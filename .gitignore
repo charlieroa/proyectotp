@@ -1,0 +1,13 @@
+﻿node_modules/
+.env
+.env.*
+*.zip
+*.sql
+*.p12
+*.key
+*.crt
+*.txt
+dist/
+build/
+.DS_Store
+*.log

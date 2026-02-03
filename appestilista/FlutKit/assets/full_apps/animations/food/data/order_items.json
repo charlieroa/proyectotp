@@ -1,0 +1,53 @@
+[
+  {
+    "food_item": {
+      "name": "Veggie Burger Combo",
+      "image": "assets/images/full_apps/food/images/food8.jpg",
+      "description": "Low carb, dairy and grain free diet. The veggie burger contains an optimal balance of proteins, fats, carbohydrates and minerals.",
+      "proteins": 450.2,
+      "carbs": 85.7,
+      "fats": 55.5,
+      "calories": 252.6,
+      "ratings": 4.0,
+      "price": 225.5,
+      "favourite": false,
+      "reviews": 75
+    },
+    "quantity": 2,
+    "date": "22 October"
+  },
+  {
+    "food_item": {
+      "name": "Almond Broccoli Soup",
+      "image": "assets/images/full_apps/food/images/food9.jpg",
+      "description": "Low carb, dairy and grain free diet. The veggie burger contains an optimal balance of proteins, fats, carbohydrates and minerals.",
+      "proteins": 450.2,
+      "carbs": 85.7,
+      "fats": 55.5,
+      "calories": 222.5,
+      "ratings": 3.5,
+      "price": 285.5,
+      "favourite": true,
+      "reviews": 56
+    },
+    "quantity": 5,
+    "date": "23 September"
+  },
+  {
+    "food_item": {
+      "name": "Vegetable Spaghetti",
+      "image": "assets/images/full_apps/food/images/food10.jpg",
+      "description": "Low carb, dairy and grain free diet. The veggie burger contains an optimal balance of proteins, fats, carbohydrates and minerals.",
+      "proteins": 450.2,
+      "carbs": 85.7,
+      "fats": 55.5,
+      "calories": 185.9,
+      "ratings": 3.0,
+      "price": 249.9,
+      "favourite": false,
+      "reviews": 77
+    },
+    "quantity": 3,
+    "date": "18 August"
+  }
+]

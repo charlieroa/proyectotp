@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light" data-layout-mode="default" data-topbar-color="light" data-sidenav-color="light" data-sidenav-size="default">
+
+<head>
+    <meta charset="utf-8" />
+    <title>Introduction | FlutKit - Flutter Mobile App</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta content="GetAppui" name="author" />
+
+    <!-- App favicon -->
+    <link rel="shortcut icon" href="assets/images/favicon.ico">
+
+    <!-- Theme Config Js -->
+    <script src="assets/js/elements.js"></script>
+    <link href="assets/css/app.css" rel="stylesheet" type="text/css" />
+</head>
+
+<body>
+
+    <!-- Begin page -->
+    <div class="app-wrapper">
+
+        <x-leftbar></x-leftbar>
+        <!-- ========== Left menu End ========== -->
+
+        <div class="content-page">
+
+            <!-- ========== Topbar Start ========== -->
+            <x-topbar></x-topbar>
+            <div class="content">
+
+                <h4>State Management</h3>
+                <p>Let's see how to add a new screen in the application with the help of controller and builder.</p>
+                <div class="row">
+                    <div class="col-xl-6 ">
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title mb-0">Screen (Stateful Widget)</h5>
+                                <pre class="mt-3">import 'package:flutter/material.dart';
+import 'package:flutx/flutx.dart';
+import 'package:flutkit/theme/app_theme.dart';
+import 'package:flutkit/theme/custom_theme.dart';
+import '_controller.dart';
+
+class <span class="text-primary">Screen</span> extends StatefulWidget {                <span class="text-danger">// Change screen name</span>
+  const Screen({Key? key}) : super(key: key);
+
+  @override
+  State<1> CreateState() => _1();
+}
+
+class _ScreenState extends State&ltScreen> {
+  late ThemeData theme;
+  late CustomTheme customTheme;
+
+  <span class="text-primary">late Controller controller;</span>                          <span class="text-danger">// Define Controller here</span>
+
+  @override
+  void initState() {
+    super.initState();
+    theme = AppTheme.theme;
+    customTheme = AppTheme.customTheme;
+    <span class="text-danger">// Initialise Controller here and by default save is true.</span>
+    <span class="text-primary">controller = FxControllerStore.putOrFind(Controller(save: <span class="text-primary">false</span>));</span>
+  }
+
+  @override
+  Widget build(BuildContext context) {
+   return FxBuilder<span class="text-primary">&ltController></span>(                    <span class="text-danger">// Link Controller here</span>
+        controller: controller,
+        builder: (controller) {
+          return Scaffold();
+        });
+  }
+}
+</pre>
+                                <div class="alert alert-primary mb-0" role="alert">
+                                    <p class="mb-0">For more changes, have a look at the file <span class="text-dark fw-bold"> - 'lib/apps/sample/_screen.dart'</span></p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-xl-6 ">
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title mb-0">Controller</h5>
+                                <pre class="mt-3">
+import 'package:flutx/flutx.dart';
+
+class <span class="text-primary">Controller</span> extends FxController {         <span class="text-danger">// Change Controller name here</span>
+
+  @override
+  void initState() {
+    super.initState();
+  }
+
+  @override
+  String getTag() {
+    return <span class="text-primary">"controller";</span>         <span class="text-danger">// Give a unique tag name to the controller here</span>
+  }
+}
+</pre>
+                                <div class="alert alert-primary mb-0" role="alert">
+                                    <p class="mb-0">For more changes, have a look at the file <span class="text-dark fw-bold"> - 'lib/apps/sample/_controller.dart'</span></p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col">
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="mt-0">FxController Store</h5>
+                                <p class="mb-0">This is the file where the controllers are stored in the form of list.
+                                    It always stores the state of the controller with <strong>save:true</strong>. But if you do not want to save the state then you should
+                                write <strong>save:false</strong>.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+
+            </div>
+
+            <hyper-footer></hyper-footer>
+        </div>
+    </div>
+    <!-- content -->
+
+    <!-- partial: footer -->
+
+
+</div>
+
+<!-- ============================================================== -->
+<!-- End Page content -->
+<!-- ============================================================== -->
+
+
+<!-- END wrapper -->
+
+<!-- partial: right sidebar -->
+    <!-- Vendor js -->
+    <script src="assets/js/jquery.min.js"></script>
+    <script src="assets/js/bootstrap.bundle.min.js"></script>
+    <script src="assets/js/simplebar.min.js"></script>
+    <script src="assets/js/feather.min.js"></script>
+
+    <!-- App js -->
+    <script src="assets/js/app.js"></script></body>
+</html>

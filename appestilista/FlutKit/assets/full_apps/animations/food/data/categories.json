@@ -1,0 +1,26 @@
+[
+  {
+    "name": "Indian",
+    "image": "assets/images/full_apps/food/images/indian.jpg",
+    "dishes": 110,
+    "color": "FCE5E1"
+  },
+  {
+    "name": "Italian",
+    "image": "assets/images/full_apps/food/images/italian.jpg",
+    "dishes": 100,
+    "color": "D7FAD6"
+  },
+  {
+    "name": "Mexican",
+    "image": "assets/images/full_apps/food/images/mexican.jpg",
+    "dishes": 90,
+    "color": "FDEAD4"
+  },
+  {
+    "name": "Chinese",
+    "image": "assets/images/full_apps/food/images/chinese.jpg",
+    "dishes": 115,
+    "color": "FCE5E1"
+  }
+]

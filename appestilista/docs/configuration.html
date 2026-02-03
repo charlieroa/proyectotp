@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light" data-layout-mode="default" data-topbar-color="light" data-sidenav-color="light" data-sidenav-size="default">
+
+<head>
+    <meta charset="utf-8" />
+    <title>Introduction | FlutKit - Flutter Mobile App</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta content="GetAppui" name="author" />
+
+    <!-- App favicon -->
+    <link rel="shortcut icon" href="assets/images/favicon.ico">
+
+    <!-- Theme Config Js -->
+    <script src="assets/js/elements.js"></script>
+    <link href="assets/css/app.css" rel="stylesheet" type="text/css" />
+</head>
+
+<body>
+
+    <!-- Begin page -->
+    <div class="app-wrapper">
+
+        <x-leftbar></x-leftbar>
+        <!-- ========== Left menu End ========== -->
+
+        <div class="content-page">
+
+            <!-- ========== Topbar Start ========== -->
+            <x-topbar></x-topbar>
+            <div class="content">
+
+                <!-- start page title -->
+
+                <h4>Android Configuration</h3>
+
+                <h5 class="my-0">Open Android module in Android Studio</h4>
+
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card border-light border mt-3">
+                            <div class="card-body">
+                                <ol class="mb-0">
+                                    <li>Open Android Studio.</li>
+                                    <li>Select Open an existing Android Studio Project.</li>
+                                    <li> Open the android directory within your app.</li>
+                                    <li> Wait until the project has been synced successfully.
+                                        (This happens automatically once you open the project, but if it doesn’t,
+                                        select Sync Project with Gradle Files from the File menu).
+                                    </li>
+                                    <li> Now, click on Run button.</li>
+                                </ol>
+                            </div> <!-- end card-body-->
+                        </div> <!-- end card-->
+                    </div> <!-- end col-->
+                </div>
+
+                <h4 class="my-0">Change Application Name</h4>
+
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card border-light border mt-3">
+                            <div class="card-body">
+                                <ol>
+                                    <li>You must want to change your application name. This is how you can do. Follow
+                                        the below step.
+                                    </li>
+                                    <li>Open&nbsp;<code>/android/app/src/main/AndroidManifest.xml</code>
+                                        and specify your application name.
+                                    </li>
+                                </ol>
+                                <div class="bg-light p-3">
+                                     <pre class="mb-0"><code>&lt;manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example"&gt;
+
+    &lt;uses-permission android:name="android.permission.INTERNET" /&gt;
+    &lt;uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" /&gt;
+
+    &lt;application
+        android:name="io.flutter.app.FlutterApplication"
+        <span class="text-primary fw-bold">android:label="YOUR_APPLICATION_NAME"</span>      <span class="text-danger">// Change here</span>
+        android:icon="@mipmap/ic_launcher"&gt;
+        &lt;activity...</code></pre>
+
+                                </div>
+                            </div> <!-- end card-body-->
+
+
+                        </div> <!-- end card-->
+                    </div> <!-- end col-->
+                </div>
+
+
+                <h4 class="my-0">Change Application ID</h4>
+
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card border-light border mt-3">
+                            <div class="card-body">
+                                <ol>
+                                    <li>Follow the below steps to change you Application ID.</li>
+                                    <li>Open&nbsp;<code style="font-size: 14px;">/android/app/build.gradle</code></li>
+                                </ol>
+                                <div class="bg-light p-3">
+                                    <pre class="mb-0"><code>    defaultConfig {
+        <span class="text-primary fw-bold">applicationId "YOUR_APPLICATION_ID"</span>      <span class="text-danger">// Change here - com.company_name.product_name (Like com.coderthemes.flutkit)</span>
+        minSdkVersion 20
+        targetSdkVersion 30
+        versionCode flutterVersionCode.toInteger()
+        versionName flutterVersionName
+    }</code></pre>
+
+                                </div>
+
+                            </div> <!-- end card-body-->
+
+
+                        </div> <!-- end card-->
+
+                    </div> <!-- end col-->
+                </div>
+
+
+                <h4 class="my-0">Change Application Icon</h4>
+
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="card border-light border mt-3">
+                            <div class="card-body">
+                                <ol>
+                                    <li>See&nbsp;<a
+                                            href="https://romannurik.github.io/AndroidAssetStudio/icons-launcher.html"
+                                            target="_blank" rel="noopener">
+                                        How to generate an application icon?</a></li>
+                                    <li>Browse your image and click on Download icon. After successfully generated,
+                                        replace all icons in respective folders:
+                                    </li>
+                                </ol>
+
+
+
+                                <div class="card  mt-3">
+                                    <div class="card-body">
+                                        <h4>Folder Structure</h4>
+                                        <p>Let's take a deep dive to how the files and folders are arranged in the
+                                            app.</p>
+                                        <pre class="mb-0 bg-light p-3">
+├── docs
+└── FlutKit
+│   ├── android
+│         └── apps
+│               ├── src
+│                    └── main
+│                          ├── res
+│                               └── drawable
+│                                      ├── <span class="text-primary">launch_background.xml</span>    &lt---- <div
+                                                class="avatar-xs d-inline-block"><span
+                                                class="avatar-title bg-dark rounded-circle">1</span></div>
+│                               └── drawable-v21
+│                                      ├── <span class="text-primary">launch_background.xml</span>    &lt---- <div
+                                                class="avatar-xs d-inline-block"><span
+                                                class="avatar-title bg-dark rounded-circle">2</span></div>
+│                               └── mipmap-hdpi
+│                                      ├── <span class="text-primary">full_logo.png</span>            &lt---- <div
+                                                class="avatar-xs d-inline-block"><span
+                                                class="avatar-title bg-dark rounded-circle">3</span></div>
+│                                      ├── ic_launcher.png
+│                                      ├── <span class="text-primary">logo.png</span>                 &lt---- <div
+                                                class="avatar-xs d-inline-block"><span
+                                                class="avatar-title bg-dark rounded-circle">4</span></div>
+│                               └── mipmap-mdpi
+│                                      └── .....
+│                               └── mipmap-xhdpi
+│                                      └── .....
+│                               └── mipmap-xxhdpi
+│                                      └── .....
+│                               └── mipmap-xxxhdpi
+│                                      └── .....
+│                               ├── AndroidManifest.xml</pre>
+                                        <ol class="mt-3">
+                                            <li>Change Splash Screen Style</li>
+                                            <li>Change Splash Screen Style (For Android API above 21)</li>
+                                            <li>Change Splash Screen Image</li>
+                                            <li>Change Application Icon</li>
+                                        </ol>
+
+
+                                        <ul>
+                                            <li>
+                                                <code>/mipmap-hdpi&nbsp&nbsp&nbsp</code>&nbsp;in&nbsp;<code>/android/app/src/main/res/</code>&nbsp;folder
+                                            </li>
+                                            <li>
+                                                <code>/mipmap-mdpi&nbsp&nbsp&nbsp</code>&nbsp;in&nbsp;<code>/android/app/src/main/res/</code>&nbsp;folder
+                                            </li>
+                                            <li>
+                                                <code>/mipmap-xhdpi&nbsp&nbsp</code>&nbsp;in&nbsp;<code>/android/app/src/main/res/</code>&nbsp;folder
+                                            </li>
+                                            <li><code>/mipmap-xxhdpi&nbsp</code>&nbsp;in&nbsp;<code>/android/app/src/main/res/</code>&nbsp;folder
+                                            </li>
+                                            <li><code>/mipmap-xxxhdpi</code>&nbsp;in&nbsp;<code>/android/app/src/main/res/</code>&nbsp;folder
+                                            </li>
+                                        </ul>
+                                    </div>
+                                </div>
+
+                                <div class="alert alert-warning mb-0" role="alert">
+                                    <h4 class="">Important: </h4>
+                                    <p class="mb-0">If you don't know how to change logo from Android Manifest <span class="text-primary">(/android/app/src/main/AndroidManifest.xml)</span>, Then icon name must be <span class="text-primary">logo.png</span>.
+                                    </p>
+                                </div>
+
+                            </div> <!-- end card-body-->
+
+
+                        </div> <!-- end card-->
+
+                    </div> <!-- end col-->
+                </div>
+
+                <!-- end page title -->
+
+            </div>
+
+            <hyper-footer></hyper-footer>
+        </div>
+    </div>
+    <!-- content -->
+
+    <!-- partial: footer -->
+
+
+</div>
+
+<!-- ============================================================== -->
+<!-- End Page content -->
+<!-- ============================================================== -->
+
+
+<!-- END wrapper -->
+
+<!-- partial: right sidebar -->
+    <!-- Vendor js -->
+    <script src="assets/js/jquery.min.js"></script>
+    <script src="assets/js/bootstrap.bundle.min.js"></script>
+    <script src="assets/js/simplebar.min.js"></script>
+    <script src="assets/js/feather.min.js"></script>
+
+    <!-- App js -->
+    <script src="assets/js/app.js"></script></body>
+</html>

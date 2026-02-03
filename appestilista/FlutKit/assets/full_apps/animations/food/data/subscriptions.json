@@ -1,0 +1,24 @@
+[
+  {
+    "type": "BASIC",
+    "description": "Best for basic and limited use.",
+    "price": 30.0,
+    "benefits": [
+      "Free Delivery upto first 3 orders.",
+      "Discount upto 50% on trending items.",
+      "Ultra Fast Delivery available.",
+      "Enjoy like restaurant at home."
+    ]
+  },
+  {
+    "type": "PREMIUM",
+    "description": "Best for daily use.",
+    "price": 50.0,
+    "benefits": [
+      "Free Delivery upto first 3 orders.",
+      "Discount upto 50% on trending items.",
+      "Ultra Fast Delivery available.",
+      "Enjoy like restaurant at home."
+    ]
+  }
+]

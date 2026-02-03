@@ -1,0 +1,17 @@
+[
+  {
+    "method": "Master Card",
+    "card_number": "8989 **** **** 5656",
+    "icon": "assets/brand/master-card.png"
+  },
+  {
+    "method": "Visa Card",
+    "card_number": "9696 **** **** 4343",
+    "icon": "assets/brand/visa-card.png"
+  },
+  {
+    "method": "Cash on Delivery",
+    "card_number": "Additional $5 for COD",
+    "icon": "assets/brand/dollar.png"
+  }
+]
