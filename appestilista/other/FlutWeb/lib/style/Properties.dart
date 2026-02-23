@@ -1,1 +1,0 @@
-enum DisplayType { None, Block }

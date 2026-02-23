@@ -1,0 +1,2515 @@
+// src/controllers/appointmentController.js
+'use strict';
+
+const prisma = require('../config/prisma');
+const { getIO } = require('../socket');
+const { formatInTimeZone } = require('date-fns-tz');
+
+function emitSocket(tenantId, event, data) {
+  try { getIO().to(`tenant:${tenantId}`).emit(event, data); }
+  catch (e) { console.log('⚠️ Socket emit error:', e.message); }
+}
+const {
+  TIME_ZONE,
+  BLOCKING_STATUSES,
+  UUID_RE,
+  clean,
+  cleanHHMM,
+  makeLocalUtc,
+  toLocalHHmm,
+  toLocalISO,
+  normalizeDateKeyword,
+  normalizeHumanTimeToHHMM,
+  getDayRangesFromWorkingHours,
+  getEffectiveStylistDayRanges,
+  intersectRangesArrays,
+  isWithinRanges,
+  buildSlotsFromRanges,
+} = require('../utils/appointmentHelpers');
+
+const {
+  getServiceDurationMinutes,
+  resolveServiceFuzzy,
+  resolveStylistFuzzy,
+  findAvailableStylists,
+  getStylistEffectiveDuration,
+  checkStylistOffersService,
+  getAvailableSlotsForStylist,
+  createAppointmentRecord,
+} = require('../services/appointmentService');
+
+/* =================================================================== */
+/* ==============   FILTRO DE HORARIOS PASADOS   ===================== */
+/* =================================================================== */
+
+/**
+ * Filtra slots que ya pasaron (solo para el día actual)
+ * @param {Date[]} slots - Array de slots UTC
+ * @param {string} dateStr - Fecha en formato YYYY-MM-DD
+ * @returns {Date[]} - Slots filtrados (sin horarios pasados)
+ */
+const filterPastSlots = (slots, dateStr) => {
+  const now = new Date();
+  const today = formatInTimeZone(now, TIME_ZONE, 'yyyy-MM-dd');
+
+  // Si la fecha no es hoy, devolver todos los slots
+  if (dateStr !== today) {
+    return slots;
+  }
+
+  // Si es hoy, filtrar solo los slots futuros (con margen de 5 minutos)
+  const nowWithBuffer = new Date(now.getTime() + 5 * 60000); // +5 minutos
+
+  const filtered = slots.filter(slot => slot >= nowWithBuffer);
+
+  console.log(`🕐 [filterPastSlots] Filtrando slots para hoy (${dateStr})`);
+  console.log(`   Hora actual + buffer: ${nowWithBuffer.toISOString()}`);
+  console.log(`   Slots totales: ${slots.length}, Slots futuros: ${filtered.length}`);
+
+  return filtered;
+};
+
+/* =================================================================== */
+/* ==============   SOPORTE PARA CITAS EN EL PASADO   ================= */
+/* =================================================================== */
+
+/** Retorna true si dateTime está en el pasado respecto a ahora */
+const isDateInPast = (dateTime) => {
+  const now = new Date();
+  const target = new Date(dateTime);
+
+  // Validar que la fecha sea válida
+  if (isNaN(target.getTime())) {
+    console.log('⚠️ [isDateInPast] Fecha inválida:', dateTime);
+    return false;
+  }
+
+  const isPast = target < now;
+
+  console.log('🕐 [isDateInPast] Comparación de fechas:');
+  console.log('   Ahora (now):', now.toISOString());
+  console.log('   Target:', target.toISOString());
+  console.log('   ¿Es pasado?:', isPast);
+
+  return isPast;
+};
+
+/** Lee allow_past_appointments del tenant en DB (fail-safe: false) */
+const getAllowPastAppointments = async (tenantId) => {
+  try {
+    console.log('='.repeat(60));
+    console.log('🔍 [DEBUG 1] Consultando allow_past_appointments');
+    console.log('   TenantId recibido:', tenantId);
+    console.log('   Tipo de tenantId:', typeof tenantId);
+
+    const tenant = await prisma.tenants.findUnique({
+      where: { id: tenantId },
+      select: { allow_past_appointments: true }
+    });
+
+    console.log('🔍 [DEBUG 2] Resultado de la consulta:');
+    console.log('   Tenant encontrado:', !!tenant);
+    console.log('   Datos completos:', JSON.stringify(tenant, null, 2));
+
+    if (!tenant) {
+      console.log('⚠️ [DEBUG 3] NO SE ENCONTRÓ EL TENANT EN LA DB');
+      console.log('='.repeat(60));
+      return false;
+    }
+
+    const rawValue = tenant.allow_past_appointments;
+    const finalValue = rawValue ?? false;
+
+    console.log('🔍 [DEBUG 3] Procesando valor:');
+    console.log('   Valor crudo (raw):', rawValue);
+    console.log('   Tipo del valor:', typeof rawValue);
+    console.log('   Valor final:', finalValue);
+    console.log('   Tipo final:', typeof finalValue);
+    console.log('='.repeat(60));
+
+    return finalValue;
+  } catch (error) {
+    console.error('❌ [DEBUG ERROR] Error al obtener allow_past_appointments:', error);
+    console.log('='.repeat(60));
+    return false;
+  }
+};
+
+/** Lanza error si la fecha/hora está en pasado y el tenant no lo permite */
+const validatePastAppointment = async (tenantId, startTime) => {
+  console.log('\n' + '█'.repeat(60));
+  console.log('🔍 [VALIDACIÓN] Iniciando validación de cita en pasado');
+  console.log('   TenantId:', tenantId);
+  console.log('   StartTime:', startTime);
+  console.log('   StartTime ISO:', startTime.toISOString ? startTime.toISOString() : 'No es Date');
+
+  const now = new Date();
+  const isPast = isDateInPast(startTime);
+
+  console.log('   Fecha actual:', now.toISOString());
+  console.log('   ¿Es fecha pasada?:', isPast);
+
+  const allowPast = await getAllowPastAppointments(tenantId);
+
+  console.log('   Allow past desde DB:', allowPast);
+  console.log('   Tipo de allowPast:', typeof allowPast);
+  console.log('   !allowPast:', !allowPast);
+  console.log('   Condición (!allowPast && isPast):', (!allowPast && isPast));
+
+  if (!allowPast && isPast) {
+    console.log('❌ [VALIDACIÓN] RECHAZANDO CITA - Fecha en pasado y flag deshabilitado');
+    console.log('█'.repeat(60) + '\n');
+    throw new Error(
+      'No se pueden crear citas en fechas u horas pasadas. Contacta al administrador si necesitas habilitarlo.'
+    );
+  }
+
+  console.log('✅ [VALIDACIÓN] CITA APROBADA');
+  console.log('█'.repeat(60) + '\n');
+};
+
+/* =================================================================== */
+/* ==============   NUEVA FUNCIÓN: LISTAR SERVICIOS DE ESTILISTA   === */
+/* =================================================================== */
+
+/**
+ * Obtiene los servicios que ofrece un estilista específico
+ * @param {string} stylistId - ID del estilista
+ * @returns {Promise<Array>} - Array de servicios con id, name, duration_minutes
+ */
+const getStylistServices = async (stylistId) => {
+  try {
+    const rows = await prisma.stylist_services.findMany({
+      where: { user_id: stylistId },
+      include: {
+        services: {
+          select: { id: true, name: true, duration_minutes: true }
+        }
+      },
+      orderBy: { services: { name: 'asc' } }
+    });
+
+    return rows.map(r => r.services);
+  } catch (error) {
+    console.error('Error al obtener servicios del estilista:', error);
+    return [];
+  }
+};
+
+/* =================================================================== */
+/* ==============   EXPORTS UTILES PARA ORCHESTRATOR    ============== */
+/* =================================================================== */
+
+exports.normalizeDateKeyword = normalizeDateKeyword;
+exports.normalizeHumanTimeToHHMM = normalizeHumanTimeToHHMM;
+exports.resolveServiceFuzzy = resolveServiceFuzzy;
+exports.resolveStylistFuzzy = resolveStylistFuzzy;
+
+/* =================================================================== */
+/* =====================  ENDPOINTS PÚBLICOS (NUEVOS)  =============== */
+/* =================================================================== */
+/**
+ * 1️⃣ Buscar Estilista (público)
+ * GET /api/appointments/stylists/search-public?tenantId={UUID}&query=carlos
+ */
+exports.searchStylistsPublic = async (req, res) => {
+  try {
+    let { tenantId, query } = req.query;
+    tenantId = clean(tenantId);
+    query = clean(query);
+
+    if (!tenantId || !UUID_RE.test(tenantId)) {
+      return res.status(400).json({ error: 'tenantId inválido o faltante (UUID).' });
+    }
+    if (!query) {
+      return res.status(400).json({ error: 'Falta query.' });
+    }
+
+    const q = `%${query.toLowerCase()}%`;
+
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT id, first_name, last_name, COALESCE(NULLIF(status,''),'active') AS status
+       FROM users
+       WHERE tenant_id = $1::uuid
+         AND role_id = 3
+         AND COALESCE(NULLIF(status,''),'active') IN ('active')
+         AND (
+              LOWER(first_name) ILIKE $2
+           OR LOWER(COALESCE(last_name,'')) ILIKE $2
+           OR LOWER(TRIM(first_name || ' ' || COALESCE(last_name,''))) ILIKE $2
+         )
+       ORDER BY first_name ASC, last_name ASC
+       LIMIT 25`,
+      tenantId, q
+    );
+
+    const stylists = rows.map(u => ({
+      id: u.id,
+      name: `${u.first_name} ${u.last_name || ''}`.trim(),
+      status: u.status
+    }));
+
+    return res.status(200).json({
+      query,
+      total: stylists.length,
+      stylists
+    });
+  } catch (e) {
+    console.error('searchStylistsPublic', e);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+/**
+ * 2️⃣ Servicios del Estilista (público)
+ * GET /api/appointments/stylists/:stylistId/services-public?tenantId={UUID}
+ */
+exports.getStylistServicesPublic = async (req, res) => {
+  try {
+    const { stylistId } = req.params;
+    let { tenantId } = req.query;
+
+    tenantId = clean(tenantId);
+
+    if (!tenantId || !UUID_RE.test(tenantId)) {
+      return res.status(400).json({ error: 'tenantId inválido o faltante (UUID).' });
+    }
+    if (!stylistId || !UUID_RE.test(stylistId)) {
+      return res.status(400).json({ error: 'stylistId inválido (UUID).' });
+    }
+
+    const sty = await prisma.users.findFirst({
+      where: { id: stylistId, tenant_id: tenantId, role_id: 3 },
+      select: { id: true, first_name: true, last_name: true, role_id: true, tenant_id: true, status: true }
+    });
+
+    if (!sty) {
+      return res.status(404).json({ error: 'Estilista no encontrado para ese tenant.' });
+    }
+    const styStatus = (sty.status && sty.status !== '') ? sty.status : 'active';
+    if (styStatus !== 'active') {
+      return res.status(409).json({ error: 'El estilista no está activo.' });
+    }
+
+    const services = await getStylistServices(stylistId);
+
+    return res.status(200).json({
+      stylist: {
+        id: stylistId,
+        name: `${sty.first_name} ${sty.last_name || ''}`.trim()
+      },
+      total: services.length,
+      services: services.map(s => ({
+        id: s.id,
+        name: s.name,
+        duration_minutes: Number(s.duration_minutes) || null
+      }))
+    });
+  } catch (e) {
+    console.error('getStylistServicesPublic', e);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+/**
+ * 3️⃣ Buscar Servicio (público)
+ * GET /api/services/search/:tenantId?query=corte
+ */
+exports.searchServicesPublic = async (req, res) => {
+  try {
+    const { tenantId } = req.params;
+    let { query } = req.query;
+
+    if (!tenantId || !UUID_RE.test(tenantId)) {
+      return res.status(400).json({ error: 'tenantId inválido o faltante (UUID).' });
+    }
+    query = clean(query);
+    if (!query) {
+      return res.status(400).json({ error: 'Falta query.' });
+    }
+
+    const q = `%${query.toLowerCase()}%`;
+
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT id, name, duration_minutes
+       FROM services
+       WHERE tenant_id = $1::uuid
+         AND LOWER(name) ILIKE $2
+       ORDER BY name ASC
+       LIMIT 50`,
+      tenantId, q
+    );
+
+    return res.status(200).json({
+      query,
+      total: rows.length,
+      services: rows.map(s => ({
+        id: s.id,
+        name: s.name,
+        duration_minutes: Number(s.duration_minutes) || null
+      }))
+    });
+  } catch (e) {
+    console.error('searchServicesPublic', e);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+/**
+ * 4️⃣ Verificar Disponibilidad (público)
+ * GET /api/appointments/verify-public?tenantId={UUID}&service={id|nombre}&stylist={id|nombre}&date=YYYY-MM-DD&time=HH:mm
+ * (Wrapper del verificador público ya existente)
+ */
+exports.verifyAvailabilityPublic = async (req, res) => {
+  return exports.verifyStylistServiceAndAvailabilityPublic(req, res);
+};
+
+/* =================================================================== */
+/* =========================  ENDPOINTS PUBLICOS  ==================== */
+/* =================================================================== */
+
+exports.smartAvailabilityPublic = async (req, res) => {
+  try {
+    let { tenantId, service, stylist, date, time, step, limit } = req.query;
+
+    tenantId = clean(tenantId);
+    service = clean(service);
+    stylist = clean(stylist);
+    date = clean(date);
+    time = time ? cleanHHMM(time) : null;
+
+    if (!tenantId || !service || !stylist || !date) {
+      return res.status(400).json({
+        error: 'Faltan parámetros: tenantId, service, stylist, date. time opcional.'
+      });
+    }
+    if (!UUID_RE.test(tenantId)) {
+      return res.status(400).json({ error: 'tenantId inválido (debe ser UUID).' });
+    }
+
+    const stepMinutes = Math.max(5, parseInt(step || '15', 10));
+    const suggestLimit = Math.max(1, parseInt(limit || '6', 10));
+
+    // Servicio
+    let serviceRow = null;
+    if (UUID_RE.test(service)) {
+      serviceRow = await prisma.services.findFirst({
+        where: { id: service, tenant_id: tenantId },
+        select: { id: true, name: true, duration_minutes: true }
+      });
+    } else {
+      const rows = await prisma.$queryRawUnsafe(
+        `SELECT id, name, duration_minutes FROM services WHERE tenant_id = $1::uuid AND LOWER(name) = LOWER($2) LIMIT 1`,
+        tenantId, service
+      );
+      serviceRow = rows[0] || null;
+    }
+    if (!serviceRow) return res.status(404).json({ error: 'Servicio no encontrado.' });
+
+    const serviceId = serviceRow.id;
+    const serviceName = serviceRow.name;
+
+    // Estilista
+    let stylistRow = null;
+    if (UUID_RE.test(stylist)) {
+      stylistRow = await prisma.users.findFirst({
+        where: { id: stylist, tenant_id: tenantId, role_id: 3 },
+        select: { id: true, first_name: true, last_name: true, working_hours: true, status: true }
+      });
+    } else {
+      const rows = await prisma.$queryRawUnsafe(
+        `SELECT id, first_name, last_name, working_hours, status
+         FROM users
+         WHERE tenant_id = $1::uuid AND role_id = 3
+           AND (
+             LOWER(TRIM(first_name || ' ' || COALESCE(last_name,''))) = LOWER(TRIM($2))
+             OR LOWER(TRIM(first_name)) = LOWER(TRIM($2))
+           )
+         LIMIT 1`,
+        tenantId, stylist
+      );
+      stylistRow = rows[0] || null;
+    }
+    if (!stylistRow) return res.status(404).json({ error: 'Estilista no encontrado.' });
+    if ((stylistRow.status || 'active') !== 'active') {
+      return res.status(409).json({ error: 'El estilista no está activo.' });
+    }
+
+    const stylistId = stylistRow.id;
+    const stylistName = `${stylistRow.first_name} ${stylistRow.last_name || ''}`.trim();
+
+    // Ofrece servicio
+    const offersService = await checkStylistOffersService(stylistId, serviceId);
+    if (!offersService) {
+      return res.status(200).json({
+        service: { id: serviceId, name: serviceName },
+        stylist: { id: stylistId, name: stylistName },
+        offers_service: false,
+        is_available: false,
+        suggestions: [],
+        reason: 'El estilista no ofrece este servicio.'
+      });
+    }
+
+    // Slots disponibles
+    const { slots, duration, effectiveRanges, reason } = await getAvailableSlotsForStylist(
+      tenantId, stylistId, serviceId, date, stepMinutes
+    );
+
+    // FILTRAR HORARIOS PASADOS
+    const filteredSlots = filterPastSlots(slots, date);
+
+    if (filteredSlots.length === 0) {
+      const isPastDay = slots.length > 0 && filteredSlots.length === 0;
+      return res.status(200).json({
+        service: { id: serviceId, name: serviceName },
+        stylist: { id: stylistId, name: stylistName },
+        offers_service: true,
+        is_available: false,
+        suggestions: [],
+        reason: isPastDay
+          ? 'Todos los horarios de hoy ya pasaron. Intenta con mañana u otra fecha.'
+          : (reason || 'No hay disponibilidad')
+      });
+    }
+
+    const allLocalTimes = filteredSlots.map(toLocalHHmm);
+
+    let isAvailable = false;
+    let suggestions = [];
+
+    if (time) {
+      const wanted = String(time).slice(0, 5);
+      isAvailable = allLocalTimes.includes(wanted);
+
+      if (!isAvailable) {
+        const wantedDate = makeLocalUtc(date, wanted);
+        const withDist = filteredSlots.map(d => ({
+          d, dist: Math.abs(d.getTime() - wantedDate.getTime())
+        })).sort((a, b) => a.dist - b.dist);
+
+        suggestions = [...new Set(withDist.slice(0, suggestLimit).map(x => toLocalHHmm(x.d)))];
+      }
+    } else {
+      suggestions = allLocalTimes.slice(0, suggestLimit);
+    }
+
+    return res.status(200).json({
+      service: { id: serviceId, name: serviceName, duration_minutes: duration },
+      stylist: { id: stylistId, name: stylistName },
+      offers_service: true,
+      requested: { date, time: time || null },
+      is_available: !!isAvailable,
+      suggestions,
+      slots_all: allLocalTimes.slice(0, 48)
+    });
+  } catch (e) {
+    console.error('smartAvailabilityPublic', e);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+exports.smartAvailabilityPublicJSON = async (req, res) => {
+  try {
+    const { tenantId, service, stylist, date, time, step, limit } = req.body || {};
+    req.query = {
+      tenantId: tenantId ?? '',
+      service: service ?? '',
+      stylist: stylist ?? '',
+      date: date ?? '',
+      time: time ?? '',
+      step: step ?? '',
+      limit: limit ?? ''
+    };
+    return exports.smartAvailabilityPublic(req, res);
+  } catch (e) {
+    console.error('smartAvailabilityPublicJSON', e);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+exports.verifyStylistServiceAndAvailabilityPublic = async (req, res) => {
+  try {
+    let { tenantId, service, stylist, date, time, limit } = req.query;
+    tenantId = clean(tenantId);
+    service = clean(service);
+    stylist = clean(stylist);
+    date = clean(date);
+    time = cleanHHMM(time);
+    const suggestLimit = Math.max(1, parseInt(limit || '5', 10));
+
+    if (!tenantId || !service || !stylist || !date || !time) {
+      return res.status(400).json({ error: 'Faltan parámetros: tenantId, service, stylist, date, time.' });
+    }
+    if (!UUID_RE.test(tenantId)) return res.status(400).json({ error: 'tenantId inválido.' });
+
+    // Servicio
+    let svc;
+    if (UUID_RE.test(service)) {
+      svc = await prisma.services.findFirst({
+        where: { id: service, tenant_id: tenantId },
+        select: { id: true, name: true, duration_minutes: true }
+      });
+    } else {
+      const rows = await prisma.$queryRawUnsafe(
+        `SELECT id, name, duration_minutes FROM services WHERE tenant_id=$1::uuid AND LOWER(name)=LOWER($2) LIMIT 1`,
+        tenantId, service
+      );
+      svc = rows[0] || null;
+    }
+    if (!svc) return res.status(404).json({ error: 'Servicio no encontrado.' });
+
+    // Estilista
+    let sty;
+    if (UUID_RE.test(stylist)) {
+      sty = await prisma.users.findFirst({
+        where: { id: stylist, tenant_id: tenantId, role_id: 3 },
+        select: { id: true, first_name: true, last_name: true, working_hours: true, status: true }
+      });
+    } else {
+      const rows = await prisma.$queryRawUnsafe(
+        `SELECT id, first_name, last_name, working_hours, status
+          FROM users
+          WHERE tenant_id=$1::uuid AND role_id=3
+            AND (
+              LOWER(TRIM(first_name || ' ' || COALESCE(last_name,''))) = LOWER(TRIM($2))
+              OR LOWER(TRIM(first_name)) = LOWER(TRIM($2))
+            )
+          LIMIT 1`,
+        tenantId, stylist
+      );
+      sty = rows[0] || null;
+    }
+    if (!sty) return res.status(404).json({ error: 'Estilista no encontrado.' });
+    if ((sty.status || 'active') !== 'active') {
+      return res.status(409).json({ error: 'El estilista no está activo.' });
+    }
+
+    const stylistName = `${sty.first_name} ${sty.last_name || ''}`.trim();
+
+    // Ofrece servicio
+    const offersService = await checkStylistOffersService(sty.id, svc.id);
+    if (!offersService) {
+      return res.status(200).json({
+        service: { id: svc.id, name: svc.name },
+        stylist: { id: sty.id, name: stylistName },
+        offers_service: false,
+        is_available: false,
+        reason: 'El estilista no ofrece este servicio.',
+        suggestions: []
+      });
+    }
+
+    // Slots
+    const { slots, duration, effectiveRanges, reason } = await getAvailableSlotsForStylist(
+      tenantId, sty.id, svc.id, date, 15
+    );
+
+    // FILTRAR HORARIOS PASADOS
+    const filteredSlots = filterPastSlots(slots, date);
+
+    if (filteredSlots.length === 0) {
+      const isPastDay = slots.length > 0 && filteredSlots.length === 0;
+      return res.status(200).json({
+        service: { id: svc.id, name: svc.name },
+        stylist: { id: sty.id, name: stylistName },
+        offers_service: true,
+        is_available: false,
+        reason: isPastDay
+          ? 'Todos los horarios de hoy ya pasaron. Intenta con mañana u otra fecha.'
+          : (reason || 'No hay disponibilidad'),
+        suggestions: []
+      });
+    }
+
+    const wantedStart = makeLocalUtc(date, time);
+    const wanted = String(time).slice(0, 5);
+    const allLocalTimes = filteredSlots.map(toLocalHHmm);
+    const isAvailable = allLocalTimes.includes(wanted);
+
+    if (!isAvailable) {
+      const withDist = filteredSlots
+        .map(d => ({ d, dist: Math.abs(d.getTime() - wantedStart.getTime()) }))
+        .sort((a, b) => a.dist - b.dist);
+
+      const alternos = await findAvailableStylists(tenantId, svc.name, date, time);
+      const altStylists = alternos
+        .filter(u => u.id !== sty.id)
+        .map(u => ({ id: u.id, name: `${u.first_name} ${u.last_name || ''}`.trim() }));
+
+      return res.status(200).json({
+        service: { id: svc.id, name: svc.name, duration_minutes: duration },
+        stylist: { id: sty.id, name: stylistName },
+        offers_service: true,
+        is_available: false,
+        reason: 'No disponible a esa hora.',
+        suggestions: [...new Set(withDist.slice(0, suggestLimit).map(x => toLocalHHmm(x.d)))],
+        alternative_stylists: altStylists
+      });
+    }
+
+    return res.status(200).json({
+      service: { id: svc.id, name: svc.name, duration_minutes: duration },
+      stylist: { id: sty.id, name: stylistName },
+      offers_service: true,
+      is_available: true,
+      requested: { date, time }
+    });
+
+  } catch (e) {
+    console.error('verifyStylistServiceAndAvailabilityPublic', e);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+exports.checkAvailability = async (req, res) => {
+  const { tenantId } = req.params;
+  const { servicio, fecha, hora } = req.query;
+
+  if (!servicio || !fecha || !hora) {
+    return res.status(400).json({
+      error: 'Faltan parámetros: servicio, fecha (YYYY-MM-DD), hora (HH:MM)'
+    });
+  }
+
+  try {
+    const availableStylists = await findAvailableStylists(tenantId, servicio, fecha, hora);
+
+    if (availableStylists.length === 0) {
+      return res.status(200).json({
+        available: false,
+        message: 'No hay estilistas disponibles para esa fecha y hora',
+        stylists: []
+      });
+    }
+
+    return res.status(200).json({
+      available: true,
+      message: `Hay ${availableStylists.length} estilista(s) disponible(s)`,
+      stylists: availableStylists.map(s => ({
+        id: s.id,
+        name: `${s.first_name} ${s.last_name || ''}`.trim()
+      }))
+    });
+  } catch (error) {
+    console.error('Error al verificar disponibilidad:', error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+exports.agendarCitaConversacional = async (req, res) => {
+  try {
+    const { appointmentDetails, clientId, tenantId } = req.body;
+
+    if (!appointmentDetails || !clientId || !tenantId) {
+      return res.status(400).json({ error: 'Faltan datos obligatorios de n8n.' });
+    }
+    const { servicio, fecha, hora, estilista } = appointmentDetails;
+
+    // Estilista
+    let stylistId;
+    if (estilista) {
+      const stylistRows = await prisma.$queryRawUnsafe(
+        "SELECT id FROM users WHERE tenant_id = $1::uuid AND role_id = 3 AND LOWER(first_name || ' ' || last_name) = LOWER($2)",
+        tenantId, estilista
+      );
+      if (stylistRows.length === 0) {
+        return res.status(404).json({ error: `Estilista "${estilista}" no encontrado.` });
+      }
+      stylistId = stylistRows[0].id;
+    } else {
+      const availableStylists = await findAvailableStylists(tenantId, servicio, fecha, hora);
+      if (availableStylists.length === 0) {
+        return res.status(200).json({ error: 'No hay estilistas disponibles para esa fecha y hora.' });
+      }
+      stylistId = availableStylists[0].id;
+    }
+
+    // Servicio
+    const serviceRows = await prisma.$queryRawUnsafe(
+      'SELECT id, duration_minutes FROM services WHERE tenant_id = $1::uuid AND LOWER(name) = LOWER($2)',
+      tenantId, servicio
+    );
+    if (serviceRows.length === 0) {
+      return res.status(404).json({ error: `Servicio "${servicio}" no encontrado.` });
+    }
+    const serviceId = serviceRows[0].id;
+    const duration = Number(serviceRows[0].duration_minutes) || 60;
+
+    const offersService = await checkStylistOffersService(stylistId, serviceId);
+    if (!offersService) {
+      return res.status(400).json({ error: `El estilista "${estilista}" no ofrece el servicio "${servicio}".` });
+    }
+
+    const startTimeDate = makeLocalUtc(fecha, hora);
+
+    // Permitir/denegar pasado según tenant
+    await validatePastAppointment(tenantId, startTimeDate);
+
+    const appointment = await createAppointmentRecord(tenantId, clientId, stylistId, serviceId, startTimeDate, duration);
+    emitSocket(tenantId, 'appointment:created', appointment);
+
+    return res.status(201).json({
+      success: true,
+      message: `¡Tu cita ha sido agendada con éxito con ${estilista || 'un estilista disponible'} para ${formatInTimeZone(startTimeDate, TIME_ZONE, "yyyy-MM-dd 'a las' HH:mm")}!`,
+      appointment
+    });
+  } catch (error) {
+    console.error('Error en agendamiento conversacional:', error.message);
+    return res.status(500).json({ error: error.message || 'Error interno del servidor.' });
+  }
+};
+
+/* =================================================================== */
+/* =======================  ENDPOINTS AUTENTICADOS  ================== */
+/* =================================================================== */
+
+exports.createAppointment = async (req, res) => {
+  const { stylist_id, service_id, start_time, client_id: clientIdFromRequest } = req.body;
+  const { tenant_id, id: clientIdFromToken } = req.user;
+  const { dryRun } = req.query;
+
+  const final_client_id = clientIdFromRequest || clientIdFromToken;
+  if (!stylist_id || !service_id || !start_time || !final_client_id) {
+    return res.status(400).json({ error: 'Faltan campos obligatorios.' });
+  }
+
+  try {
+    const startTimeDate = new Date(start_time);
+    if (isNaN(startTimeDate)) {
+      return res.status(400).json({ error: 'start_time inválido. Envíe ISO 8601 con zona o UTC.' });
+    }
+
+    // Obtener el tenant_id del estilista para asegurar que la cita pertenezca al tenant correcto
+    const stylistUser = await prisma.users.findUnique({
+      where: { id: stylist_id },
+      select: { tenant_id: true }
+    });
+    if (!stylistUser) {
+      return res.status(404).json({ error: `Estilista con ID ${stylist_id} no encontrado.` });
+    }
+    const stylistTenantId = stylistUser.tenant_id;
+
+    // Permitir/denegar pasado según tenant del estilista
+    await validatePastAppointment(stylistTenantId, startTimeDate);
+
+    const offersService = await checkStylistOffersService(stylist_id, service_id);
+    if (!offersService) {
+      return res.status(400).json({ error: 'El estilista no está cualificado para este servicio.' });
+    }
+
+    const duration = await getServiceDurationMinutes(service_id, 60);
+
+    if (String(dryRun).toLowerCase() === 'true') {
+      const endTimeDate = new Date(startTimeDate.getTime() + duration * 60000);
+      return res.status(200).json({
+        dryRun: true,
+        wouldCreate: {
+          tenant_id: stylistTenantId, client_id: final_client_id, stylist_id, service_id,
+          start_time: startTimeDate, end_time: endTimeDate, status: 'scheduled'
+        },
+        wouldUpdate: { stylist_last_turn_at: 'NOW()' }
+      });
+    }
+
+    // Usar el tenant_id del estilista, no el del usuario del dashboard
+    const appointment = await createAppointmentRecord(stylistTenantId, final_client_id, stylist_id, service_id, startTimeDate, duration);
+    emitSocket(stylistTenantId, 'appointment:created', appointment);
+    return res.status(201).json(appointment);
+  } catch (error) {
+    console.error('Error al crear la cita:', error);
+    return res.status(409).json({ error: error.message || 'Error interno del servidor' });
+  }
+};
+
+exports.createAppointmentsBatch = async (req, res) => {
+  const { appointments, client_id: clientIdFromRequest } = req.body;
+  const { tenant_id, id: clientIdFromToken } = req.user;
+
+  const final_client_id = clientIdFromRequest || clientIdFromToken;
+  if (!Array.isArray(appointments) || appointments.length === 0) {
+    return res.status(400).json({ error: "El body debe contener un array 'appointments' con al menos una cita." });
+  }
+  if (!final_client_id) {
+    return res.status(400).json({ error: 'No se pudo determinar el cliente.' });
+  }
+
+  try {
+    const createdAppointments = await prisma.$transaction(async (tx) => {
+      const created = [];
+
+      for (const appt of appointments) {
+        const { stylist_id, service_id, start_time } = appt;
+        if (!stylist_id || !service_id || !start_time) {
+          throw new Error('Cada cita debe tener stylist_id, service_id y start_time.');
+        }
+
+        const startTimeDate = new Date(start_time);
+        if (isNaN(startTimeDate)) throw new Error('start_time inválido en una de las citas.');
+
+        // Obtener el tenant_id del estilista para asegurar que la cita pertenezca al tenant correcto
+        console.log(`[createAppointmentsBatch] Procesando cita - stylist_id: ${stylist_id}, service_id: ${service_id}, start_time: ${start_time}`);
+        const stylistUser = await tx.users.findFirst({
+          where: { id: stylist_id },
+          select: { tenant_id: true, first_name: true, last_name: true }
+        });
+        if (!stylistUser) {
+          throw new Error(`Estilista con ID ${stylist_id} no encontrado.`);
+        }
+        const stylistTenantId = stylistUser.tenant_id;
+        const stylistName = `${stylistUser.first_name} ${stylistUser.last_name || ''}`;
+        console.log(`[createAppointmentsBatch] Estilista: ${stylistName}, tenant_id del estilista: ${stylistTenantId}, tenant_id del usuario dashboard: ${tenant_id}`);
+
+        // Permitir/denegar pasado según tenant del estilista
+        await validatePastAppointment(stylistTenantId, startTimeDate);
+
+        const offersService = await checkStylistOffersService(stylist_id, service_id);
+        if (!offersService) {
+          throw new Error('El estilista no está cualificado para uno de los servicios.');
+        }
+
+        const duration = await getServiceDurationMinutes(service_id, 60);
+
+        // Usar el tenant_id del estilista, no el del usuario del dashboard
+        console.log(`[createAppointmentsBatch] Creando cita con tenant_id: ${stylistTenantId} (del estilista)`);
+        const appointment = await createAppointmentRecord(stylistTenantId, final_client_id, stylist_id, service_id, startTimeDate, duration);
+        console.log(`[createAppointmentsBatch] Cita creada exitosamente: ${appointment.id}, fecha: ${startTimeDate.toISOString()}`);
+        created.push(appointment);
+      }
+
+      return created;
+    });
+
+    for (const appt of createdAppointments) {
+      emitSocket(appt.tenant_id, 'appointment:created', appt);
+    }
+    return res.status(201).json(createdAppointments);
+  } catch (error) {
+    console.error('Error al crear citas en lote:', error);
+    return res.status(400).json({ error: error.message });
+  }
+};
+
+exports.updateAppointment = async (req, res) => {
+  const { id } = req.params;
+  const { stylist_id, service_id, start_time } = req.body;
+  const { tenant_id } = req.user;
+
+  if (!id) return res.status(400).json({ error: "Falta id de la cita." });
+  if (!stylist_id && !service_id && !start_time) return res.status(400).json({ error: "Nada que actualizar." });
+
+  try {
+    const current = await prisma.appointments.findUnique({ where: { id } });
+    if (!current) return res.status(404).json({ error: "Cita no encontrada." });
+
+    if (current.tenant_id !== tenant_id) {
+      return res.status(403).json({ error: "No autorizado." });
+    }
+
+    const newStylistId = stylist_id ?? current.stylist_id;
+    const newServiceId = service_id ?? current.service_id;
+    const newStart = start_time ? new Date(start_time) : new Date(current.start_time);
+    if (isNaN(newStart)) return res.status(400).json({ error: 'start_time inválido.' });
+
+    // Si se está cambiando la fecha/hora, validar pasado según flag
+    if (start_time) {
+      await validatePastAppointment(tenant_id, newStart);
+    }
+
+    if (newStylistId !== current.stylist_id || newServiceId !== current.service_id) {
+      const offersService = await checkStylistOffersService(newStylistId, newServiceId);
+      if (!offersService) {
+        return res.status(400).json({ error: "El estilista no está cualificado para este servicio." });
+      }
+    }
+
+    const duration = await getServiceDurationMinutes(newServiceId, 60);
+    const newEnd = new Date(newStart.getTime() + duration * 60000);
+
+    const overlapRows = await prisma.$queryRawUnsafe(
+      `SELECT id FROM appointments
+       WHERE stylist_id = $1::uuid
+         AND id <> $2::uuid
+         AND status = ANY($5)
+         AND (start_time, end_time) OVERLAPS ($3, $4)`,
+      newStylistId, id, newStart, newEnd, BLOCKING_STATUSES
+    );
+    if (overlapRows.length > 0) {
+      return res.status(409).json({ error: "Conflicto de horario para el estilista." });
+    }
+
+    await prisma.appointments.update({
+      where: { id },
+      data: {
+        stylist_id: newStylistId,
+        service_id: newServiceId,
+        start_time: newStart,
+        end_time: newEnd,
+        updated_at: new Date()
+      }
+    });
+
+    const fullRows = await prisma.$queryRawUnsafe(
+      `SELECT a.*, s.name AS service_name, s.price,
+             client.first_name AS client_first_name, client.last_name AS client_last_name,
+             stylist.first_name AS stylist_first_name, stylist.last_name AS stylist_last_name
+       FROM appointments a
+       JOIN services s    ON a.service_id = s.id
+       JOIN users client  ON a.client_id  = client.id
+       JOIN users stylist ON a.stylist_id = stylist.id
+       WHERE a.id = $1::uuid`,
+      id
+    );
+
+    emitSocket(tenant_id, 'appointment:updated', fullRows[0]);
+    return res.status(200).json(fullRows[0]);
+  } catch (error) {
+    console.error("Error al actualizar la cita:", error);
+    return res.status(500).json({ error: error.message || "Error interno del servidor" });
+  }
+};
+
+exports.getAppointmentsByTenant = async (req, res) => {
+  const { tenantId } = req.params;
+  const { startDate, endDate } = req.query;
+
+  if (!startDate || !endDate) {
+    return res.status(400).json({ error: 'Debe proporcionar un rango de fechas (startDate, endDate).' });
+  }
+
+  try {
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT a.id, a.start_time, a.end_time, a.status, a.service_id, a.stylist_id, a.client_id,
+             s.name as service_name, s.price,
+             client.first_name as client_first_name, client.last_name as client_last_name,
+             stylist.first_name as stylist_first_name, stylist.last_name as stylist_last_name
+      FROM appointments a
+      JOIN services s    ON a.service_id = s.id
+      JOIN users client  ON a.client_id  = client.id
+      JOIN users stylist ON a.stylist_id = stylist.id
+      WHERE a.tenant_id = $1::uuid
+        AND a.start_time >= $2
+        AND a.start_time <= $3
+      ORDER BY a.start_time`,
+      tenantId, startDate, endDate
+    );
+    return res.status(200).json(rows);
+  } catch (error) {
+    console.error('Error al obtener citas:', error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+exports.getAvailability = async (req, res) => {
+  const { stylist_id, date, service_id, duration_minutes } = req.query;
+  const { tenant_id } = req.user;
+
+  if (!tenant_id || !stylist_id || !date) {
+    return res.status(400).json({ error: 'Faltan parámetros (tenant_id del token, stylist_id, date).' });
+  }
+
+  try {
+    let serviceDuration = Number(duration_minutes);
+    if (!Number.isFinite(serviceDuration) || serviceDuration <= 0) {
+      serviceDuration = await getServiceDurationMinutes(service_id, 60);
+    }
+
+    const { slots, reason } = await getAvailableSlotsForStylist(tenant_id, stylist_id, service_id, date, serviceDuration);
+
+    // FILTRAR HORARIOS PASADOS
+    const filteredSlots = filterPastSlots(slots, date);
+
+    if (filteredSlots.length === 0) {
+      const isPastDay = slots.length > 0 && filteredSlots.length === 0;
+      return res.status(200).json({
+        availableSlots: [],
+        availableSlots_meta: [],
+        message: isPastDay
+          ? 'Todos los horarios de hoy ya pasaron. Intenta con mañana u otra fecha.'
+          : (reason || 'No hay disponibilidad')
+      });
+    }
+
+    const availableSlots_meta = filteredSlots.map(d => ({
+      utc: d.toISOString(),
+      local: toLocalISO(d),
+      local_time: toLocalHHmm(d),
+    }));
+
+    const availableSlotsDisplay = availableSlots_meta.map(s => s.local_time);
+
+    return res.status(200).json({
+      availableSlots: availableSlotsDisplay,
+      availableSlots_meta
+    });
+  } catch (error) {
+    console.error('Error al obtener disponibilidad para estilista:', error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+exports.getAvailableStylistsByTime = async (req, res) => {
+  const { tenant_id: tenantIdFromToken } = req.user;
+  const { service_id, date, time } = req.query;
+
+  if (!service_id || !date || !time) {
+    return res.status(400).json({ error: 'Faltan parámetros obligatorios: service_id, date, time.' });
+  }
+
+  try {
+    const serviceRecord = await prisma.services.findUnique({
+      where: { id: service_id },
+      select: { name: true }
+    });
+    if (!serviceRecord) {
+      return res.status(404).json({ error: 'Servicio no encontrado.' });
+    }
+
+    const availableStylists = await findAvailableStylists(tenantIdFromToken, serviceRecord.name, date, time);
+
+    return res.status(200).json({
+      availableStylists: availableStylists.map(s => ({
+        id: s.id,
+        first_name: s.first_name,
+        last_name: s.last_name,
+        avatar_url: null
+      }))
+    });
+  } catch (error) {
+    console.error('Error al obtener estilistas disponibles por fecha y hora:', error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+exports.validateAppointment = async (req, res) => {
+  const { stylist_id, service_id, date, time } = req.body;
+  const { tenant_id } = req.user;
+
+  if (!stylist_id || !service_id || !date || !time) {
+    return res.status(400).json({ error: 'Faltan campos: stylist_id, service_id, date, time.' });
+  }
+
+  try {
+    const duration = await getServiceDurationMinutes(service_id, 60);
+    const start = makeLocalUtc(date, time);
+    const end = new Date(start.getTime() + duration * 60000);
+
+    // Permitir/denegar pasado según tenant (respuesta 200 con valid=false)
+    try {
+      await validatePastAppointment(tenant_id, start);
+    } catch (error) {
+      return res.status(200).json({ valid: false, reason: error.message });
+    }
+
+    const tenant = await prisma.tenants.findUnique({
+      where: { id: tenant_id },
+      select: { working_hours: true }
+    });
+    if (!tenant) {
+      return res.status(404).json({ error: 'Tenant no encontrado.' });
+    }
+
+    const tenantWorkingHours = tenant.working_hours || {};
+    const tenantRanges = getDayRangesFromWorkingHours(tenantWorkingHours, date);
+
+    const tenantOk = isWithinRanges(date, tenantRanges, start, end);
+    if (!tenantOk) {
+      return res.status(200).json({ valid: false, reason: 'El salón no está abierto a esa hora.' });
+    }
+
+    const stylistUser = await prisma.users.findFirst({
+      where: { id: stylist_id, role_id: 3, tenant_id: tenant_id },
+      select: { working_hours: true }
+    });
+    if (!stylistUser) {
+      return res.status(404).json({ error: 'Estilista no encontrado o no pertenece al tenant.' });
+    }
+
+    const sWH = stylistUser.working_hours ?? null;
+    const stylistRanges = getEffectiveStylistDayRanges(sWH, tenantWorkingHours, date);
+    const effective = intersectRangesArrays(tenantRanges, stylistRanges);
+
+    const stylistOk = isWithinRanges(date, effective, start, end);
+    if (!stylistOk) {
+      return res.status(200).json({ valid: false, reason: 'El estilista no trabaja a esa hora.' });
+    }
+
+    const overlapRows = await prisma.$queryRawUnsafe(
+      `SELECT id FROM appointments
+       WHERE stylist_id = $1::uuid
+         AND status = ANY($4)
+         AND (start_time, end_time) OVERLAPS ($2, $3)`,
+      stylist_id, start, end, BLOCKING_STATUSES
+    );
+    if (overlapRows.length > 0) {
+      return res.status(200).json({ valid: false, reason: 'Conflicto de horario para el estilista.' });
+    }
+
+    return res.status(200).json({ valid: true });
+  } catch (error) {
+    console.error('Error al validar cita:', error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+exports.handleCheckIn = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const rows = await prisma.$queryRawUnsafe(
+      `UPDATE appointments
+       SET status = 'checked_in', updated_at = NOW()
+       WHERE id = $1::uuid AND status IN ('scheduled', 'rescheduled')
+       RETURNING *`,
+      id
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({
+        message: 'Cita no encontrada o en un estado no válido para hacer check-in.'
+      });
+    }
+    return res.status(200).json(rows[0]);
+  } catch (error) {
+    console.error('Error al hacer check-in:', error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+exports.handleCheckout = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const appointmentRows = await tx.$queryRawUnsafe(
+        `UPDATE appointments
+         SET status = 'checked_out', updated_at = NOW()
+         WHERE id = $1::uuid AND status = 'checked_in'
+         RETURNING stylist_id, service_id, *`,
+        id
+      );
+
+      if (appointmentRows.length === 0) {
+        const currentState = await tx.appointments.findUnique({
+          where: { id },
+          select: { status: true }
+        });
+        if (currentState && currentState.status !== 'checked_in') {
+          throw new Error(`No se puede hacer check-out. El estado actual es '${currentState.status}', se esperaba 'checked_in'.`);
+        }
+        throw new Error('Cita no encontrada o en un estado no válido para hacer check-out.');
+      }
+
+      const appointmentRow = appointmentRows[0];
+      const { stylist_id, service_id } = appointmentRow;
+
+      // Actualizar tracking global del estilista
+      await tx.users.update({
+        where: { id: stylist_id },
+        data: { last_service_at: new Date() }
+      });
+
+      // DIGITURNO: Actualizar posición en cola de TODOS los servicios del estilista
+      // Cuando un estilista completa cualquier cita, pasa al final de TODAS sus colas
+      await tx.$queryRawUnsafe(
+        `UPDATE stylist_services
+         SET last_completed_at = NOW(),
+             total_completed = COALESCE(total_completed, 0) + 1
+         WHERE user_id = $1::uuid`,
+        stylist_id
+      );
+
+      console.log(`🎯 [DIGITURNO] Cola actualizada:`);
+      console.log(`   Estilista: ${stylist_id.substring(0, 8)}...`);
+      console.log(`   Servicio completado: ${service_id.substring(0, 8)}...`);
+      console.log(`   Movido al final de TODAS sus colas de servicios`);
+
+      return appointmentRow;
+    });
+
+    emitSocket(result.tenant_id, 'appointment:updated', result);
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error('Error al hacer check-out:', error);
+    const errorMessage = error.message.includes('No se puede hacer check-out')
+      ? error.message
+      : 'Error interno del servidor';
+    return res.status(400).json({ error: errorMessage });
+  }
+};
+
+exports.updateAppointmentStatus = async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!status) {
+    return res.status(400).json({ error: 'Debe proporcionar un nuevo estado (status).' });
+  }
+  try {
+    const rows = await prisma.$queryRawUnsafe(
+      'UPDATE appointments SET status = $1, updated_at = NOW() WHERE id = $2::uuid RETURNING *',
+      status, id
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Cita no encontrada para actualizar.' });
+    }
+    emitSocket(rows[0].tenant_id, 'appointment:updated', rows[0]);
+    return res.status(200).json(rows[0]);
+  } catch (error) {
+    console.error('Error al actualizar la cita:', error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+exports.rescheduleAppointment = async (req, res) => {
+  const { id } = req.params;
+  const { start_time } = req.body;
+  const { tenant_id } = req.user;
+
+  if (!start_time) return res.status(400).json({ error: 'Se requiere start_time.' });
+
+  try {
+    const current = await prisma.appointments.findUnique({ where: { id } });
+    if (!current) return res.status(404).json({ error: 'Cita no encontrada.' });
+
+    if (current.tenant_id !== tenant_id) return res.status(403).json({ error: 'No autorizado.' });
+
+    const newStart = new Date(start_time);
+    if (isNaN(newStart)) return res.status(400).json({ error: 'start_time inválido.' });
+
+    const duration = await getServiceDurationMinutes(current.service_id, 60);
+    const newEnd = new Date(newStart.getTime() + duration * 60000);
+
+    const overlapRows = await prisma.$queryRawUnsafe(
+      `SELECT id FROM appointments
+       WHERE stylist_id = $1::uuid AND id <> $2::uuid AND status = ANY($5)
+       AND (start_time, end_time) OVERLAPS ($3, $4)`,
+      current.stylist_id, id, newStart, newEnd, BLOCKING_STATUSES
+    );
+    if (overlapRows.length > 0) return res.status(409).json({ error: 'Conflicto de horario.' });
+
+    const rows = await prisma.$queryRawUnsafe(
+      `UPDATE appointments SET start_time = $1, end_time = $2, status = 'rescheduled', updated_at = NOW()
+       WHERE id = $3::uuid RETURNING *`,
+      newStart, newEnd, id
+    );
+
+    emitSocket(tenant_id, 'appointment:updated', rows[0]);
+    return res.status(200).json(rows[0]);
+  } catch (error) {
+    console.error('Error al reagendar la cita:', error);
+    return res.status(500).json({ error: error.message || 'Error interno del servidor' });
+  }
+};
+
+exports.deleteAppointment = async (req, res) => {
+  const { id } = req.params;
+  try {
+    await prisma.appointments.delete({ where: { id } });
+    return res.status(204).send();
+  } catch (error) {
+    // P2025 = Record not found
+    if (error.code === 'P2025') {
+      return res.status(404).json({ message: 'Cita no encontrada para eliminar' });
+    }
+    console.error('Error al eliminar la cita:', error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+exports.getTenantSlots = async (req, res) => {
+  const { tenant_id } = req.user;
+  const { date, service_id, interval } = req.query;
+
+  if (!date) {
+    return res.status(400).json({ error: 'Falta date (YYYY-MM-DD).' });
+  }
+
+  try {
+    const tenant = await prisma.tenants.findUnique({
+      where: { id: tenant_id },
+      select: { working_hours: true }
+    });
+    if (!tenant) {
+      return res.status(404).json({ error: 'Tenant no encontrado.' });
+    }
+
+    const tenantWorking = tenant.working_hours || {};
+    const tenantRanges = getDayRangesFromWorkingHours(tenantWorking, date);
+    if (!Array.isArray(tenantRanges) || tenantRanges.length === 0) {
+      return res.status(200).json({ slots: [], slots_meta: [], message: 'El salón está cerrado en esta fecha.' });
+    }
+
+    let step;
+    if (interval && Number(interval) > 0) {
+      step = Number(interval);
+    } else {
+      step = await getServiceDurationMinutes(service_id, 60);
+    }
+
+    const slots = buildSlotsFromRanges(date, tenantRanges, step);
+
+    // FILTRAR HORARIOS PASADOS
+    const filteredSlots = filterPastSlots(slots, date);
+
+    if (filteredSlots.length === 0) {
+      const isPastDay = slots.length > 0 && filteredSlots.length === 0;
+      return res.status(200).json({
+        slots: [],
+        slots_meta: [],
+        message: isPastDay
+          ? 'Todos los horarios de hoy ya pasaron. Intenta con mañana u otra fecha.'
+          : 'El salón está cerrado en esta fecha.'
+      });
+    }
+
+    const slots_meta = filteredSlots.map(d => ({
+      utc: d.toISOString(),
+      local: toLocalISO(d),
+      local_time: toLocalHHmm(d),
+    }));
+
+    const slotsDisplay = slots_meta.map(s => s.local_time);
+
+    return res.status(200).json({
+      slots: slotsDisplay,
+      slots_meta
+    });
+  } catch (error) {
+    console.error('Error al obtener slots del tenant:', error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+exports.getTenantSlotsPublic = async (req, res) => {
+  const { tenantId } = req.params;
+  const { date, service_id, interval } = req.query;
+
+  if (!date) {
+    return res.status(400).json({ error: 'Falta date (YYYY-MM-DD).' });
+  }
+
+  try {
+    const tenant = await prisma.tenants.findUnique({
+      where: { id: tenantId },
+      select: { working_hours: true }
+    });
+    if (!tenant) {
+      return res.status(404).json({ error: 'Tenant no encontrado.' });
+    }
+
+    const tenantWorking = tenant.working_hours || {};
+    const tenantRanges = getDayRangesFromWorkingHours(tenantWorking, date);
+
+    if (!Array.isArray(tenantRanges) || tenantRanges.length === 0) {
+      return res.status(200).json({
+        slots: [],
+        slots_meta: [],
+        message: 'El salón está cerrado en esta fecha.'
+      });
+    }
+
+    let step;
+    if (interval && Number(interval) > 0) {
+      step = Number(interval);
+    } else {
+      step = await getServiceDurationMinutes(service_id, 60);
+    }
+
+    const slots = buildSlotsFromRanges(date, tenantRanges, step);
+
+    // FILTRAR HORARIOS PASADOS
+    const filteredSlots = filterPastSlots(slots, date);
+
+    if (filteredSlots.length === 0) {
+      const isPastDay = slots.length > 0 && filteredSlots.length === 0;
+      return res.status(200).json({
+        slots: [],
+        slots_meta: [],
+        message: isPastDay
+          ? 'Todos los horarios de hoy ya pasaron. Intenta con mañana u otra fecha.'
+          : 'El salón está cerrado en esta fecha.'
+      });
+    }
+
+    const slots_meta = filteredSlots.map(d => ({
+      utc: d.toISOString(),
+      local: toLocalISO(d),
+      local_time: toLocalHHmm(d),
+    }));
+
+    const slotsDisplay = slots_meta.map(s => s.local_time);
+
+    return res.status(200).json({
+      slots: slotsDisplay,
+      slots_meta
+    });
+  } catch (error) {
+    console.error('Error en getTenantSlotsPublic:', error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+exports.scheduleWithFallback = async (req, res) => {
+  try {
+    const { tenantId, clientId, service, date, time, stylist, limit } = req.body || {};
+    const suggestLimit = Math.max(1, parseInt(limit || '6', 10));
+
+    if (!tenantId || !clientId || !service || !date || !time) {
+      return res.status(400).json({ error: 'Faltan campos: tenantId, clientId, service, date, time.' });
+    }
+
+    // Servicio
+    let svc;
+    if (UUID_RE.test(service)) {
+      svc = await prisma.services.findFirst({
+        where: { id: service, tenant_id: tenantId },
+        select: { id: true, name: true, duration_minutes: true }
+      });
+    } else {
+      const rows = await prisma.$queryRawUnsafe(
+        `SELECT id, name, duration_minutes FROM services WHERE tenant_id=$1::uuid AND LOWER(name)=LOWER($2) LIMIT 1`,
+        tenantId, service
+      );
+      svc = rows[0] || null;
+    }
+    if (!svc) return res.status(404).json({ error: 'Servicio no encontrado.' });
+
+    const durationBase = Number(svc.duration_minutes) || 60;
+
+    if (stylist) {
+      // Con estilista específico
+      let sty;
+      if (UUID_RE.test(stylist)) {
+        sty = await prisma.users.findFirst({
+          where: { id: stylist, tenant_id: tenantId, role_id: 3 },
+          select: { id: true, first_name: true, last_name: true, working_hours: true, status: true }
+        });
+      } else {
+        const rows = await prisma.$queryRawUnsafe(
+          `SELECT id, first_name, last_name, working_hours, status
+            FROM users
+            WHERE tenant_id=$1::uuid AND role_id=3
+              AND (
+                LOWER(TRIM(first_name || ' ' || COALESCE(last_name,''))) = LOWER(TRIM($2))
+                OR LOWER(TRIM(first_name)) = LOWER(TRIM($2))
+              )
+            LIMIT 1`,
+          tenantId, stylist
+        );
+        sty = rows[0] || null;
+      }
+      if (!sty) return res.status(404).json({ error: 'Estilista no encontrado.' });
+      if ((sty.status || 'active') !== 'active') {
+        return res.status(409).json({ error: 'El estilista no está activo.' });
+      }
+
+      const offersService = await checkStylistOffersService(sty.id, svc.id);
+      if (!offersService) {
+        return res.status(200).json({
+          booked: false,
+          reason: 'El estilista no ofrece este servicio.',
+          suggestions: [],
+          alternative_stylists: []
+        });
+      }
+
+      const duration = await getStylistEffectiveDuration(sty.id, svc.id, durationBase);
+      const { slots, effectiveRanges } = await getAvailableSlotsForStylist(tenantId, sty.id, svc.id, date, 15);
+
+      // FILTRAR HORARIOS PASADOS
+      const filteredSlots = filterPastSlots(slots, date);
+
+      const wantedStart = makeLocalUtc(date, time);
+      const wantedEnd = new Date(wantedStart.getTime() + duration * 60000);
+
+      // Permitir/denegar pasado según tenant
+      try {
+        await validatePastAppointment(tenantId, wantedStart);
+      } catch (error) {
+        return res.status(400).json({
+          booked: false,
+          reason: error.message,
+          suggestions: [],
+          alternative_stylists: []
+        });
+      }
+
+      const inRange = effectiveRanges && effectiveRanges.length > 0 && isWithinRanges(date, effectiveRanges, wantedStart, wantedEnd);
+
+      if (!inRange || filteredSlots.length === 0) {
+        const withDist = filteredSlots.map(d => ({ d, dist: Math.abs(d.getTime() - wantedStart.getTime()) }))
+          .sort((a, b) => a.dist - b.dist);
+        return res.status(200).json({
+          booked: false,
+          reason: filteredSlots.length === 0 && slots.length > 0
+            ? 'Todos los horarios de hoy ya pasaron. Intenta con mañana.'
+            : 'La hora solicitada no está disponible.',
+          suggestions: [...new Set(withDist.slice(0, suggestLimit).map(x => toLocalHHmm(x.d)))],
+          alternative_stylists: []
+        });
+      }
+
+      const wanted = toLocalHHmm(wantedStart);
+      const allLocalTimes = filteredSlots.map(toLocalHHmm);
+      const isAvailable = allLocalTimes.includes(wanted);
+
+      if (!isAvailable) {
+        const withDist = filteredSlots.map(d => ({ d, dist: Math.abs(d.getTime() - wantedStart.getTime()) }))
+          .sort((a, b) => a.dist - b.dist);
+
+        const alternos = await findAvailableStylists(tenantId, svc.name, date, time);
+        const altStylists = alternos
+          .filter(u => u.id !== sty.id)
+          .map(u => ({ id: u.id, name: `${u.first_name} ${u.last_name || ''}`.trim() }));
+
+        return res.status(200).json({
+          booked: false,
+          reason: 'Conflicto de horario.',
+          suggestions: [...new Set(withDist.slice(0, suggestLimit).map(x => toLocalHHmm(x.d)))],
+          alternative_stylists: altStylists
+        });
+      }
+
+      const appointment = await createAppointmentRecord(tenantId, clientId, sty.id, svc.id, wantedStart, duration);
+      emitSocket(tenantId, 'appointment:created', appointment);
+      return res.status(201).json({ booked: true, appointment });
+    }
+
+    // Sin estilista específico
+    const start = makeLocalUtc(date, time);
+
+    // Permitir/denegar pasado según tenant
+    try {
+      await validatePastAppointment(tenantId, start);
+    } catch (error) {
+      return res.status(400).json({
+        booked: false,
+        reason: error.message,
+        suggestions: [],
+        alternative_stylists: []
+      });
+    }
+
+    const exactAlternatives = await findAvailableStylists(tenantId, svc.name, date, time);
+    if (exactAlternatives.length > 0) {
+      const styId = exactAlternatives[0].id;
+      const appointment = await createAppointmentRecord(tenantId, clientId, styId, svc.id, start, durationBase);
+      emitSocket(tenantId, 'appointment:created', appointment);
+      return res.status(201).json({ booked: true, appointment });
+    }
+
+    // Nadie libre -> sugerencias
+    const tenant = await prisma.tenants.findUnique({
+      where: { id: tenantId },
+      select: { working_hours: true }
+    });
+    const tenantWH = tenant?.working_hours || {};
+    const dayRanges = getDayRangesFromWorkingHours(tenantWH, date);
+    const candidates = buildSlotsFromRanges(date, dayRanges, 15);
+
+    // FILTRAR HORARIOS PASADOS
+    const filteredCandidates = filterPastSlots(candidates, date);
+    const wanted = makeLocalUtc(date, time);
+
+    const scored = [];
+    for (const c of filteredCandidates) {
+      const hh = toLocalHHmm(c);
+      const alts = await findAvailableStylists(tenantId, svc.name, date, hh);
+      if (alts.length > 0) {
+        scored.push({ d: c, dist: Math.abs(c.getTime() - wanted.getTime()), stylists: alts.slice(0, 3) });
+      }
+    }
+    scored.sort((a, b) => a.dist - b.dist);
+
+    return res.status(200).json({
+      booked: false,
+      reason: filteredCandidates.length === 0 && candidates.length > 0
+        ? 'Todos los horarios de hoy ya pasaron. Intenta con mañana.'
+        : 'No hay estilistas disponibles a la hora solicitada.',
+      suggestions: [...new Set(scored.slice(0, suggestLimit).map(x => toLocalHHmm(x.d)))],
+      alternative_stylists: (scored[0]?.stylists || []).map(s => ({
+        id: s.id, name: `${s.first_name} ${s.last_name || ''}`.trim()
+      }))
+    });
+
+  } catch (e) {
+    console.error('scheduleWithFallback', e);
+    return res.status(500).json({ error: e.message || 'Error interno del servidor' });
+  }
+};
+
+/* =================================================================== */
+/* =========================  AI ORCHESTRATOR  ======================= */
+/* =================================================================== */
+
+/* =================================================================== */
+/* =========================  AI ORCHESTRATOR (CORREGIDO)  =========== */
+/* =================================================================== */
+
+exports.aiOrchestratorPublic = async (req, res) => {
+  try {
+    const payload = { ...(req.query || {}), ...(req.body || {}) };
+
+    let {
+      action,
+      tenantId,
+      clientId,
+      service, service_id, selected_service_id,
+      stylist, stylist_id, selected_stylist_id,
+      date, time,
+      confirm,
+      limit,
+      step
+    } = payload;
+
+    console.log('\n' + '='.repeat(80));
+    console.log('🎯 [AI ORCHESTRATOR] Inicio de procesamiento');
+    console.log('='.repeat(80));
+
+    action = clean(action) || 'orchestrate';
+    if (clean(payload.ai_intent) === 'agendar') action = 'agendar';
+    if (String(confirm).toLowerCase() === 'true') action = 'agendar';
+
+    tenantId = clean(tenantId);
+    clientId = clean(clientId);
+    const suggestLimit = Math.max(1, parseInt(limit || '6', 10));
+    const stepMinutes = Math.max(5, parseInt(step || '15', 10));
+
+    console.log('[PARAMS RAW]:');
+    console.log('   tenantId:', tenantId);
+    console.log('   action:', action);
+    console.log('   service:', service, '| service_id:', service_id, '| selected_service_id:', selected_service_id);
+    console.log('   stylist:', stylist, '| stylist_id:', stylist_id, '| selected_stylist_id:', selected_stylist_id);
+    console.log('   date (ANTES normalizar):', date);
+    console.log('   time (ANTES normalizar):', time);
+
+    if (!tenantId || !UUID_RE.test(tenantId)) {
+      return res.status(400).json({ error: 'Falta tenantId válido (UUID).' });
+    }
+
+    // NORMALIZAR FECHA Y HORA
+    const dateOriginal = date;
+    const timeOriginal = time;
+
+    date = normalizeDateKeyword(clean(date));
+    time = normalizeHumanTimeToHHMM(time);
+
+    console.log('\n[NORMALIZACION]:');
+    console.log('   date: "' + dateOriginal + '" -> "' + date + '"');
+    console.log('   time: "' + timeOriginal + '" -> "' + time + '"');
+
+    // =================================================================
+    // PASO 1: RESOLVER SERVICIO
+    // =================================================================
+    console.log('\n[PASO 1] Resolviendo servicio...');
+
+    const svc = await resolveServiceFuzzy(tenantId, { service, service_id, selected_service_id }, 10);
+    let chosenService = svc.chosen;
+    const serviceOptions = svc.options || [];
+
+    console.log('   Servicio elegido:', chosenService ? chosenService.name : 'ninguno');
+    console.log('   Opciones disponibles:', serviceOptions.length);
+
+    // =================================================================
+    // PASO 2: RESOLVER ESTILISTA (SI SE PROPORCIONÓ)
+    // =================================================================
+    console.log('\n[PASO 2] Resolviendo estilista...');
+
+    const sty = await resolveStylistFuzzy(tenantId, { stylist, stylist_id, selected_stylist_id }, 10);
+    let chosenStylist = sty.chosen;
+    const stylistOptions = sty.options || [];
+
+    console.log('   Estilista elegido:', chosenStylist ? chosenStylist.name : 'ninguno');
+    console.log('   Opciones disponibles:', stylistOptions.length);
+
+    // =================================================================
+    // MANEJO DE DESAMBIGUACION
+    // =================================================================
+    const need = {
+      service: !chosenService && serviceOptions.length > 0,
+      stylist: !chosenStylist && stylistOptions.length > 0
+    };
+
+    if (need.service || need.stylist) {
+      console.log('[DESAMBIGUACION NECESARIA]');
+      console.log('   Servicios:', need.service ? 'SI' : 'NO');
+      console.log('   Estilistas:', need.stylist ? 'SI' : 'NO');
+
+      return res.status(200).json({
+        status: 'disambiguation_needed',
+        message: 'Encontré múltiples coincidencias. Por favor elige una opción.',
+        need,
+        options: {
+          services: serviceOptions.map(s => ({
+            id: s.id, name: s.name, duration_minutes: Number(s.duration_minutes) || null
+          })),
+          stylists: stylistOptions.map(u => ({
+            id: u.id, name: u.name
+          }))
+        },
+        next: 'Envía selected_service_id y/o selected_stylist_id en el siguiente request.'
+      });
+    }
+
+    // =================================================================
+    // VALIDAR QUE NO SE INVENTEN SERVICIOS/ESTILISTAS
+    // =================================================================
+    if (!chosenService && clean(service)) {
+      console.log('[SERVICIO NO ENCONTRADO]:', service);
+      return res.status(200).json({
+        status: 'no_match_service',
+        message: `No encontré un servicio que coincida con "${service}".`,
+        suggestions: []
+      });
+    }
+
+    if (!chosenStylist && clean(stylist)) {
+      console.log('[ESTILISTA NO ENCONTRADO]:', stylist);
+      return res.status(200).json({
+        status: 'no_match_stylist',
+        message: `No encontré un estilista que coincida con "${stylist}".`,
+        suggestions: []
+      });
+    }
+
+    // =================================================================
+    // CASO ESPECIAL: TENGO ESTILISTA PERO NO SERVICIO
+    // -> Listar servicios que ofrece ese estilista
+    // =================================================================
+    if (chosenStylist && !chosenService) {
+      console.log('\n[LISTAR SERVICIOS] Estilista sin servicio');
+      console.log('   Estilista:', chosenStylist.name);
+
+      const stylistServices = await getStylistServices(chosenStylist.id);
+
+      if (stylistServices.length === 0) {
+        console.log('   Estilista no tiene servicios configurados');
+        return res.status(200).json({
+          status: 'stylist_no_services',
+          message: `${chosenStylist.name} no tiene servicios configurados.`,
+          services: []
+        });
+      }
+
+      console.log('   Servicios encontrados:', stylistServices.length);
+
+      return res.status(200).json({
+        status: 'list_stylist_services',
+        message: `${chosenStylist.name} ofrece estos servicios:`,
+        stylist: {
+          id: chosenStylist.id,
+          name: chosenStylist.name
+        },
+        services: stylistServices.map(s => ({
+          id: s.id,
+          name: s.name,
+          duration_minutes: Number(s.duration_minutes) || null
+        })),
+        next: 'Envía selected_service_id con el servicio que deseas o usa "service" con el nombre.'
+      });
+    }
+
+    // =================================================================
+    // VALIDAR QUE TENEMOS SERVICIO
+    // =================================================================
+    if (!chosenService) {
+      console.log('[NECESITA SERVICIO]');
+      return res.status(200).json({
+        status: 'need_service',
+        message: '¿Qué servicio deseas?',
+        options_hint: 'Envía service por nombre o selected_service_id.'
+      });
+    }
+
+    console.log('\n[SERVICIO CONFIRMADO]:', chosenService.name);
+
+    // =================================================================
+    // CAMINO A: CON ESTILISTA ESPECIFICO
+    // =================================================================
+    if (chosenStylist) {
+      console.log('\n[CAMINO A] Con estilista específico:', chosenStylist.name);
+
+      // Verificar que el estilista ofrece el servicio
+      const offersService = await checkStylistOffersService(chosenStylist.id, chosenService.id);
+
+      if (!offersService) {
+        console.log('   Estilista NO ofrece el servicio');
+
+        // Obtener servicios que SÍ ofrece
+        const stylistServices = await getStylistServices(chosenStylist.id);
+
+        // Buscar estilistas alternativos que SÍ ofrecen el servicio
+        const alternosRows = await prisma.$queryRawUnsafe(
+          `SELECT u.id, u.first_name, u.last_name
+           FROM users u
+           JOIN stylist_services ss ON u.id = ss.user_id
+           WHERE u.tenant_id=$1::uuid AND u.role_id=3 AND COALESCE(NULLIF(u.status,''),'active')='active'
+             AND ss.service_id=$2::uuid`,
+          tenantId, chosenService.id
+        );
+        const alt = alternosRows
+          .filter(u => u.id !== chosenStylist.id)
+          .map(u => ({ id: u.id, name: `${u.first_name} ${u.last_name || ''}`.trim() }));
+
+        return res.status(200).json({
+          status: 'stylist_not_offering_service',
+          message: `${chosenStylist.name} no ofrece "${chosenService.name}".`,
+          stylist_services: stylistServices.map(s => ({
+            id: s.id,
+            name: s.name,
+            duration_minutes: Number(s.duration_minutes) || null
+          })),
+          alternative_stylists: alt.slice(0, suggestLimit),
+          next: 'Elige otro servicio de los que ofrece, o elige un estilista alterno.'
+        });
+      }
+
+      console.log('   Estilista SI ofrece el servicio');
+
+      let duration = Number(chosenService.duration_minutes) || 60;
+      duration = await getStylistEffectiveDuration(chosenStylist.id, chosenService.id, duration);
+
+      console.log('   Duración efectiva:', duration, 'minutos');
+
+      // Verificar si necesitamos fecha
+      if (!date) {
+        console.log('   Falta fecha');
+        return res.status(200).json({
+          status: 'need_date',
+          message: '¿Para qué fecha quieres agendar?',
+          hint: 'Puedes enviar "hoy" / "mañana" o YYYY-MM-DD.'
+        });
+      }
+
+      console.log('   Fecha:', date);
+
+      // Obtener slots disponibles
+      const { slots, effectiveRanges, reason } = await getAvailableSlotsForStylist(
+        tenantId, chosenStylist.id, chosenService.id, date, stepMinutes
+      );
+
+      console.log('   Slots totales:', slots.length);
+
+      // Filtrar horarios pasados
+      const filteredSlots = filterPastSlots(slots, date);
+      console.log('   Slots después de filtrar pasados:', filteredSlots.length);
+
+      if (filteredSlots.length === 0) {
+        const isPastDay = slots.length > 0 && filteredSlots.length === 0;
+        console.log('   No hay slots disponibles');
+        console.log('   Razón:', isPastDay ? 'horarios pasados' : reason);
+
+        return res.status(200).json({
+          status: isPastDay ? 'all_slots_past' : (reason || 'no_availability'),
+          message: isPastDay
+            ? 'Todos los horarios de hoy ya pasaron. Intenta con mañana u otra fecha.'
+            : (reason || 'No hay disponibilidad'),
+          suggestions: []
+        });
+      }
+
+      const allLocalTimes = filteredSlots.map(toLocalHHmm);
+      console.log('   Horarios disponibles (primeros 10):', allLocalTimes.slice(0, 10));
+
+      // Verificar si necesitamos hora
+      if (!time) {
+        console.log('   Falta hora');
+        return res.status(200).json({
+          status: 'choose_time',
+          message: 'Estos son los horarios disponibles para ese día:',
+          suggestions: allLocalTimes.slice(0, suggestLimit),
+          slots_all: allLocalTimes.slice(0, 48),
+          next: 'Envía time con una de las opciones.'
+        });
+      }
+
+      const wanted = String(time).slice(0, 5);
+      console.log('   Hora solicitada:', wanted);
+      console.log('   Esta disponible?:', allLocalTimes.includes(wanted));
+
+      const isAvailable = allLocalTimes.includes(wanted);
+
+      if (!isAvailable) {
+        console.log('   Hora NO disponible');
+
+        const wantedDate = makeLocalUtc(date, wanted);
+        const withDist = filteredSlots.map(d => ({ d, dist: Math.abs(d.getTime() - wantedDate.getTime()) }))
+          .sort((a, b) => a.dist - b.dist);
+
+        const alternos = await findAvailableStylists(tenantId, chosenService.name, date, wanted);
+        const altStylists = alternos
+          .filter(u => u.id !== chosenStylist.id)
+          .map(u => ({ id: u.id, name: `${u.first_name} ${u.last_name || ''}`.trim() }));
+
+        return res.status(200).json({
+          status: 'choose_time',
+          message: `A las ${wanted} no tiene disponibilidad ${chosenStylist.name} para ${chosenService.name}.`,
+          suggestions: [...new Set(withDist.slice(0, suggestLimit).map(x => toLocalHHmm(x.d)))],
+          slots_all: allLocalTimes.slice(0, 48),
+          alternative_stylists: altStylists,
+          next: 'Elige una de las horas sugeridas o un estilista alterno.'
+        });
+      }
+
+      // SI HAY DISPONIBILIDAD
+      console.log('   Hora disponible');
+
+      const startTimeDate = makeLocalUtc(date, wanted);
+      const endTimeDate = new Date(startTimeDate.getTime() + duration * 60000);
+
+      console.log('   Start time:', startTimeDate.toISOString());
+      console.log('   End time:', endTimeDate.toISOString());
+
+      // Si la acción es agendar, proceder
+      if (action === 'agendar') {
+        console.log('\n[AGENDAMIENTO] Confirmando cita...');
+
+        if (!clientId) {
+          return res.status(400).json({ error: 'Para agendar se requiere clientId.' });
+        }
+
+        try {
+          await validatePastAppointment(tenantId, startTimeDate);
+
+          const appointment = await createAppointmentRecord(
+            tenantId, clientId, chosenStylist.id, chosenService.id, startTimeDate, duration
+          );
+          emitSocket(tenantId, 'appointment:created', appointment);
+
+          console.log('   Cita agendada exitosamente:', appointment.id);
+
+          return res.status(201).json({
+            status: 'booked',
+            message: `¡Listo! Tu cita quedó con ${chosenStylist.name} el ${formatInTimeZone(startTimeDate, TIME_ZONE, 'yyyy-MM-dd')} a las ${formatInTimeZone(startTimeDate, TIME_ZONE, 'HH:mm')}.`,
+            appointment
+          });
+        } catch (error) {
+          console.error('   Error al agendar:', error.message);
+          return res.status(409).json({
+            status: 'conflict_or_invalid',
+            message: error.message || 'Se ocupó el turno mientras confirmabas. Elige otra hora.',
+            suggestions: allLocalTimes.slice(0, suggestLimit)
+          });
+        }
+      }
+
+      // Mostrar confirmación
+      console.log('   Solicitando confirmación al usuario');
+
+      return res.status(200).json({
+        status: 'confirm',
+        summary: {
+          service: { id: chosenService.id, name: chosenService.name, duration_minutes: duration },
+          stylist: { id: chosenStylist.id, name: chosenStylist.name },
+          date: date,
+          time: wanted,
+          timezone: TIME_ZONE
+        },
+        message: '¿Confirmas que agende esta cita?',
+        next: 'Reenvía este mismo payload añadiendo "confirm": true o "action": "agendar"'
+      });
+    }
+
+    // =================================================================
+    // CAMINO B: SIN ESTILISTA ESPECIFICO
+    // =================================================================
+    console.log('\n[CAMINO B] Sin estilista específico');
+
+    if (!date) {
+      console.log('   Falta fecha');
+      return res.status(200).json({
+        status: 'need_date',
+        message: '¿Para qué fecha quieres agendar?',
+        hint: 'Puedes enviar "hoy" / "mañana" o YYYY-MM-DD.'
+      });
+    }
+
+    if (!time) {
+      console.log('   Falta hora');
+      return res.status(200).json({
+        status: 'need_time',
+        message: '¿Y a qué hora te gustaría?',
+        hint: 'Puedes enviar "2 pm", "14:30", etc.'
+      });
+    }
+
+    console.log('   Fecha:', date);
+    console.log('   Hora:', time);
+    console.log('   Buscando estilistas disponibles...');
+
+    const availableStylists = await findAvailableStylists(tenantId, chosenService.name, date, time);
+
+    console.log('   Estilistas disponibles:', availableStylists.length);
+
+    if (availableStylists.length === 0) {
+      console.log('   No hay estilistas disponibles');
+      return res.status(200).json({
+        status: 'no_stylist_available_at_time',
+        message: `Lo siento, no encontré estilistas disponibles para "${chosenService.name}" a las ${time} ese día.`,
+        suggestions: [],
+        alternative_stylists: []
+      });
+    }
+
+    const firstAvailable = availableStylists[0];
+    chosenStylist = {
+      ...firstAvailable,
+      name: `${firstAvailable.first_name} ${firstAvailable.last_name || ''}`.trim()
+    };
+
+    console.log('   Estilista asignado:', chosenStylist.name);
+
+    let duration = Number(chosenService.duration_minutes) || 60;
+    duration = await getStylistEffectiveDuration(chosenStylist.id, chosenService.id, duration);
+
+    const startTimeDate = makeLocalUtc(date, time);
+    const wanted = String(time).slice(0, 5);
+
+    if (action === 'agendar') {
+      console.log('\n[AGENDAMIENTO] Confirmando cita...');
+
+      if (!clientId) {
+        return res.status(400).json({ error: 'Para agendar se requiere clientId.' });
+      }
+
+      try {
+        await validatePastAppointment(tenantId, startTimeDate);
+
+        const appointment = await createAppointmentRecord(
+          tenantId, clientId, chosenStylist.id, chosenService.id, startTimeDate, duration
+        );
+        emitSocket(tenantId, 'appointment:created', appointment);
+
+        console.log('   Cita agendada exitosamente:', appointment.id);
+
+        return res.status(201).json({
+          status: 'booked',
+          message: `¡Listo! Tu cita quedó con ${chosenStylist.name} el ${formatInTimeZone(startTimeDate, TIME_ZONE, 'yyyy-MM-dd')} a las ${formatInTimeZone(startTimeDate, TIME_ZONE, 'HH:mm')}.`,
+          appointment
+        });
+      } catch (error) {
+        console.error('   Error al agendar:', error.message);
+        return res.status(409).json({
+          status: 'conflict_or_invalid',
+          message: error.message || '¡Uy! Justo se ocupó ese turno mientras confirmabas. ¿Intentamos de nuevo?'
+        });
+      }
+    }
+
+    console.log('   Solicitando confirmación al usuario');
+
+    return res.status(200).json({
+      status: 'confirm',
+      summary: {
+        service: { id: chosenService.id, name: chosenService.name, duration_minutes: duration },
+        stylist: { id: chosenStylist.id, name: chosenStylist.name },
+        date: date,
+        time: wanted,
+        timezone: TIME_ZONE
+      },
+      message: `Encontré disponibilidad con ${chosenStylist.name} para esa hora. ¿Confirmas que agende esta cita?`,
+      next: 'Reenvía este mismo payload añadiendo "confirm": true o "action": "agendar"'
+    });
+
+  } catch (e) {
+    console.error('\n[AI ORCHESTRATOR ERROR]:', e);
+    console.error(e.stack);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  } finally {
+    console.log('='.repeat(80));
+  }
+};
+
+exports.aiOrchestrator = async (req, res) => {
+  try {
+    const method = req.method.toUpperCase();
+    const src = method === 'GET' ? req.query : req.body;
+
+    let tenantId = clean(src.tenantId || src.tenant_id || '');
+    let clientId = src.clientId || src.client_id || null;
+
+    let intent = clean((src.ai_intent || src.intent || '').toLowerCase());
+    let ai_service = clean(src.ai_service || src.service || '');
+    let ai_stylist = clean(src.ai_stylist || src.stylist || '');
+    let ai_date = clean(src.ai_date || src.date || '');
+    let ai_time = cleanHHMM(src.ai_time || src.time || '');
+
+    const suggestLimit = Math.max(1, parseInt(src.limit || '6', 10));
+
+    if (!tenantId || !UUID_RE.test(tenantId)) {
+      return res.status(400).json({ ok: false, error: 'tenantId inválido o faltante.' });
+    }
+
+    if (method === 'GET') {
+      if (intent === 'listar_servicios') {
+        const rows = await prisma.$queryRawUnsafe(
+          `SELECT id, name, duration_minutes
+           FROM services
+           WHERE tenant_id = $1::uuid
+           ORDER BY name ASC`,
+          tenantId
+        );
+        return res.status(200).json({
+          ok: true,
+          intent: 'listar_servicios',
+          total: rows.length,
+          services: rows
+        });
+      }
+
+      if (intent === 'listar_estilistas') {
+        const rows = await prisma.$queryRawUnsafe(
+          `SELECT id, first_name, last_name
+           FROM users
+           WHERE tenant_id = $1::uuid
+             AND role_id = 3
+             AND COALESCE(NULLIF(status,''),'active')='active'
+           ORDER BY first_name ASC, last_name ASC`,
+          tenantId
+        );
+        return res.status(200).json({
+          ok: true,
+          intent: 'listar_estilistas',
+          total: rows.length,
+          stylists: rows.map(u => ({ id: u.id, name: `${u.first_name} ${u.last_name || ''}`.trim() }))
+        });
+      }
+
+      if (intent === 'validar' || (ai_service && ai_stylist && ai_date)) {
+        // Service
+        let svcRow;
+        if (UUID_RE.test(ai_service)) {
+          svcRow = await prisma.services.findFirst({
+            where: { id: ai_service, tenant_id: tenantId },
+            select: { id: true, name: true, duration_minutes: true }
+          });
+        } else {
+          const rows = await prisma.$queryRawUnsafe(
+            `SELECT id, name, duration_minutes FROM services WHERE tenant_id=$1::uuid AND LOWER(name)=LOWER($2) LIMIT 1`,
+            tenantId, ai_service
+          );
+          svcRow = rows[0] || null;
+        }
+        if (!svcRow) return res.status(404).json({ ok: false, error: 'Servicio no encontrado.' });
+
+        // Estilista
+        let styRow;
+        if (UUID_RE.test(ai_stylist)) {
+          styRow = await prisma.users.findFirst({
+            where: { id: ai_stylist, tenant_id: tenantId, role_id: 3 },
+            select: { id: true, first_name: true, last_name: true, working_hours: true, status: true }
+          });
+        } else {
+          const rows = await prisma.$queryRawUnsafe(
+            `SELECT id, first_name, last_name, working_hours, status
+              FROM users
+              WHERE tenant_id=$1::uuid AND role_id=3
+                AND (
+                  LOWER(TRIM(first_name || ' ' || COALESCE(last_name,''))) = LOWER(TRIM($2))
+                  OR LOWER(TRIM(first_name)) = LOWER(TRIM($2))
+                )
+              LIMIT 1`,
+            tenantId, ai_stylist
+          );
+          styRow = rows[0] || null;
+        }
+        if (!styRow) return res.status(404).json({ ok: false, error: 'Estilista no encontrado.' });
+        if ((styRow.status || 'active') !== 'active') {
+          return res.status(409).json({ ok: false, error: 'El estilista no está activo.' });
+        }
+
+        const offersService = await checkStylistOffersService(styRow.id, svcRow.id);
+        if (!offersService) {
+          // Listar servicios del estilista
+          const stylistServices = await getStylistServices(styRow.id);
+
+          let alternatives = [];
+          if (ai_date && ai_time) {
+            const alts = await findAvailableStylists(tenantId, svcRow.name, ai_date, ai_time);
+            alternatives = alts
+              .filter(u => u.id !== styRow.id)
+              .map(u => ({ id: u.id, name: `${u.first_name} ${u.last_name || ''}`.trim() }));
+          } else {
+            const altRows = await prisma.$queryRawUnsafe(
+              `SELECT u.id, u.first_name, u.last_name
+               FROM users u
+               JOIN stylist_services ss ON u.id = ss.user_id
+               WHERE u.tenant_id=$1::uuid AND u.role_id=3
+                 AND COALESCE(NULLIF(u.status,''),'active')='active'
+                 AND ss.service_id=$2::uuid
+               ORDER BY u.first_name ASC`,
+              tenantId, svcRow.id
+            );
+            alternatives = altRows
+              .filter(u => u.id !== styRow.id)
+              .map(u => ({ id: u.id, name: `${u.first_name} ${u.last_name || ''}`.trim() }));
+          }
+
+          return res.status(200).json({
+            ok: true,
+            intent: 'validar',
+            service: { id: svcRow.id, name: svcRow.name },
+            stylist: { id: styRow.id, name: `${styRow.first_name} ${styRow.last_name || ''}`.trim() },
+            offers_service: false,
+            is_available: false,
+            reason: 'El estilista no ofrece este servicio.',
+            stylist_services: stylistServices.map(s => ({
+              id: s.id,
+              name: s.name,
+              duration_minutes: Number(s.duration_minutes) || null
+            })),
+            alternative_stylists: alternatives
+          });
+        }
+
+        const { slots, duration, reason } = await getAvailableSlotsForStylist(tenantId, styRow.id, svcRow.id, ai_date, 15);
+
+        // FILTRAR HORARIOS PASADOS
+        const filteredSlots = filterPastSlots(slots, ai_date);
+
+        if (filteredSlots.length === 0) {
+          const isPastDay = slots.length > 0 && filteredSlots.length === 0;
+          return res.status(200).json({
+            ok: true,
+            intent: 'validar',
+            service: { id: svcRow.id, name: svcRow.name },
+            stylist: { id: styRow.id, name: `${styRow.first_name} ${styRow.last_name || ''}`.trim() },
+            offers_service: true,
+            is_available: false,
+            reason: isPastDay
+              ? 'Todos los horarios de hoy ya pasaron. Intenta con mañana u otra fecha.'
+              : (reason || 'No hay disponibilidad'),
+            suggestions: []
+          });
+        }
+
+        const allLocalTimes = filteredSlots.map(toLocalHHmm);
+
+        if (!ai_time) {
+          return res.status(200).json({
+            ok: true,
+            intent: 'validar',
+            service: { id: svcRow.id, name: svcRow.name, duration_minutes: duration },
+            stylist: { id: styRow.id, name: `${styRow.first_name} ${styRow.last_name || ''}`.trim() },
+            offers_service: true,
+            is_available: false,
+            reason: 'No se proporcionó hora, mostrando opciones.',
+            suggestions: allLocalTimes.slice(0, suggestLimit),
+            slots_all: allLocalTimes.slice(0, 48)
+          });
+        }
+
+        const wanted = String(ai_time).slice(0, 5);
+        const isAvailable = allLocalTimes.includes(wanted);
+
+        if (!isAvailable) {
+          const wantedDate = makeLocalUtc(ai_date, wanted);
+          const withDist = filteredSlots.map(d => ({ d, dist: Math.abs(d.getTime() - wantedDate.getTime()) }))
+            .sort((a, b) => a.dist - b.dist);
+
+          const alternos = await findAvailableStylists(tenantId, svcRow.name, ai_date, ai_time);
+          const altStylists = alternos
+            .filter(u => u.id !== styRow.id)
+            .map(u => ({ id: u.id, name: `${u.first_name} ${u.last_name || ''}`.trim() }));
+
+          return res.status(200).json({
+            ok: true,
+            intent: 'validar',
+            service: { id: svcRow.id, name: svcRow.name, duration_minutes: duration },
+            stylist: { id: styRow.id, name: `${styRow.first_name} ${styRow.last_name || ''}`.trim() },
+            offers_service: true,
+            is_available: false,
+            reason: 'No disponible a esa hora.',
+            suggestions: [...new Set(withDist.slice(0, suggestLimit).map(x => toLocalHHmm(x.d)))],
+            alternative_stylists: altStylists
+          });
+        }
+
+        return res.status(200).json({
+          ok: true,
+          intent: 'validar',
+          service: { id: svcRow.id, name: svcRow.name, duration_minutes: duration },
+          stylist: { id: styRow.id, name: `${styRow.first_name} ${styRow.last_name || ''}`.trim() },
+          offers_service: true,
+          is_available: true,
+          requested: { date: ai_date, time: ai_time }
+        });
+      }
+
+      return res.status(400).json({ ok: false, error: 'Intención GET no reconocida.' });
+    }
+
+    if (method === 'POST') {
+      if (!intent) intent = 'agendar';
+      if (intent !== 'agendar') {
+        return res.status(400).json({ ok: false, error: 'Para POST, use ai_intent=agendar.' });
+      }
+      if (!clientId) return res.status(400).json({ ok: false, error: 'Falta clientId para agendar.' });
+      if (!ai_service || !ai_date || !ai_time) {
+        return res.status(400).json({ ok: false, error: 'Faltan campos: service/date/time.' });
+      }
+
+      req.body = {
+        tenantId,
+        clientId,
+        service: ai_service,
+        date: ai_date,
+        time: ai_time,
+        stylist: ai_stylist || undefined,
+        limit: suggestLimit
+      };
+      return exports.scheduleWithFallback(req, res);
+    }
+
+    return res.status(405).json({ ok: false, error: 'Método no permitido.' });
+
+  } catch (err) {
+    console.error('aiOrchestrator', err);
+    return res.status(500).json({ ok: false, error: 'Error interno del servidor' });
+  }
+};
+
+exports.getDigiturnoQueue = async (req, res) => {
+  try {
+    const { tenantId } = req.params;
+
+    if (!tenantId || !UUID_RE.test(tenantId)) {
+      return res.status(400).json({ error: 'tenantId inválido (UUID).' });
+    }
+
+    console.log('[DIGITURNO QUEUE] Consultando cola para tenant:', tenantId);
+
+    // Obtener todos los servicios del tenant
+    const servicesList = await prisma.services.findMany({
+      where: { tenant_id: tenantId },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' }
+    });
+
+    const queue = [];
+
+    // Para cada servicio, obtener la cola ordenada
+    for (const service of servicesList) {
+      const stylistRows = await prisma.$queryRawUnsafe(
+        `SELECT
+          u.id as stylist_id,
+          u.first_name,
+          u.last_name,
+          ss.last_completed_at,
+          ss.total_completed,
+          ROW_NUMBER() OVER (
+            ORDER BY
+              ss.last_completed_at NULLS FIRST,
+              ss.total_completed ASC,
+              u.created_at ASC
+          ) as queue_position
+        FROM users u
+        INNER JOIN stylist_services ss ON u.id = ss.user_id
+        WHERE u.tenant_id = $1::uuid
+          AND u.role_id = 3
+          AND COALESCE(NULLIF(u.status,''),'active') = 'active'
+          AND ss.service_id = $2::uuid
+        ORDER BY
+          ss.last_completed_at NULLS FIRST,
+          ss.total_completed ASC,
+          u.created_at ASC`,
+        tenantId, service.id
+      );
+
+      // Agregar cada estilista con su posición en la cola de este servicio
+      stylistRows.forEach((row) => {
+        queue.push({
+          service_id: service.id,
+          service_name: service.name,
+          stylist_id: row.stylist_id,
+          stylist_name: `${row.first_name} ${row.last_name || ''}`.trim(),
+          order: row.queue_position,
+          last_completed_at: row.last_completed_at,
+          total_completed: row.total_completed || 0
+        });
+      });
+    }
+
+    console.log(`[DIGITURNO QUEUE] Cola generada: ${queue.length} registros`);
+
+    return res.status(200).json({
+      tenant_id: tenantId,
+      timestamp: new Date().toISOString(),
+      queue
+    });
+
+  } catch (error) {
+    console.error('[DIGITURNO QUEUE] Error:', error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+/* =================================================================== */
+/* ==============   POLLING: CITAS RECIENTES   ======================= */
+/* =================================================================== */
+
+/**
+ * Obtiene las citas creadas en los últimos N minutos (para polling)
+ * GET /api/appointments/recent/:tenantId?minutes=5
+ */
+exports.getRecentAppointments = async (req, res) => {
+  try {
+    const { tenantId } = req.params;
+    const minutes = parseInt(req.query.minutes) || 5;
+
+    if (!tenantId) {
+      return res.status(400).json({ error: 'tenantId requerido' });
+    }
+
+    console.log(`[POLLING] Consultando citas recientes para tenant ${tenantId} (últimos ${minutes} min)`);
+
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT
+        a.id,
+        a.client_id,
+        c.first_name || ' ' || COALESCE(c.last_name, '') AS client_name,
+        a.stylist_id,
+        s.first_name || ' ' || COALESCE(s.last_name, '') AS stylist_name,
+        a.service_id,
+        svc.name AS service_name,
+        a.start_time,
+        a.end_time,
+        a.status,
+        a.created_at
+      FROM appointments a
+      LEFT JOIN users c ON a.client_id = c.id
+      LEFT JOIN users s ON a.stylist_id = s.id
+      LEFT JOIN services svc ON a.service_id = svc.id
+      WHERE a.tenant_id = $1::uuid
+        AND a.created_at >= NOW() - INTERVAL '${minutes} minutes'
+      ORDER BY a.created_at DESC
+      LIMIT 10`,
+      tenantId
+    );
+
+    const appointments = rows.map(row => ({
+      id: row.id,
+      clientId: row.client_id,
+      clientName: row.client_name?.trim() || 'Cliente',
+      stylistId: row.stylist_id,
+      stylistName: row.stylist_name?.trim() || 'Estilista',
+      serviceId: row.service_id,
+      serviceName: row.service_name || 'Servicio',
+      startTime: row.start_time,
+      endTime: row.end_time,
+      status: row.status,
+      createdAt: row.created_at,
+      createdVia: 'whatsapp' // Asumimos que las citas polling son de WhatsApp
+    }));
+
+    console.log(`[POLLING] Encontradas ${appointments.length} citas recientes`);
+
+    return res.status(200).json({
+      tenant_id: tenantId,
+      timestamp: new Date().toISOString(),
+      appointments
+    });
+
+  } catch (error) {
+    console.error('[POLLING] Error:', error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
