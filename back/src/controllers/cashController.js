@@ -85,7 +85,8 @@ exports.getCurrentSession = async (req, res) => {
             SELECT
                 (SELECT json_agg(t) FROM incomes t) as incomes_by_payment_method,
                 (SELECT json_agg(t) FROM expenses t) as expenses_by_category,
-                (SELECT COUNT(DISTINCT invoice_id)::int FROM movements WHERE invoice_id IS NOT NULL) as attended_appointments_count
+                (SELECT COUNT(DISTINCT invoice_id)::int FROM movements WHERE invoice_id IS NOT NULL) as attended_appointments_count,
+                COALESCE((SELECT SUM(amount) FROM movements WHERE category = 'propina_salon'), 0) as total_propinas
         `;
 
         const summaryRows = await prisma.$queryRawUnsafe(summaryQuery, sessionId);
@@ -104,7 +105,8 @@ exports.getCurrentSession = async (req, res) => {
             summary: {
                 incomes_by_payment_method: summary.incomes_by_payment_method || [],
                 expenses_by_category: summary.expenses_by_category || [],
-                attended_appointments_count: summary.attended_appointments_count || 0
+                attended_appointments_count: summary.attended_appointments_count || 0,
+                total_propinas: Number(summary.total_propinas || 0)
             }
         });
 
@@ -248,7 +250,7 @@ exports.getCashMovements = async (req, res) => {
         `;
         const queryParams = [tenant_id];
         if (startDate && endDate) {
-            query += ' AND cm.created_at BETWEEN $2 AND $3';
+            query += ' AND cm.created_at BETWEEN $2::timestamptz AND $3::timestamptz';
             queryParams.push(startDate, endDate);
         }
         query += ' ORDER BY cm.created_at DESC';

@@ -7,9 +7,9 @@ const prisma = require('../config/prisma');
 const calculateStylistPayrollBreakdown = async (tenant_id, stylist, start_date, end_date) => {
     const tenantRow = await prisma.tenants.findUnique({
         where: { id: tenant_id },
-        select: { admin_fee_enabled: true, admin_fee_rate: true }
+        select: { admin_fee_enabled: true, admin_fee_rate: true, tip_salon_percent: true }
     });
-    const { admin_fee_enabled, admin_fee_rate } = tenantRow || {};
+    const { admin_fee_enabled, admin_fee_rate, tip_salon_percent } = tenantRow || {};
 
     // 1. Obtener Ingresos (Servicios y Productos)
     const salesRows = await prisma.$queryRawUnsafe(
@@ -22,14 +22,14 @@ const calculateStylistPayrollBreakdown = async (tenant_id, stylist, start_date, 
          LEFT JOIN services s ON ap.service_id = s.id
          LEFT JOIN users u_client ON inv.client_id = u_client.id
          WHERE inv.tenant_id = $1::uuid AND COALESCE(ap.stylist_id, ii.seller_id) = $4::uuid
-           AND inv.created_at >= $2 AND inv.created_at < $3
+           AND inv.created_at >= $2::timestamptz AND inv.created_at < $3::timestamptz
            AND inv.status IN ('paid', 'closed', 'completed')`,
         tenant_id, start_date, end_date, stylist.id
     );
 
     // 2. Obtener Egresos (Anticipos, Cuotas de Préstamos, Compras)
     const expensesRows = await prisma.$queryRawUnsafe(
-        `(SELECT 'advance' as type, amount, description FROM cash_movements WHERE type = 'payroll_advance' AND tenant_id = $1::uuid AND related_entity_id = $2::uuid AND created_at >= $3 AND created_at < $4)
+        `(SELECT 'advance' as type, amount, description FROM cash_movements WHERE type = 'payroll_advance' AND tenant_id = $1::uuid AND related_entity_id = $2::uuid AND created_at >= $3::timestamptz AND created_at < $4::timestamptz)
          UNION ALL
          (SELECT 'loan' as type, sli.total_amount as amount, 'Cuota #' || sli.installment_no || ' Préstamo ' || sl.id::text AS description
           FROM staff_loan_installments sli
@@ -38,7 +38,7 @@ const calculateStylistPayrollBreakdown = async (tenant_id, stylist, start_date, 
             AND sli.status = 'pending' AND sli.due_date <= $4::date
          )
          UNION ALL
-         (SELECT 'purchase' as type, total_amount as amount, 'Compra de Personal ID ' || id::text as description FROM staff_purchases WHERE tenant_id = $1::uuid AND stylist_id = $2::uuid AND status = 'pendiente' AND purchase_date < $4)`,
+         (SELECT 'purchase' as type, total_amount as amount, 'Compra de Personal ID ' || id::text as description FROM staff_purchases WHERE tenant_id = $1::uuid AND stylist_id = $2::uuid AND status = 'pendiente' AND purchase_date < $4::timestamptz)`,
         tenant_id, stylist.id, start_date, end_date
     );
 
@@ -68,8 +68,23 @@ const calculateStylistPayrollBreakdown = async (tenant_id, stylist, start_date, 
     const expenses_total = expensesRows.reduce((sum, e) => sum + Math.abs(Number(e.amount)), 0);
     details.expenses = expensesRows;
 
+    // Propinas del estilista en el periodo
+    const tipsRows = await prisma.$queryRawUnsafe(
+        `SELECT COALESCE(SUM(i.tip_amount), 0) AS total_tips
+         FROM invoices i
+         JOIN invoice_items ii ON ii.invoice_id = i.id
+         WHERE ii.seller_id = $1::uuid
+           AND ii.item_type = 'service'
+           AND i.created_at >= $2::timestamptz AND i.created_at < $3::timestamptz
+           AND i.tip_amount > 0`,
+        stylist.id, start_date, end_date
+    );
+    const totalTips = Number(tipsRows[0]?.total_tips || 0);
+    const tipSalonPct = Number(tip_salon_percent ?? 10);
+    const stylist_tips = Math.round(totalTips * (1 - tipSalonPct / 100));
+
     const base_salary = stylist.payment_type === 'salary' ? Number(stylist.base_salary || 0) : 0;
-    const gross_total = base_salary + service_commissions_total + product_commissions_total;
+    const gross_total = base_salary + service_commissions_total + product_commissions_total + stylist_tips;
     let net_paid = gross_total - expenses_total;
 
     // Regla de Negocio: Aplicar pago mínimo
@@ -82,6 +97,7 @@ const calculateStylistPayrollBreakdown = async (tenant_id, stylist, start_date, 
         stylist_name: `${stylist.first_name} ${stylist.last_name || ''}`.trim(),
         payment_type: stylist.payment_type,
         net_paid,
+        stylist_tips,
         details
     };
 };
@@ -98,9 +114,9 @@ exports.getPayrollDetailedPreview = async (req, res) => {
     try {
         const tenantRow = await prisma.tenants.findUnique({
             where: { id: tenant_id },
-            select: { admin_fee_enabled: true, admin_fee_rate: true }
+            select: { admin_fee_enabled: true, admin_fee_rate: true, tip_salon_percent: true }
         });
-        const { admin_fee_enabled, admin_fee_rate } = tenantRow || {};
+        const { admin_fee_enabled, admin_fee_rate, tip_salon_percent } = tenantRow || {};
 
         const stylistsRows = await prisma.users.findMany({
             where: { tenant_id, role_id: 3, status: 'active' },
@@ -108,18 +124,31 @@ exports.getPayrollDetailedPreview = async (req, res) => {
         });
 
         const servicesRows = await prisma.$queryRawUnsafe(
-            `SELECT ap.stylist_id, u.first_name || ' ' || u.last_name as client_name, s.name as service_name, ii.total_price as service_price FROM invoice_items ii JOIN invoices inv ON ii.invoice_id = inv.id JOIN appointments ap ON ii.related_id = ap.id JOIN services s ON ap.service_id = s.id JOIN users u ON inv.client_id = u.id WHERE ii.item_type = 'service' AND inv.tenant_id = $1::uuid AND inv.created_at >= $2 AND inv.created_at < $3 AND inv.status IN ('paid','closed','completed')`,
+            `SELECT ap.stylist_id, u.first_name || ' ' || u.last_name as client_name, s.name as service_name, ii.total_price as service_price FROM invoice_items ii JOIN invoices inv ON ii.invoice_id = inv.id JOIN appointments ap ON ii.related_id = ap.id JOIN services s ON ap.service_id = s.id JOIN users u ON inv.client_id = u.id WHERE ii.item_type = 'service' AND inv.tenant_id = $1::uuid AND inv.created_at >= $2::timestamptz AND inv.created_at < $3::timestamptz AND inv.status IN ('paid','closed','completed')`,
             tenant_id, start_date, end_date
         );
 
         const productsRows = await prisma.$queryRawUnsafe(
-            `SELECT ii.seller_id as stylist_id, p.name as product_name, ii.commission_value FROM invoice_items ii JOIN invoices inv ON ii.invoice_id = inv.id JOIN products p ON ii.related_id = p.id WHERE ii.item_type = 'product' AND inv.tenant_id = $1::uuid AND inv.created_at >= $2 AND inv.created_at < $3`,
+            `SELECT ii.seller_id as stylist_id, p.name as product_name, ii.commission_value FROM invoice_items ii JOIN invoices inv ON ii.invoice_id = inv.id JOIN products p ON ii.related_id = p.id WHERE ii.item_type = 'product' AND inv.tenant_id = $1::uuid AND inv.created_at >= $2::timestamptz AND inv.created_at < $3::timestamptz`,
+            tenant_id, start_date, end_date
+        );
+
+        // Propinas por estilista en el periodo
+        const tipsRows = await prisma.$queryRawUnsafe(
+            `SELECT ii.seller_id as stylist_id, COALESCE(SUM(i.tip_amount), 0) AS total_tips
+             FROM invoices i
+             JOIN invoice_items ii ON ii.invoice_id = i.id
+             WHERE ii.item_type = 'service'
+               AND i.tenant_id = $1::uuid
+               AND i.created_at >= $2::timestamptz AND i.created_at < $3::timestamptz
+               AND i.tip_amount > 0
+             GROUP BY ii.seller_id`,
             tenant_id, start_date, end_date
         );
 
         // Egresos filtrados por periodo para anticipos, cuotas de préstamos pendientes, compras pendientes
         const expensesRows = await prisma.$queryRawUnsafe(`
-            (SELECT related_entity_id as stylist_id, amount, description FROM cash_movements WHERE type = 'payroll_advance' AND tenant_id = $1::uuid AND status = 'pending' AND created_at >= $2 AND created_at < $3)
+            (SELECT related_entity_id as stylist_id, amount, description FROM cash_movements WHERE type = 'payroll_advance' AND tenant_id = $1::uuid AND status = 'pending' AND created_at >= $2::timestamptz AND created_at < $3::timestamptz)
             UNION ALL
             (SELECT sl.stylist_id, sli.total_amount as amount, 'Cuota #' || sli.installment_no || ' Préstamo ' || sl.id::text AS description
              FROM staff_loan_installments sli
@@ -128,9 +157,11 @@ exports.getPayrollDetailedPreview = async (req, res) => {
                AND sli.status = 'pending' AND sli.due_date <= $3::date
             )
             UNION ALL
-            (SELECT stylist_id, total_amount as amount, 'Compra de Personal ID ' || id::text as description FROM staff_purchases WHERE tenant_id = $1::uuid AND status = 'pendiente' AND purchase_date < $3)`,
+            (SELECT stylist_id, total_amount as amount, 'Compra de Personal ID ' || id::text as description FROM staff_purchases WHERE tenant_id = $1::uuid AND status = 'pendiente' AND purchase_date < $3::timestamptz)`,
             tenant_id, start_date, end_date
         );
+
+        const tipSalonPct = Number(tip_salon_percent ?? 10);
 
         let stylist_breakdowns = stylistsRows.map(stylist => {
             const details = { services: [], products: [], expenses: [] };
@@ -151,25 +182,30 @@ exports.getPayrollDetailedPreview = async (req, res) => {
             const expenses_total = expensesRows.filter(e => e.stylist_id === stylist.id).reduce((sum, e) => sum + Math.abs(Number(e.amount)), 0);
             details.expenses = expensesRows.filter(e => e.stylist_id === stylist.id);
 
+            // Propinas del estilista
+            const stylistTipRow = tipsRows.find(t => t.stylist_id === stylist.id);
+            const totalTips = Number(stylistTipRow?.total_tips || 0);
+            const stylist_tips = Math.round(totalTips * (1 - tipSalonPct / 100));
+
             const base_salary = stylist.payment_type === 'salary' ? Number(stylist.base_salary || 0) : 0;
-            const gross_total = base_salary + service_commissions_total + product_commissions_total;
+            const gross_total = base_salary + service_commissions_total + product_commissions_total + stylist_tips;
             let net_paid = gross_total - expenses_total;
 
             if (net_paid < 8000) { net_paid = 0; }
 
             return {
                 stylist_id: stylist.id, stylist_name: `${stylist.first_name} ${stylist.last_name || ''}`.trim(),
-                net_paid, details, payment_type: stylist.payment_type,
+                net_paid, stylist_tips, details, payment_type: stylist.payment_type,
             };
         }).filter(s => s.net_paid > 0 || s.details.services.length > 0 || s.details.products.length > 0 || s.details.expenses.length > 0 || s.payment_type === 'commission');
 
         // CÁLCULO DE WIDGETS CORREGIDO: Usamos los datos ya procesados
         const paymentTotalsRows = await prisma.$queryRawUnsafe(
-            `SELECT COALESCE(SUM(p.amount) FILTER (WHERE p.payment_method = 'cash'), 0) AS cash, COALESCE(SUM(p.amount) FILTER (WHERE p.payment_method = 'credit_card'), 0) AS "creditCard" FROM payments p JOIN invoices inv ON p.invoice_id = inv.id WHERE p.tenant_id = $1::uuid AND inv.created_at >= $2 AND inv.created_at < $3`,
+            `SELECT COALESCE(SUM(p.amount) FILTER (WHERE p.payment_method = 'cash'), 0) AS cash, COALESCE(SUM(p.amount) FILTER (WHERE p.payment_method = 'credit_card'), 0) AS "creditCard" FROM payments p JOIN invoices inv ON p.invoice_id = inv.id WHERE p.tenant_id = $1::uuid AND inv.created_at >= $2::timestamptz AND inv.created_at < $3::timestamptz`,
             tenant_id, start_date, end_date
         );
         const inventorySoldRows = await prisma.$queryRawUnsafe(
-            `SELECT COALESCE(SUM(ii.total_price), 0) as sum FROM invoice_items ii JOIN invoices i ON ii.invoice_id = i.id WHERE ii.item_type = 'product' AND i.tenant_id = $1::uuid AND i.created_at >= $2 AND i.created_at < $3`,
+            `SELECT COALESCE(SUM(ii.total_price), 0) as sum FROM invoice_items ii JOIN invoices i ON ii.invoice_id = i.id WHERE ii.item_type = 'product' AND i.tenant_id = $1::uuid AND i.created_at >= $2::timestamptz AND i.created_at < $3::timestamptz`,
             tenant_id, start_date, end_date
         );
 
@@ -246,7 +282,7 @@ exports.createPayroll = async (req, res) => {
                 await tx.$queryRawUnsafe(
                     `UPDATE cash_movements SET status = 'deducted'
                      WHERE type = 'payroll_advance' AND tenant_id = $1::uuid AND related_entity_id = $2::uuid
-                       AND status = 'pending' AND created_at >= $3 AND created_at < $4`,
+                       AND status = 'pending' AND created_at >= $3::timestamptz AND created_at < $4::timestamptz`,
                     tenant_id, stylist_id, start_date, end_date
                 );
             }
@@ -256,7 +292,7 @@ exports.createPayroll = async (req, res) => {
             if (purchaseExpenses.length > 0) {
                 await tx.$queryRawUnsafe(
                     `UPDATE staff_purchases SET status = 'deducido'
-                     WHERE tenant_id = $1::uuid AND stylist_id = $2::uuid AND status = 'pendiente' AND purchase_date < $3`,
+                     WHERE tenant_id = $1::uuid AND stylist_id = $2::uuid AND status = 'pendiente' AND purchase_date < $3::timestamptz`,
                     tenant_id, stylist_id, end_date
                 );
             }

@@ -200,7 +200,7 @@ async function getUpcomingAppointmentsForClient(tenantId, clientId) {
              JOIN users u ON a.stylist_id = u.id
              WHERE a.tenant_id = $1::uuid AND a.client_id = $2::uuid
                AND a.status IN ('scheduled', 'pending_approval', 'rescheduled')
-               AND a.start_time >= $3
+               AND a.start_time >= $3::timestamptz
              ORDER BY a.start_time ASC
              LIMIT 10`,
             tenantId, clientId, now
@@ -441,10 +441,58 @@ exports.handleWahaWebhook = async (req, res) => {
                         await wahaService.sendMessage(tenantId, chatId, '🔓 Sesión de administrador cerrada. Volviste al modo cliente.');
                         return res.status(200).send('OK');
                     }
-                    // Procesar con IA admin
+
+                    // Comando para cambiar de salón
+                    if (/^(cambiar\s*sal[oó]n|cambiar\s*peluquer[ií]a|otro\s*local|switch\s*salon)$/i.test(msgTrimmed)) {
+                        try {
+                            const currentAdminTenantId = adminSession.tenantId || tenantId;
+                            const userTenantRows = await prisma.$queryRawUnsafe(
+                                `SELECT id, name, parent_tenant_id FROM tenants WHERE id = $1::uuid`,
+                                currentAdminTenantId
+                            );
+
+                            let relatedTenants = [];
+                            if (userTenantRows.length > 0) {
+                                const ut = userTenantRows[0];
+                                const parentId = ut.parent_tenant_id || ut.id;
+                                relatedTenants = await prisma.$queryRawUnsafe(
+                                    `SELECT id, name FROM tenants
+                                     WHERE id = $1::uuid OR parent_tenant_id = $1::uuid
+                                     ORDER BY name`,
+                                    parentId
+                                );
+                            }
+
+                            if (relatedTenants.length <= 1) {
+                                await wahaService.sendMessage(tenantId, chatId, 'Solo tienes un local registrado.');
+                                return res.status(200).send('OK');
+                            }
+
+                            const tenantList = relatedTenants.map((t, i) => `${i + 1}. ${t.name}`).join('\n');
+                            adminSessionCache.delete(adminCacheKey);
+                            adminAuthStateCache.set(adminCacheKey, {
+                                step: 'select_tenant',
+                                userId: adminSession.userId,
+                                role_id: adminSession.role_id,
+                                email: adminSession.email,
+                                name: adminSession.name,
+                                tenants: relatedTenants,
+                                createdAt: Date.now()
+                            });
+
+                            await wahaService.sendMessage(tenantId, chatId, `¿Cuál local quieres administrar?\n\n${tenantList}\n\nEnvía el número.`);
+                        } catch (switchErr) {
+                            console.error('❌ Error cambiando salón:', switchErr.message);
+                            await wahaService.sendMessage(tenantId, chatId, 'Error al buscar locales. Intenta de nuevo.');
+                        }
+                        return res.status(200).send('OK');
+                    }
+
+                    // Procesar con IA admin (usar tenantId del adminSession si existe)
                     adminSession.lastActivity = Date.now();
+                    const effectiveTenantId = adminSession.tenantId || tenantId;
                     try {
-                        const adminResponse = await processWithAdminAI(tenantId, adminSession, msgTrimmed);
+                        const adminResponse = await processWithAdminAI(effectiveTenantId, adminSession, msgTrimmed, isVoiceMessage);
 
                         // Si el admin envió audio, responder con TTS
                         if (isVoiceMessage) {
@@ -501,14 +549,41 @@ exports.handleWahaWebhook = async (req, res) => {
                         return res.status(200).send('OK');
                     }
 
+                    if (authState.step === 'select_tenant') {
+                        const selection = parseInt(msgTrimmed, 10);
+                        if (isNaN(selection) || selection < 1 || selection > authState.tenants.length) {
+                            await wahaService.sendMessage(tenantId, chatId, `Envía un número del 1 al ${authState.tenants.length} para seleccionar el local.`);
+                            return res.status(200).send('OK');
+                        }
+                        const selectedTenant = authState.tenants[selection - 1];
+                        adminAuthStateCache.delete(adminCacheKey);
+
+                        adminSessionCache.set(adminCacheKey, {
+                            userId: authState.userId,
+                            role_id: authState.role_id,
+                            email: authState.email,
+                            name: authState.name,
+                            tenantId: selectedTenant.id,
+                            tenantName: selectedTenant.name,
+                            lastActivity: Date.now(),
+                            conversationHistory: []
+                        });
+
+                        console.log(`🔐 [ADMIN WA] Sesión admin iniciada: ${authState.name} (${authState.email}) en tenant ${selectedTenant.id} (${selectedTenant.name})`);
+                        await wahaService.sendMessage(tenantId, chatId,
+                            `✅ Administrando *${selectedTenant.name}*\n\nPuedes preguntarme sobre citas, ventas, estilistas, servicios, productos, promociones y configuración.\n\nEscribe *"salir"* para cerrar sesión.\nEscribe *"cambiar salón"* para administrar otro local.\n⏱️ La sesión expira tras 30 min de inactividad.`
+                        );
+                        return res.status(200).send('OK');
+                    }
+
                     if (authState.step === 'password') {
                         try {
-                            // Buscar usuario por email + tenant_id con role admin o recepcionista
+                            // Buscar usuario por email GLOBALMENTE (sin filtrar por tenant) con role admin
                             const userRows = await prisma.$queryRawUnsafe(
-                                `SELECT id, email, password_hash, role_id, first_name, last_name
+                                `SELECT id, email, password_hash, role_id, first_name, last_name, tenant_id
                                  FROM users
-                                 WHERE tenant_id = $1::uuid AND LOWER(email) = $2 AND role_id IN (1, 2)`,
-                                tenantId, authState.email
+                                 WHERE LOWER(email) = $1 AND role_id IN (1, 2)`,
+                                authState.email
                             );
 
                             if (userRows.length === 0) {
@@ -543,20 +618,81 @@ exports.handleWahaWebhook = async (req, res) => {
                                 return res.status(200).send('OK');
                             }
 
-                            // Autenticación exitosa
-                            adminAuthStateCache.delete(adminCacheKey);
+                            // Autenticación exitosa - buscar tenants relacionados
                             const adminName = `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Admin';
+                            const userTenantId = user.tenant_id;
+
+                            // Buscar tenants relacionados (hijos, padre, hermanos)
+                            let relatedTenants = [];
+                            try {
+                                const userTenantRows = await prisma.$queryRawUnsafe(
+                                    `SELECT id, name, parent_tenant_id FROM tenants WHERE id = $1::uuid`,
+                                    userTenantId
+                                );
+
+                                if (userTenantRows.length > 0) {
+                                    const userTenant = userTenantRows[0];
+
+                                    if (userTenant.parent_tenant_id) {
+                                        // User está en un tenant hijo → obtener padre + hermanos
+                                        relatedTenants = await prisma.$queryRawUnsafe(
+                                            `SELECT id, name FROM tenants
+                                             WHERE id = $1::uuid OR parent_tenant_id = $1::uuid
+                                             ORDER BY name`,
+                                            userTenant.parent_tenant_id
+                                        );
+                                    } else {
+                                        // User está en tenant padre → obtener self + hijos
+                                        relatedTenants = await prisma.$queryRawUnsafe(
+                                            `SELECT id, name FROM tenants
+                                             WHERE id = $1::uuid OR parent_tenant_id = $1::uuid
+                                             ORDER BY name`,
+                                            userTenantId
+                                        );
+                                    }
+                                }
+                            } catch (tenantErr) {
+                                console.warn('⚠️ Error buscando tenants relacionados:', tenantErr.message);
+                            }
+
+                            // Si hay múltiples tenants, preguntar cuál administrar
+                            if (relatedTenants.length > 1) {
+                                const tenantList = relatedTenants.map((t, i) => `${i + 1}. ${t.name}`).join('\n');
+
+                                adminAuthStateCache.set(adminCacheKey, {
+                                    step: 'select_tenant',
+                                    userId: user.id,
+                                    role_id: user.role_id,
+                                    email: user.email,
+                                    name: adminName,
+                                    tenants: relatedTenants,
+                                    createdAt: Date.now()
+                                });
+
+                                await wahaService.sendMessage(tenantId, chatId,
+                                    `✅ ¡Hola, ${adminName}! Tienes acceso a ${relatedTenants.length} locales:\n\n${tenantList}\n\n¿Cuál quieres administrar? Envía el número.`
+                                );
+                                return res.status(200).send('OK');
+                            }
+
+                            // Un solo tenant → crear sesión directamente
+                            adminAuthStateCache.delete(adminCacheKey);
+                            const selectedTenantId = relatedTenants.length === 1 ? relatedTenants[0].id : userTenantId;
+                            const selectedTenantName = relatedTenants.length === 1 ? relatedTenants[0].name : null;
+
                             adminSessionCache.set(adminCacheKey, {
                                 userId: user.id,
                                 role_id: user.role_id,
                                 email: user.email,
                                 name: adminName,
+                                tenantId: selectedTenantId,
+                                tenantName: selectedTenantName,
                                 lastActivity: Date.now(),
                                 conversationHistory: []
                             });
-                            console.log(`🔐 [ADMIN WA] Sesión admin iniciada: ${adminName} (${user.email}) en tenant ${tenantId}`);
+                            console.log(`🔐 [ADMIN WA] Sesión admin iniciada: ${adminName} (${user.email}) en tenant ${selectedTenantId}`);
                             await wahaService.sendMessage(tenantId, chatId,
-                                `✅ ¡Bienvenido/a, ${adminName}! 🔐\n\nEstás en *modo administrador*. Puedes preguntarme sobre:\n• Citas de hoy o cualquier fecha\n• Fichero digital / estilistas en el salón\n• Servicios, productos, promociones\n• Ventas y rendimiento\n• Crear citas, servicios, productos, estilistas o promociones\n\nEscribe *"salir"* para cerrar sesión.\n⏱️ La sesión expira tras 30 min de inactividad.`
+                                `✅ ¡Bienvenido/a, ${adminName}! 🔐\n\nEstás en *modo administrador*${selectedTenantName ? ` de *${selectedTenantName}*` : ''}. Puedes preguntarme sobre:\n• Citas de hoy o cualquier fecha\n• Fichero digital / estilistas en el salón\n• Servicios, productos, promociones\n• Ventas y rendimiento\n• Crear citas, servicios, productos, estilistas o promociones\n• Configurar horarios y datos del salón\n\nEscribe *"salir"* para cerrar sesión.\nEscribe *"cambiar salón"* para administrar otro local.\n⏱️ La sesión expira tras 30 min de inactividad.`
                             );
                             return res.status(200).send('OK');
 
@@ -1629,12 +1765,27 @@ REGLA DE ORO:
 /* ==============   PROCESAR CON IA ADMIN (WHATSAPP)   =============== */
 /* =================================================================== */
 
-async function processWithAdminAI(tenantId, adminSession, userMessage) {
+async function processWithAdminAI(tenantId, adminSession, userMessage, isVoiceMessage = false) {
     const apiKey = await getGlobalOpenAIKey();
     if (!apiKey) throw new Error('No hay API key de OpenAI configurada.');
 
     const now = formatInTimeZone(new Date(), TIME_ZONE, 'yyyy-MM-dd hh:mm a');
-    const systemPrompt = `${ADMIN_SYSTEM_PROMPT}\n\nFecha/hora actual: ${now}\nAdmin: ${adminSession.name} (${adminSession.email})`;
+    let systemPrompt = `${ADMIN_SYSTEM_PROMPT}\n\nFecha/hora actual: ${now}\nAdmin: ${adminSession.name} (${adminSession.email})`;
+
+    if (adminSession.tenantName) {
+        systemPrompt += `\nSalón actual: ${adminSession.tenantName}`;
+    }
+
+    if (isVoiceMessage) {
+        systemPrompt += `\n\n⚠️ RESPUESTA POR VOZ: El admin envió una nota de voz, tu respuesta será convertida a audio (TTS). MUY IMPORTANTE:
+- Formatea números de forma HABLADA: en vez de "$300.000" di "trescientos mil pesos" o "300 mil pesos"
+- En vez de "$1.500.000" di "un millón quinientos mil" o "millón y medio"
+- Sé conversacional y natural, como si hablaras por teléfono
+- NO uses emojis, asteriscos, viñetas ni formato markdown
+- Usa frases como "llevas", "tienes", "van" en vez de listar datos fríamente
+- Para ventas di algo como: "hoy llevas 300 mil pesos en total, 100 mil en efectivo, 150 mil en tarjeta y 50 mil en transferencias"
+- Para productos: "el más vendido es tal con 20 unidades"`;
+    }
 
     // Usar historial separado de la sesión admin
     const history = adminSession.conversationHistory || [];

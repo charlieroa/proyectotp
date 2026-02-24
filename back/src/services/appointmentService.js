@@ -186,6 +186,7 @@ async function findAvailableStylists(tenantId, serviceName, dateStr, timeStr) {
 
     // 4. CONSULTA PRINCIPAL CON SISTEMA DE COLA JUSTA POR SERVICIO
     // Traemos a todos ordenados por su turno "logico" (quien lleva mas tiempo sin trabajar va primero)
+    // MULTI-SEDE: Incluye estilistas locales + estilistas compartidos de otras sedes
     console.log('🔍 [DIGITURNO] Consultando cola del servicio...');
 
     const allPotentialStylists = await prisma.$queryRawUnsafe(
@@ -199,7 +200,11 @@ async function findAvailableStylists(tenantId, serviceName, dateStr, timeStr) {
           ss.total_completed
         FROM users u
         INNER JOIN stylist_services ss ON u.id = ss.user_id
-        WHERE u.tenant_id = $1::uuid
+        WHERE (u.tenant_id = $1::uuid
+               OR u.id IN (
+                 SELECT sba.stylist_id FROM stylist_branch_assignments sba
+                 WHERE sba.branch_tenant_id = $1::uuid
+               ))
           AND u.role_id = 3
           AND COALESCE(NULLIF(u.status,''),'active') = 'active'
           AND ss.service_id = $2::uuid
@@ -339,10 +344,23 @@ async function getAvailableSlotsForStylist(tenantId, stylistId, serviceId, date,
   const tenantRanges = getDayRangesFromWorkingHours(tenantWH, date);
   if (!tenantRanges.length) return { slots: [], reason: 'El salón está cerrado ese día' };
 
-  const styRes = await prisma.users.findFirst({
+  // MULTI-SEDE: Buscar estilista local O compartido
+  let styRes = await prisma.users.findFirst({
     where: { id: stylistId, tenant_id: tenantId, role_id: 3 },
     select: { working_hours: true },
   });
+  if (!styRes) {
+    // Verificar si es un estilista compartido asignado a este tenant
+    const sharedAssignment = await prisma.stylist_branch_assignments.findFirst({
+      where: { stylist_id: stylistId, branch_tenant_id: tenantId },
+    });
+    if (sharedAssignment) {
+      styRes = await prisma.users.findFirst({
+        where: { id: stylistId, role_id: 3 },
+        select: { working_hours: true },
+      });
+    }
+  }
   if (!styRes) return { slots: [], reason: 'Estilista no encontrado' };
 
   const stylistWH = styRes.working_hours ?? null;

@@ -988,8 +988,8 @@ exports.getAppointmentsByTenant = async (req, res) => {
       JOIN users client  ON a.client_id  = client.id
       JOIN users stylist ON a.stylist_id = stylist.id
       WHERE a.tenant_id = $1::uuid
-        AND a.start_time >= $2
-        AND a.start_time <= $3
+        AND a.start_time >= $2::timestamptz
+        AND a.start_time <= $3::timestamptz
       ORDER BY a.start_time`,
       tenantId, startDate, endDate
     );
@@ -2510,6 +2510,123 @@ exports.getRecentAppointments = async (req, res) => {
 
   } catch (error) {
     console.error('[POLLING] Error:', error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+// =====================================================================
+// SUPER CALENDARIO: Vista consolidada de todas las sedes
+// GET /api/appointments/super-calendar?start=DATE&end=DATE
+// =====================================================================
+exports.getSuperCalendar = async (req, res) => {
+  const { tenant_id } = req.user;
+  const { start, end } = req.query;
+
+  if (!start || !end) {
+    return res.status(400).json({ error: 'Se requieren parámetros start y end.' });
+  }
+
+  try {
+    // 1. Obtener el grupo de sedes (misma lógica que getMyBusinesses)
+    const currentTenant = await prisma.tenants.findUnique({
+      where: { id: tenant_id },
+      select: { id: true, parent_tenant_id: true },
+    });
+    if (!currentTenant) return res.status(404).json({ error: 'Tenant no encontrado.' });
+
+    let parentId;
+    if (currentTenant.parent_tenant_id) {
+      parentId = currentTenant.parent_tenant_id;
+    } else {
+      const hasChildren = await prisma.tenants.count({ where: { parent_tenant_id: currentTenant.id } });
+      parentId = hasChildren > 0 ? currentTenant.id : null;
+    }
+
+    // Si no tiene sedes, solo retornar citas del tenant actual
+    let tenantIds;
+    if (parentId) {
+      const allTenants = await prisma.tenants.findMany({
+        where: { OR: [{ id: parentId }, { parent_tenant_id: parentId }] },
+        select: { id: true, name: true, branch_color: true },
+      });
+      tenantIds = allTenants.map(t => t.id);
+    } else {
+      tenantIds = [tenant_id];
+    }
+
+    // Helper: build IN clause with numbered placeholders starting at offset
+    const inClause = (ids, offset) => ids.map((_, i) => `$${offset + i}::uuid`).join(', ');
+
+    // 2. Query consolidada de citas
+    const n = tenantIds.length;
+    const appointments = await prisma.$queryRawUnsafe(
+      `SELECT a.id, a.start_time, a.end_time, a.status, a.tenant_id,
+              s.name AS service_name, s.price,
+              CONCAT(st.first_name, ' ', COALESCE(st.last_name, '')) AS stylist_name,
+              CONCAT(cl.first_name, ' ', COALESCE(cl.last_name, '')) AS client_name,
+              t.name AS branch_name, t.branch_color
+       FROM appointments a
+       JOIN services s ON a.service_id = s.id
+       JOIN users st ON a.stylist_id = st.id
+       LEFT JOIN users cl ON a.client_id = cl.id
+       JOIN tenants t ON a.tenant_id = t.id
+       WHERE a.tenant_id IN (${inClause(tenantIds, 1)})
+         AND a.start_time >= $${n + 1}::timestamptz AND a.start_time <= $${n + 2}::timestamptz
+         AND a.status != 'cancelled'
+       ORDER BY a.start_time`,
+      ...tenantIds, start, end
+    );
+
+    // 3. Widgets de resumen
+    const salesByBranch = await prisma.$queryRawUnsafe(
+      `SELECT i.tenant_id, t.name AS branch_name, t.branch_color,
+              COALESCE(SUM(i.total_amount), 0) AS total_sales,
+              COUNT(i.id)::int AS invoice_count
+       FROM invoices i
+       JOIN tenants t ON i.tenant_id = t.id
+       WHERE i.tenant_id IN (${inClause(tenantIds, 1)})
+         AND i.created_at >= $${n + 1}::timestamptz AND i.created_at <= $${n + 2}::timestamptz
+         AND i.status IN ('paid', 'closed', 'completed')
+       GROUP BY i.tenant_id, t.name, t.branch_color`,
+      ...tenantIds, start, end
+    );
+
+    const activeStylistsByBranch = await prisma.$queryRawUnsafe(
+      `SELECT u.tenant_id, t.name AS branch_name,
+              COUNT(u.id)::int AS active_count
+       FROM users u
+       JOIN tenants t ON u.tenant_id = t.id
+       WHERE u.tenant_id IN (${inClause(tenantIds, 1)})
+         AND u.role_id = 3
+         AND u.status = 'active'
+         AND u.is_inside_geofence = true
+       GROUP BY u.tenant_id, t.name`,
+      ...tenantIds
+    );
+
+    const lowStockProducts = await prisma.$queryRawUnsafe(
+      `SELECT p.id, p.name, p.stock, t.name AS branch_name
+       FROM products p
+       JOIN tenants t ON p.tenant_id = t.id
+       WHERE p.tenant_id IN (${inClause(tenantIds, 1)})
+         AND p.stock <= 5
+         AND p.is_active = true
+       ORDER BY p.stock ASC
+       LIMIT 20`,
+      ...tenantIds
+    );
+
+    return res.status(200).json({
+      appointments,
+      widgets: {
+        sales_by_branch: salesByBranch,
+        active_stylists_by_branch: activeStylistsByBranch,
+        low_stock_products: lowStockProducts,
+      },
+    });
+
+  } catch (error) {
+    console.error('Error en super calendario:', error);
     return res.status(500).json({ error: 'Error interno del servidor' });
   }
 };

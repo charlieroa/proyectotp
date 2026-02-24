@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="es" class="scroll-smooth dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tupelukeria | El Primer Asistente IA para Salones</title>
+    <link rel="icon" href="/favicon.ico" />
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+    <!-- AOS Animations CSS -->
+    <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
+
+    <!-- Tailwind Config -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+                        inter: ['"Inter"', 'sans-serif'],
+                    },
+                    colors: {
+                        ai: {
+                            50: '#f5f3ff',
+                            100: '#ede9fe',
+                            400: '#a78bfa',
+                            500: '#8b5cf6',
+                            600: '#7c3aed',
+                            700: '#6d28d9',
+                            cyan: '#06b6d4',
+                            cyanLight: '#22d3ee',
+                            fuchsia: '#d946ef',
+                            fuchsiaLight: '#e879f9',
+                        },
+                        dark: {
+                            800: '#111827',
+                            900: '#0b0f19',
+                            950: '#030712',
+                        }
+                    },
+                    animation: {
+                        'blob': 'blob 10s infinite',
+                        'float': 'float 6s ease-in-out infinite',
+                        'shimmer': 'shimmer 2.5s linear infinite',
+                        'pulse-fast': 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'radar-spin': 'radar 4s linear infinite',
+                        'typing': 'typing 1.4s infinite ease-in-out both',
+                        'infinite-scroll': 'infinite-scroll 40s linear infinite',
+                    },
+                    keyframes: {
+                        blob: {
+                            '0%': { transform: 'translate(0px, 0px) scale(1)' },
+                            '33%': { transform: 'translate(30px, -50px) scale(1.1)' },
+                            '66%': { transform: 'translate(-20px, 20px) scale(0.9)' },
+                            '100%': { transform: 'translate(0px, 0px) scale(1)' },
+                        },
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0)' },
+                            '50%': { transform: 'translateY(-15px)' },
+                        },
+                        shimmer: {
+                            from: { backgroundPosition: '200% 0' },
+                            to: { backgroundPosition: '-200% 0' }
+                        },
+                        radar: {
+                            '0%': { transform: 'rotate(0deg)' },
+                            '100%': { transform: 'rotate(360deg)' },
+                        },
+                        typing: {
+                            '0%, 80%, 100%': { transform: 'scale(0)' },
+                            '40%': { transform: 'scale(1)' }
+                        },
+                        'infinite-scroll': {
+                            from: { transform: 'translateX(0)' },
+                            to: { transform: 'translateX(-50%)' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Modern Tech Grid Background */
+        .bg-grid-pattern {
+            background-size: 50px 50px;
+            background-image:
+                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+            mask-image: radial-gradient(circle at center, black, transparent 80%);
+            -webkit-mask-image: radial-gradient(circle at center, black, transparent 80%);
+        }
+
+        /* Glassmorphism */
+        .glass-nav {
+            background: rgba(3, 7, 18, 0.65);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .glass-card {
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.5) 0%, rgba(15, 23, 42, 0.3) 100%);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .glass-card:hover {
+            border-color: rgba(139, 92, 246, 0.3);
+            box-shadow: 0 12px 40px 0 rgba(139, 92, 246, 0.15);
+            transform: translateY(-4px);
+        }
+
+        /* Text Gradients */
+        .text-gradient-ai {
+            background: linear-gradient(to right, #a78bfa, #22d3ee, #e879f9);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-size: 200% auto;
+            animation: shimmer 5s linear infinite;
+        }
+
+        .text-gradient-pro {
+            background: linear-gradient(135deg, #22d3ee, #e879f9);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        /* Hide Scrollbar */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* Static gradient button (no shimmer movement) */
+        .btn-primary {
+            background: linear-gradient(135deg, #7c3aed, #8b5cf6, #06b6d4);
+        }
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #6d28d9, #7c3aed, #22d3ee);
+        }
+
+        /* Chat UI specifics */
+        .chat-bubble-owner {
+            border-radius: 18px 18px 4px 18px;
+            background: linear-gradient(135deg, #6d28d9, #8b5cf6);
+            box-shadow: 0 4px 15px rgba(109, 40, 217, 0.3);
+        }
+        .chat-bubble-bot {
+            border-radius: 18px 18px 18px 4px;
+            background: rgba(30, 41, 59, 0.8);
+            border: 1px solid rgba(255,255,255,0.05);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .typing-dot {
+            animation: typing 1.4s infinite ease-in-out both;
+        }
+        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+
+        /* Custom Audio Waveform */
+        .wave-bar {
+            width: 3px;
+            border-radius: 2px;
+            background-color: rgba(255,255,255,0.9);
+            animation: pulse-wave 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse-wave {
+            0%, 100% { transform: scaleY(0.4); opacity: 0.5; }
+            50% { transform: scaleY(1); opacity: 1; }
+        }
+
+        /* Utilities */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Mask for carousel */
+        .mask-carousel {
+            mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+            -webkit-mask-image: linear-gradient(to right, transparent, black 10%, black 90%, transparent);
+        }
+    </style>
+</head>
+<body class="bg-dark-950 text-slate-300 font-sans antialiased selection:bg-ai-500 selection:text-white overflow-x-hidden relative">
+
+    <!-- Global Background Elements -->
+    <div class="fixed inset-0 pointer-events-none z-0 bg-grid-pattern opacity-40"></div>
+    <div class="fixed top-[-10%] left-[-10%] w-[40%] h-[40%] bg-ai-600/20 rounded-full mix-blend-screen filter blur-[150px] animate-blob z-0 pointer-events-none"></div>
+    <div class="fixed bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-ai-cyan/10 rounded-full mix-blend-screen filter blur-[150px] animate-blob z-0 pointer-events-none" style="animation-delay: 2s;"></div>
+
+    <!-- Navegacion -->
+    <header class="fixed w-full top-0 z-50 glass-nav transition-all duration-300" id="navbar">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-20">
+                <!-- Logo -->
+                <div class="flex-shrink-0 flex items-center gap-3 cursor-pointer group" onclick="window.scrollTo({top:0,behavior:'smooth'})">
+                    <img src="/logo-light.png" alt="Tupelukeria" class="h-10 relative z-10 drop-shadow-[0_0_10px_rgba(139,92,246,0.4)] group-hover:drop-shadow-[0_0_15px_rgba(34,211,238,0.5)] transition-all">
+                </div>
+
+                <!-- Desktop Menu -->
+                <nav class="hidden lg:flex space-x-8 items-center">
+                    <a href="#ecosistema" class="text-sm font-semibold text-slate-400 hover:text-white transition-colors">Ecosistema</a>
+                    <a href="#soluciones" class="text-sm font-semibold text-slate-400 hover:text-white transition-colors">Modulos Inteligentes</a>
+                    <a href="#precios" class="text-sm font-semibold text-slate-400 hover:text-white transition-colors">Planes</a>
+                </nav>
+
+                <!-- CTA Buttons -->
+                <div class="hidden lg:flex items-center space-x-6">
+                    <a href="https://app.tupelukeria.com/login" class="text-sm font-semibold text-slate-300 hover:text-white transition-colors flex items-center gap-2">
+                        <i class="fa-regular fa-user"></i> Acceso
+                    </a>
+                    <a href="https://app.tupelukeria.com/register-tenant" class="px-6 py-2.5 text-sm font-bold rounded-full text-white btn-primary shadow-[0_0_20px_rgba(139,92,246,0.3)] hover:shadow-[0_0_30px_rgba(34,211,238,0.4)] transition-all hover:-translate-y-0.5">
+                        Iniciar Sistema <i class="fa-solid fa-arrow-right text-xs ml-1"></i>
+                    </a>
+                </div>
+
+                <!-- Mobile Menu Button -->
+                <div class="lg:hidden flex items-center">
+                    <button id="mobile-menu-btn" class="text-slate-300 hover:text-white focus:outline-none p-2 transition-transform active:scale-95">
+                        <i class="fa-solid fa-bars-staggered text-2xl"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Menu Movil -->
+        <div id="mobile-menu" class="hidden lg:hidden bg-dark-950/95 backdrop-blur-2xl border-t border-slate-800/50 absolute w-full shadow-2xl transition-all origin-top">
+            <div class="px-4 pt-4 pb-8 space-y-2">
+                <a href="#ecosistema" class="mobile-link block px-4 py-3 rounded-xl text-base font-semibold text-slate-300 hover:text-white hover:bg-dark-800/50">Ecosistema</a>
+                <a href="#soluciones" class="mobile-link block px-4 py-3 rounded-xl text-base font-semibold text-slate-300 hover:text-white hover:bg-dark-800/50">Modulos Inteligentes</a>
+                <a href="#precios" class="mobile-link block px-4 py-3 rounded-xl text-base font-semibold text-slate-300 hover:text-white hover:bg-dark-800/50">Planes</a>
+                <div class="pt-6 flex flex-col gap-3 px-4">
+                    <a href="https://app.tupelukeria.com/login" class="block w-full text-center px-4 py-3 border border-slate-700 rounded-full text-white font-bold hover:bg-dark-800">Acceso Usuarios</a>
+                    <a href="https://app.tupelukeria.com/register-tenant" class="block w-full text-center px-4 py-3 rounded-full btn-primary text-white font-bold shadow-lg shadow-ai-500/20">Iniciar Sistema</a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Hero -->
+    <section class="relative pt-32 pb-16 lg:pt-48 lg:pb-24 overflow-hidden flex items-center z-10">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full">
+            <div class="flex flex-col lg:flex-row items-center gap-16">
+
+                <!-- Text Content -->
+                <div class="lg:w-1/2 text-center lg:text-left" data-aos="fade-right" data-aos-duration="1000">
+                    <div class="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-dark-800/80 border border-slate-700/50 text-slate-300 text-xs sm:text-sm font-semibold mb-8 shadow-lg backdrop-blur-md">
+                        <span class="relative flex h-2.5 w-2.5">
+                          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-ai-cyanLight opacity-75"></span>
+                          <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-ai-cyanLight"></span>
+                        </span>
+                        Tupelukeria es completop. <span class="text-white">Operado 100% por voz.</span>
+                    </div>
+
+                    <h1 class="text-5xl md:text-6xl lg:text-7xl font-black text-white leading-[1.1] mb-6 tracking-tighter">
+                        Habla con tu negocio.<br />
+                        <span class="text-gradient-ai">Nosotros lo administramos.</span>
+                    </h1>
+
+                    <p class="text-lg md:text-xl text-slate-400 mb-10 max-w-2xl mx-auto lg:mx-0 font-inter font-light leading-relaxed">
+                        Un ecosistema de IA integrado en WhatsApp. Envia notas de voz para agendar, retener clientes o pedir metricas. <strong class="text-white font-medium">Geolocalizacion, digiturno justo e inventario autonomo.</strong> El software que piensa por ti.
+                    </p>
+
+                    <div class="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
+                        <a href="https://app.tupelukeria.com/register-tenant" class="px-8 py-4 rounded-full btn-primary text-white font-bold text-lg transition-all shadow-[0_0_20px_rgba(139,92,246,0.3)] hover:shadow-[0_0_35px_rgba(34,211,238,0.4)] hover:-translate-y-1 flex items-center justify-center gap-3">
+                            Desplegar IA en mi Salon <i class="fa-solid fa-microphone-lines"></i>
+                        </a>
+                        <a href="#ecosistema" class="px-8 py-4 rounded-full bg-dark-800 border border-slate-700 text-white font-bold text-lg hover:bg-dark-700 transition-all flex items-center justify-center gap-2">
+                            Ver Modulos
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Mockup WhatsApp -->
+                <div class="lg:w-1/2 w-full max-w-md mx-auto relative" data-aos="fade-left" data-aos-duration="1200" data-aos-delay="200">
+                    <div class="absolute inset-0 bg-gradient-to-tr from-ai-600 to-ai-cyanLight rounded-[2.5rem] blur-2xl opacity-30 animate-pulse"></div>
+
+                    <div class="relative rounded-[2.5rem] bg-dark-950 border-[6px] border-dark-800 shadow-2xl overflow-hidden h-[580px] flex flex-col">
+
+                        <!-- Header App -->
+                        <div class="bg-dark-900/90 backdrop-blur-md px-5 py-4 border-b border-slate-800 flex items-center gap-4 z-20">
+                            <button class="text-ai-cyanLight hover:text-white transition-colors"><i class="fa-solid fa-chevron-left"></i></button>
+                            <div class="relative">
+                                <div class="w-10 h-10 rounded-full bg-gradient-to-br from-ai-500 to-ai-cyanLight flex items-center justify-center text-white shadow-lg">
+                                    <i class="fa-solid fa-robot"></i>
+                                </div>
+                                <span class="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-dark-900 rounded-full"></span>
+                            </div>
+                            <div class="flex-1">
+                                <h3 class="text-white font-bold text-sm leading-tight">Agente | Tupelukeria.com</h3>
+                                <p class="text-[11px] text-ai-cyanLight font-medium">En linea</p>
+                            </div>
+                            <div class="flex gap-4 text-slate-400">
+                                <i class="fa-solid fa-video cursor-pointer hover:text-white transition-colors"></i>
+                                <i class="fa-solid fa-phone cursor-pointer hover:text-white transition-colors"></i>
+                            </div>
+                        </div>
+
+                        <!-- Chat Body -->
+                        <div class="flex-1 p-5 space-y-5 bg-[#0a0f1c] relative overflow-hidden flex flex-col justify-end pb-8">
+                            <div class="absolute inset-0 bg-[url('https://i.pinimg.com/736x/8c/98/99/8c98994518b575bfd8c949e91d20548b.jpg')] opacity-[0.03] mix-blend-overlay"></div>
+
+                            <!-- Voice Note -->
+                            <div class="flex justify-end relative z-10">
+                                <div class="chat-bubble-owner p-3 min-w-[260px] max-w-[85%]">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center cursor-pointer hover:bg-white/30 transition-colors shrink-0">
+                                            <i class="fa-solid fa-play text-white ml-1"></i>
+                                        </div>
+                                        <div class="flex items-center gap-[3px] h-8 flex-1">
+                                            <div class="wave-bar h-2"></div>
+                                            <div class="wave-bar h-4" style="animation-delay: 0.1s"></div>
+                                            <div class="wave-bar h-6" style="animation-delay: 0.2s"></div>
+                                            <div class="wave-bar h-8 bg-ai-cyanLight" style="animation-delay: 0.3s"></div>
+                                            <div class="wave-bar h-5" style="animation-delay: 0.4s"></div>
+                                            <div class="wave-bar h-3" style="animation-delay: 0.5s"></div>
+                                            <div class="wave-bar h-6" style="animation-delay: 0.6s"></div>
+                                            <div class="wave-bar h-4" style="animation-delay: 0.7s"></div>
+                                            <div class="wave-bar h-2" style="animation-delay: 0.8s"></div>
+                                            <div class="wave-bar h-4" style="animation-delay: 0.9s"></div>
+                                        </div>
+                                        <div class="flex flex-col items-end">
+                                            <span class="text-[10px] font-bold text-white/90">0:08</span>
+                                        </div>
+                                    </div>
+                                    <p class="text-[11px] text-white/70 italic mt-2 border-t border-white/10 pt-1.5 font-inter">
+                                        "Agente, dime como va la sala hoy y lanza campana para recuperar clientes inactivos."
+                                    </p>
+                                    <div class="flex justify-end gap-1 mt-1">
+                                        <span class="text-[9px] text-white/60">10:42 AM</span>
+                                        <i class="fa-solid fa-check-double text-ai-cyanLight text-[10px]"></i>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Typing Indicator -->
+                            <div class="flex justify-start relative z-10 opacity-0 animate-[fadeIn_0.5s_ease-in-out_1s_forwards]">
+                                <div class="bg-dark-800 p-3 rounded-2xl rounded-tl-sm border border-slate-700 w-16 flex justify-center gap-1.5 shadow-lg">
+                                    <span class="w-1.5 h-1.5 bg-ai-cyanLight rounded-full typing-dot"></span>
+                                    <span class="w-1.5 h-1.5 bg-ai-cyanLight rounded-full typing-dot"></span>
+                                    <span class="w-1.5 h-1.5 bg-ai-cyanLight rounded-full typing-dot"></span>
+                                </div>
+                            </div>
+
+                            <!-- Bot Response -->
+                            <div class="flex justify-start relative z-10 opacity-0 animate-[fadeIn_0.5s_ease-in-out_2.5s_forwards]">
+                                <div class="chat-bubble-bot p-4 max-w-[90%] text-sm text-slate-200">
+                                    <p class="mb-3 font-medium">Listo jefe!</p>
+                                    <ul class="space-y-2 mb-3 border-l-2 border-ai-cyanLight pl-3 text-xs font-inter text-slate-300">
+                                        <li><strong>Sala:</strong> 4 estilistas activos.</li>
+                                        <li><strong>Clientes:</strong> 18 atendidos hoy.</li>
+                                    </ul>
+                                    <div class="bg-ai-fuchsia/10 border border-ai-fuchsia/20 p-2.5 rounded-lg mt-3">
+                                        <p class="text-[11px] font-semibold text-ai-fuchsiaLight flex items-center gap-2 mb-1.5">
+                                            <i class="fa-solid fa-paper-plane"></i> Retencion (45 enviados)
+                                        </p>
+                                        <p class="text-[11px] text-slate-400 font-inter italic border-l-2 border-ai-fuchsia/30 pl-2 leading-relaxed">
+                                            "Hola Maria, hace mucho no te vemos por aqui. Hoy tenemos un 20% de descuento en corte. Te agendo un espacio?"
+                                        </p>
+                                    </div>
+                                    <div class="flex justify-start mt-2">
+                                        <span class="text-[9px] text-slate-500">10:43 AM</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Carousel de Logos -->
+    <section class="py-10 border-b border-slate-800/50 bg-dark-950 z-10 relative overflow-hidden">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-6">
+            <p class="text-center text-sm font-semibold text-slate-500 uppercase tracking-widest">Mas de 500 peluquerias y barberias en Colombia ya son <span class="text-ai-cyanLight">completop</span></p>
+        </div>
+
+        <div class="w-full inline-flex flex-nowrap overflow-hidden mask-carousel">
+            <ul class="flex items-center justify-center md:justify-start [&_li]:mx-8 [&_li]:max-w-none animate-infinite-scroll">
+                <li class="flex items-center gap-3 text-slate-400 hover:text-white transition-colors grayscale hover:grayscale-0 opacity-60 hover:opacity-100">
+                    <i class="fa-solid fa-scissors text-2xl text-ai-500"></i>
+                    <span class="font-bold text-lg whitespace-nowrap">Barberia El Patron</span>
+                </li>
+                <li class="flex items-center gap-3 text-slate-400 hover:text-white transition-colors grayscale hover:grayscale-0 opacity-60 hover:opacity-100">
+                    <i class="fa-solid fa-wand-magic-sparkles text-2xl text-ai-cyan"></i>
+                    <span class="font-bold text-lg whitespace-nowrap">Salon Bella</span>
+                </li>
+                <li class="flex items-center gap-3 text-slate-400 hover:text-white transition-colors grayscale hover:grayscale-0 opacity-60 hover:opacity-100">
+                    <i class="fa-solid fa-crown text-2xl text-yellow-500"></i>
+                    <span class="font-bold text-lg whitespace-nowrap">King's Barbershop</span>
+                </li>
+                <li class="flex items-center gap-3 text-slate-400 hover:text-white transition-colors grayscale hover:grayscale-0 opacity-60 hover:opacity-100">
+                    <i class="fa-solid fa-star text-2xl text-ai-fuchsia"></i>
+                    <span class="font-bold text-lg whitespace-nowrap">Studio 54 Color</span>
+                </li>
+                <li class="flex items-center gap-3 text-slate-400 hover:text-white transition-colors grayscale hover:grayscale-0 opacity-60 hover:opacity-100">
+                    <i class="fa-solid fa-hand-sparkles text-2xl text-pink-400"></i>
+                    <span class="font-bold text-lg whitespace-nowrap">Nails & Spa Elite</span>
+                </li>
+                <li class="flex items-center gap-3 text-slate-400 hover:text-white transition-colors grayscale hover:grayscale-0 opacity-60 hover:opacity-100">
+                    <i class="fa-solid fa-gem text-2xl text-blue-400"></i>
+                    <span class="font-bold text-lg whitespace-nowrap">Diamante Studio</span>
+                </li>
+                <!-- Duplicado para efecto infinito -->
+                <li class="flex items-center gap-3 text-slate-400 hover:text-white transition-colors grayscale hover:grayscale-0 opacity-60 hover:opacity-100">
+                    <i class="fa-solid fa-scissors text-2xl text-ai-500"></i>
+                    <span class="font-bold text-lg whitespace-nowrap">Barberia El Patron</span>
+                </li>
+                <li class="flex items-center gap-3 text-slate-400 hover:text-white transition-colors grayscale hover:grayscale-0 opacity-60 hover:opacity-100">
+                    <i class="fa-solid fa-wand-magic-sparkles text-2xl text-ai-cyan"></i>
+                    <span class="font-bold text-lg whitespace-nowrap">Salon Bella</span>
+                </li>
+                <li class="flex items-center gap-3 text-slate-400 hover:text-white transition-colors grayscale hover:grayscale-0 opacity-60 hover:opacity-100">
+                    <i class="fa-solid fa-crown text-2xl text-yellow-500"></i>
+                    <span class="font-bold text-lg whitespace-nowrap">King's Barbershop</span>
+                </li>
+                <li class="flex items-center gap-3 text-slate-400 hover:text-white transition-colors grayscale hover:grayscale-0 opacity-60 hover:opacity-100">
+                    <i class="fa-solid fa-star text-2xl text-ai-fuchsia"></i>
+                    <span class="font-bold text-lg whitespace-nowrap">Studio 54 Color</span>
+                </li>
+                <li class="flex items-center gap-3 text-slate-400 hover:text-white transition-colors grayscale hover:grayscale-0 opacity-60 hover:opacity-100">
+                    <i class="fa-solid fa-hand-sparkles text-2xl text-pink-400"></i>
+                    <span class="font-bold text-lg whitespace-nowrap">Nails & Spa Elite</span>
+                </li>
+                <li class="flex items-center gap-3 text-slate-400 hover:text-white transition-colors grayscale hover:grayscale-0 opacity-60 hover:opacity-100">
+                    <i class="fa-solid fa-gem text-2xl text-blue-400"></i>
+                    <span class="font-bold text-lg whitespace-nowrap">Diamante Studio</span>
+                </li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- Ecosistema (3 Actores) -->
+    <section id="ecosistema" class="py-24 relative z-10 border-b border-slate-800/50 bg-dark-950/80">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto mb-16" data-aos="fade-up">
+                <h2 class="text-ai-500 font-semibold tracking-widest uppercase text-xs mb-3">Arquitectura Multi-Entorno</h2>
+                <h3 class="text-3xl md:text-5xl font-black text-white mb-6 tracking-tight">Un Cerebro Central. <br class="md:hidden" /><span class="text-gradient-ai">Tres Experiencias Dedicadas.</span></h3>
+                <p class="text-slate-400 text-lg leading-relaxed font-inter">
+                    En lugar de un panel generico, desarrollamos entornos especializados de alto rendimiento. <span class="text-white font-medium">El dueno controla, el staff ejecuta y el cliente reserva.</span> Todo sincronizado en tiempo real por el Agente Tupelukeria.com.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8 items-stretch">
+                <!-- 1. Dueno / Admin -->
+                <div class="glass-card p-8 rounded-[2rem] relative overflow-hidden group flex flex-col h-full" data-aos="fade-up" data-aos-delay="100">
+                    <div class="absolute top-0 right-0 w-32 h-32 bg-ai-cyan/10 rounded-bl-full blur-2xl transition-all group-hover:bg-ai-cyan/20"></div>
+                    <div class="w-14 h-14 rounded-2xl bg-dark-900 border border-slate-700 flex items-center justify-center text-ai-cyan mb-6 shadow-lg shadow-ai-cyan/20 shrink-0">
+                        <i class="fa-solid fa-crown text-2xl"></i>
+                    </div>
+                    <h4 class="text-2xl font-bold text-white mb-3">Para el Dueno</h4>
+                    <p class="text-slate-400 text-sm mb-6 border-b border-slate-800 pb-6 min-h-[70px] font-inter">Control total desde tu celular. Supervisa tu salon en tiempo real sin tener que estar fisicamente alli.</p>
+                    <ul class="flex-1 flex flex-col gap-4">
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-microphone-lines text-ai-cyan mt-1 shrink-0"></i> <span>Metricas e instrucciones precisas via <strong>notas de voz</strong> al Agente.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-bullhorn text-ai-cyan mt-1 shrink-0"></i> <span>Campanas de recuperacion y retencion 100% automatizadas.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-boxes-stacked text-ai-cyan mt-1 shrink-0"></i> <span>Control de inventario maestro con alertas de reabastecimiento.</span></li>
+                    </ul>
+                </div>
+
+                <!-- 2. Estilista / Staff -->
+                <div class="glass-card p-8 rounded-[2rem] relative overflow-hidden group border-ai-500/30 shadow-[0_0_25px_rgba(139,92,246,0.1)] transform md:-translate-y-4 flex flex-col h-full" data-aos="fade-up" data-aos-delay="200">
+                    <div class="absolute top-0 right-0 w-32 h-32 bg-ai-500/10 rounded-bl-full blur-2xl transition-all group-hover:bg-ai-500/20"></div>
+                    <div class="w-14 h-14 rounded-2xl bg-ai-600 flex items-center justify-center text-white mb-6 shadow-lg shadow-ai-500/30 shrink-0">
+                        <i class="fa-solid fa-scissors text-2xl"></i>
+                    </div>
+                    <h4 class="text-2xl font-bold text-white mb-3">App del Estilista</h4>
+                    <p class="text-slate-400 text-sm mb-6 border-b border-slate-800 pb-6 min-h-[70px] font-inter">Herramientas de empoderamiento para que el equipo gane mas, se organice mejor y trabaje feliz.</p>
+                    <ul class="flex-1 flex flex-col gap-4">
+                        <li class="flex items-start gap-3 text-sm text-white font-medium font-inter"><i class="fa-solid fa-list-ol text-ai-400 mt-1 shrink-0"></i> <span><strong>Fichero Digital:</strong> Justicia y oportunidades iguales para atender sin cita.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-user-check text-ai-400 mt-1 shrink-0"></i> <span><strong>Check-in Automatico:</strong> Te activa en la fila de turnos al llegar via GPS.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-money-bill-wave text-ai-400 mt-1 shrink-0"></i> <span>Visor de comisiones, bonos y ganancias diarias en tiempo real.</span></li>
+                    </ul>
+                </div>
+
+                <!-- 3. Cliente -->
+                <div class="glass-card p-8 rounded-[2rem] relative overflow-hidden group flex flex-col h-full" data-aos="fade-up" data-aos-delay="300">
+                    <div class="absolute top-0 right-0 w-32 h-32 bg-ai-fuchsia/10 rounded-bl-full blur-2xl transition-all group-hover:bg-ai-fuchsia/20"></div>
+                    <div class="w-14 h-14 rounded-2xl bg-dark-900 border border-slate-700 flex items-center justify-center text-ai-fuchsia mb-6 shadow-lg shadow-ai-fuchsia/20 shrink-0">
+                        <i class="fa-solid fa-mobile-screen text-2xl"></i>
+                    </div>
+                    <h4 class="text-2xl font-bold text-white mb-3">Para el Cliente</h4>
+                    <p class="text-slate-400 text-sm mb-6 border-b border-slate-800 pb-6 min-h-[70px] font-inter">Cero descargas de apps molestas. Todo ocurre instantaneamente donde el cliente ya pasa su tiempo.</p>
+                    <ul class="flex-1 flex flex-col gap-4">
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-brands fa-whatsapp text-ai-fuchsia mt-1 shrink-0"></i> <span>Reserva de citas enviando <strong>notas de voz</strong> directas al WhatsApp del local.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-gift text-ai-fuchsia mt-1 shrink-0"></i> <span>Recibe descuentos automaticos y recordatorios de retencion.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-regular fa-calendar-check text-ai-fuchsia mt-1 shrink-0"></i> <span>Gestion autonoma (cancelar o reagendar) sin quitarle tiempo al staff.</span></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Modulos Inteligentes -->
+    <section id="soluciones" class="py-32 relative z-10 bg-dark-900">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-32">
+
+            <!-- Feature 1: Geolocalizacion & Digiturno -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+                <div data-aos="fade-right">
+                    <h2 class="text-3xl md:text-5xl font-black text-white mb-6 leading-tight">Adios a los tiempos muertos. <br><span class="text-gradient-ai">Geolocalizacion y Digiturno.</span></h2>
+                    <p class="text-lg text-slate-400 mb-8 font-light font-inter leading-relaxed">
+                        No hagas perder el tiempo a tus clientes. El sistema sabe por GPS que estilistas estan fisicamente en la peluqueria. Nuestro <strong>fichero digital (Digiturno interno)</strong> organiza las colas con IA, asignando turnos de forma justa y equitativa para que todos tengan la misma oportunidad de trabajar.
+                    </p>
+                    <div class="flex items-center gap-4 bg-dark-950 p-4 rounded-2xl border border-slate-800 shadow-xl">
+                        <div class="w-12 h-12 bg-ai-cyan/20 rounded-full flex items-center justify-center text-ai-cyan shrink-0"><i class="fa-solid fa-scale-balanced"></i></div>
+                        <div>
+                            <h5 class="text-white font-bold text-sm">Equidad Laboral Garantizada</h5>
+                            <p class="text-xs text-slate-400 font-inter">El algoritmo prioriza a quien lleva mas tiempo esperando atender.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="relative" data-aos="fade-left">
+                    <div class="absolute inset-0 bg-gradient-to-tr from-ai-cyan/20 to-transparent rounded-[2rem] blur-3xl"></div>
+                    <div class="glass-card rounded-[2rem] relative z-10 overflow-hidden h-[500px] md:h-[600px] flex flex-col justify-end bg-[#0a0f1c]">
+                        <div class="absolute inset-0 overflow-hidden">
+                            <svg class="absolute inset-0 w-full h-full opacity-30" xmlns="http://www.w3.org/2000/svg">
+                                <defs><pattern id="city-blocks" width="120" height="120" patternUnits="userSpaceOnUse"><rect x="10" y="10" width="100" height="40" fill="#131e36" rx="6" /><rect x="10" y="60" width="40" height="50" fill="#131e36" rx="6" /><rect x="60" y="60" width="50" height="50" fill="#131e36" rx="6" /></pattern></defs>
+                                <rect width="100%" height="100%" fill="url(#city-blocks)" />
+                            </svg>
+                            <div class="absolute top-[35%] left-[50%] -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] pointer-events-none z-10">
+                                <div class="w-full h-full rounded-full animate-radar-spin opacity-50" style="background: conic-gradient(transparent 75%, rgba(34,211,238,0.05) 95%, rgba(34,211,238,0.4) 100%);">
+                                    <div class="absolute top-0 left-[calc(50%-1px)] w-[2px] h-1/2 bg-ai-cyanLight shadow-[0_0_15px_#22d3ee]"></div>
+                                </div>
+                            </div>
+                            <div class="absolute top-[35%] left-[50%] -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center">
+                                <div class="w-24 h-24 bg-ai-cyan/10 backdrop-blur-md border border-ai-cyan/40 rounded-full shadow-[0_0_30px_rgba(34,211,238,0.2)] flex flex-col items-center justify-center relative z-10">
+                                    <span class="text-[9px] text-ai-cyanLight uppercase tracking-widest font-semibold mb-1">Tu Local</span>
+                                    <span class="text-xl font-black tracking-tight leading-none text-white">2 Activos</span>
+                                    <div class="absolute inset-0 bg-ai-cyanLight rounded-full animate-ping opacity-20 pointer-events-none"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="relative z-40 bg-dark-950/95 backdrop-blur-2xl border-t border-slate-800 p-5 md:p-6 rounded-t-3xl mt-auto shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
+                            <div class="w-12 h-1.5 bg-slate-700 rounded-full mx-auto mb-4"></div>
+                            <div class="flex justify-between items-center mb-4">
+                                <h4 class="text-white font-bold text-lg">Digiturno GPS</h4>
+                                <span class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-ai-cyanLight bg-ai-cyan/10 border border-ai-cyan/20 px-3 py-1.5 rounded-full">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-ai-cyanLight animate-pulse"></span> En Linea
+                                </span>
+                            </div>
+                            <div class="space-y-2">
+                                <div class="flex justify-between items-center bg-dark-900 p-2.5 rounded-xl border-l-4 border-ai-cyanLight shadow-sm hover:bg-dark-800 transition-colors">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-8 h-8 rounded-full bg-ai-500 flex items-center justify-center text-xs font-bold text-white border-2 border-dark-950 shadow-md">MR</div>
+                                        <div><p class="text-white text-sm font-bold leading-tight">Mario R.</p><p class="text-[10px] text-ai-cyanLight mt-0.5"><i class="fa-solid fa-mug-hot"></i> Libre en sala</p></div>
+                                    </div>
+                                    <span class="bg-ai-cyanLight text-dark-950 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider shadow-[0_0_10px_rgba(34,211,238,0.3)]">Siguiente</span>
+                                </div>
+                                <div class="flex justify-between items-center bg-dark-900/80 p-2.5 rounded-xl border-l-4 border-slate-600 opacity-90">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-8 h-8 rounded-full bg-ai-600 flex items-center justify-center text-xs font-bold text-white border-2 border-dark-950 shadow-md">CM</div>
+                                        <div><p class="text-white text-sm font-bold leading-tight">Carlos M.</p><p class="text-[10px] text-slate-400 mt-0.5"><i class="fa-solid fa-walking"></i> Llegando (1 min)</p></div>
+                                    </div>
+                                    <span class="text-slate-400 text-xs font-bold bg-dark-800 px-3 py-1 rounded-full">Turno 2</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Feature 2: Inventario & Nomina -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+                <div class="order-2 lg:order-1 relative" data-aos="fade-right">
+                    <div class="absolute inset-0 bg-gradient-to-tl from-ai-fuchsia/20 to-transparent rounded-full blur-3xl"></div>
+                    <div class="glass-card rounded-3xl p-6 md:p-8 relative z-10 border border-ai-fuchsia/30">
+                        <div class="flex justify-between items-center mb-6">
+                            <h4 class="text-white font-bold text-lg">Nomina & Rendimiento</h4>
+                            <span class="text-ai-fuchsiaLight text-xs font-semibold bg-ai-fuchsia/10 px-3 py-1 rounded-full"><i class="fa-solid fa-arrow-up"></i> Bonos Activos</span>
+                        </div>
+                        <div class="space-y-5">
+                            <div>
+                                <div class="flex justify-between text-sm mb-2 font-inter"><span class="text-white font-medium">Marcos (Puntualidad Perfecta)</span><span class="text-ai-cyanLight font-bold">+15% Bono</span></div>
+                                <div class="w-full bg-dark-900 rounded-full h-2.5"><div class="bg-gradient-to-r from-ai-500 to-ai-cyanLight h-2.5 rounded-full shadow-[0_0_10px_rgba(34,211,238,0.4)]" style="width: 100%"></div></div>
+                            </div>
+                            <div class="opacity-60">
+                                <div class="flex justify-between text-sm mb-2 font-inter"><span class="text-white font-medium">Javier (3 llegadas tarde)</span><span class="text-slate-500">Comision Base</span></div>
+                                <div class="w-full bg-dark-900 rounded-full h-2.5"><div class="bg-slate-600 h-2.5 rounded-full" style="width: 45%"></div></div>
+                            </div>
+                        </div>
+                        <div class="mt-8 pt-6 border-t border-slate-700/50">
+                            <div class="bg-gradient-to-r from-ai-fuchsia/10 to-transparent border border-ai-fuchsia/20 p-4 rounded-xl flex gap-4 items-center">
+                                <i class="fa-solid fa-boxes-packing text-ai-fuchsiaLight text-2xl"></i>
+                                <div>
+                                    <p class="text-white text-sm font-bold mb-0.5">Alerta de Inventario IA</p>
+                                    <p class="text-xs text-slate-400 font-inter leading-relaxed">Tinte Rojo agotado. Confirmado pedido automatico al proveedor autorizado.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="order-1 lg:order-2" data-aos="fade-left">
+                    <h2 class="text-3xl md:text-5xl font-black text-white mb-6 leading-tight">Stock Inteligente y <br><span class="text-gradient-ai">Nomina por Meritos.</span></h2>
+                    <p class="text-lg text-slate-400 mb-8 font-light font-inter leading-relaxed">Tupelukeria simplifica dos areas criticas de tu negocio sin mezclarlas ni causar confusion:</p>
+                    <ul class="space-y-6">
+                        <li class="flex items-start gap-4">
+                            <div class="w-12 h-12 rounded-xl bg-ai-fuchsia/10 flex items-center justify-center text-ai-fuchsiaLight shrink-0 border border-ai-fuchsia/20 shadow-lg"><i class="fa-solid fa-boxes-stacked text-xl"></i></div>
+                            <div>
+                                <h5 class="text-white font-bold text-lg mb-1.5">Inventario Autonomo</h5>
+                                <p class="text-slate-400 text-sm font-inter leading-relaxed">Si un producto se termina, el sistema detecta la falta de stock y le avisa automaticamente a tu proveedor para reabastecer.</p>
+                            </div>
+                        </li>
+                        <li class="flex items-start gap-4">
+                            <div class="w-12 h-12 rounded-xl bg-ai-cyan/10 flex items-center justify-center text-ai-cyanLight shrink-0 border border-ai-cyan/20 shadow-lg"><i class="fa-solid fa-medal text-xl"></i></div>
+                            <div>
+                                <h5 class="text-white font-bold text-lg mb-1.5">Nomina Dinamica</h5>
+                                <p class="text-slate-400 text-sm font-inter leading-relaxed">Calcula comisiones al instante y premia economicamente a quienes llegan puntuales y atienden mejor.</p>
+                            </div>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Testimonios -->
+    <section class="py-24 relative z-10 bg-dark-950 overflow-hidden">
+        <div class="absolute right-0 top-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-ai-500/10 rounded-full blur-[120px] pointer-events-none"></div>
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+            <div class="text-center max-w-3xl mx-auto mb-16" data-aos="fade-up">
+                <h2 class="text-ai-cyanLight font-semibold tracking-widest uppercase text-xs mb-3">Historias Reales</h2>
+                <h3 class="text-3xl md:text-5xl font-black text-white mb-6 tracking-tight">Lo que dicen los duenos. <br/><span class="text-gradient-ai">Puro talento local.</span></h3>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
+                <div class="glass-card p-8 rounded-3xl relative" data-aos="fade-up" data-aos-delay="100">
+                    <i class="fa-solid fa-quote-left text-4xl text-ai-600/40 absolute top-6 right-8"></i>
+                    <div class="flex items-center gap-4 mb-6">
+                        <img src="https://i.pravatar.cc/150?img=11" alt="Mateo" class="w-12 h-12 rounded-full border-2 border-ai-500">
+                        <div><h4 class="text-white font-bold text-sm">Mateo R.</h4><p class="text-ai-cyanLight text-xs font-semibold">Barberia Los Proceres (Medellin)</p></div>
+                    </div>
+                    <p class="text-slate-300 text-sm font-inter leading-relaxed italic">"Desde que pusimos el Agente en la barberia, no volvimos a perder clientes por no contestar el WhatsApp. Una chimba de sistema, parcero. Literalmente se paga solo."</p>
+                    <div class="mt-4 flex gap-1 text-yellow-400 text-xs"><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i></div>
+                </div>
+                <div class="glass-card p-8 rounded-3xl relative border-ai-cyan/30 bg-gradient-to-br from-dark-900 to-dark-800" data-aos="fade-up" data-aos-delay="200">
+                    <i class="fa-solid fa-quote-left text-4xl text-ai-cyan/40 absolute top-6 right-8"></i>
+                    <div class="flex items-center gap-4 mb-6">
+                        <img src="https://i.pravatar.cc/150?img=47" alt="Camila" class="w-12 h-12 rounded-full border-2 border-ai-cyanLight">
+                        <div><h4 class="text-white font-bold text-sm">Camila S.</h4><p class="text-ai-cyanLight text-xs font-semibold">Salon Alta Peluqueria (Bogota)</p></div>
+                    </div>
+                    <p class="text-slate-300 text-sm font-inter leading-relaxed italic">"El control de inventario y el digiturno nos organizo la vida. Las muchachas estan mas contentas porque el trabajo es super parejo. Super bacano y recomendado."</p>
+                    <div class="mt-4 flex gap-1 text-yellow-400 text-xs"><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i></div>
+                </div>
+                <div class="glass-card p-8 rounded-3xl relative" data-aos="fade-up" data-aos-delay="300">
+                    <i class="fa-solid fa-quote-left text-4xl text-ai-fuchsia/40 absolute top-6 right-8"></i>
+                    <div class="flex items-center gap-4 mb-6">
+                        <img src="https://i.pravatar.cc/150?img=68" alt="Andres" class="w-12 h-12 rounded-full border-2 border-ai-fuchsiaLight">
+                        <div><h4 class="text-white font-bold text-sm">Andres G.</h4><p class="text-ai-cyanLight text-xs font-semibold">Studio Color (Cali)</p></div>
+                    </div>
+                    <p class="text-slate-300 text-sm font-inter leading-relaxed italic">"Recuperamos la inversion en la primera semana solo con las campanas de retencion que manda el Agente. Completisimo todo, el soporte es un 10/10."</p>
+                    <div class="mt-4 flex gap-1 text-yellow-400 text-xs"><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Precios -->
+    <section id="precios" class="py-32 relative z-10 bg-dark-950 border-t border-slate-800/50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center max-w-3xl mx-auto mb-20" data-aos="fade-up">
+                <h2 class="text-ai-500 font-semibold tracking-wide uppercase text-xs mb-3">Modelos de Inversion</h2>
+                <h3 class="text-3xl md:text-5xl font-black text-white mb-6 tracking-tight">Planes escalables. <br/><span class="text-gradient-ai">Empieza gratis.</span></h3>
+                <p class="text-slate-400 text-lg font-inter">Un modelo Freemium disenado para crecer contigo. Sin letras pequenas ni tarjetas de credito obligatorias para iniciar.</p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-stretch max-w-7xl mx-auto">
+                <!-- Plan Gratis -->
+                <div class="glass-card p-8 rounded-[2rem] flex flex-col h-full border-slate-700/50" data-aos="fade-up" data-aos-delay="100">
+                    <h4 class="text-xl font-bold text-white mb-2">Gratis</h4>
+                    <p class="text-slate-500 text-sm mb-6 min-h-[40px] font-inter">Perfecto para independientes que quieren dar el primer paso digital.</p>
+                    <div class="mb-8 flex flex-col gap-1"><span class="text-5xl font-black text-white">$0</span><span class="text-slate-500 font-medium text-sm font-inter">COP / para siempre</span></div>
+                    <ul class="flex-1 flex flex-col gap-4 mb-8 border-t border-slate-800 pt-6">
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-check text-slate-500 mt-0.5"></i> <span>Enlace de reservas web.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-check text-slate-500 mt-0.5"></i> <span>1 Perfil de Staff (Admin).</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-check text-slate-500 mt-0.5"></i> <span>Agenda basica.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-500 font-inter"><i class="fa-solid fa-minus mt-0.5"></i> <span>Sin Agente IA.</span></li>
+                    </ul>
+                    <a href="https://app.tupelukeria.com/register-tenant" class="block w-full text-center py-3.5 rounded-full border border-slate-700 text-white font-bold hover:bg-dark-800 transition-colors">Comenzar Gratis</a>
+                </div>
+
+                <!-- Plan Pro -->
+                <div class="glass-card p-8 rounded-[2rem] flex flex-col h-full border-slate-700/50" data-aos="fade-up" data-aos-delay="200">
+                    <h4 class="text-xl font-bold text-white mb-2">Pro</h4>
+                    <p class="text-slate-500 text-sm mb-6 min-h-[40px] font-inter">Herramientas avanzadas para gestionar tu salon.</p>
+                    <div class="mb-8 flex flex-col gap-1"><span class="text-5xl font-black text-white">$29.900</span><span class="text-slate-500 font-medium text-sm font-inter">COP / mes</span></div>
+                    <ul class="flex-1 flex flex-col gap-4 mb-8 border-t border-slate-800 pt-6">
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-bullhorn text-ai-600 mt-0.5"></i> <span>Campanas de recuperacion.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-location-dot text-ai-600 mt-0.5"></i> <span>Digiturno y Geolocalizacion.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-medal text-ai-600 mt-0.5"></i> <span>Inventario y Nomina.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-users text-ai-600 mt-0.5"></i> <span>Staff Ilimitado.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-500 font-inter"><i class="fa-solid fa-minus mt-0.5"></i> <span>Sin Asistente IA.</span></li>
+                    </ul>
+                    <a href="https://wa.me/573000000000?text=Hola%2C%20quiero%20activar%20el%20plan%20Pro%20%28%2429.900%2Fmes%29%20para%20mi%20salon" target="_blank" class="block w-full text-center py-3.5 rounded-full border border-ai-500 text-ai-400 font-bold hover:bg-ai-500/10 transition-colors"><i class="fa-brands fa-whatsapp"></i> Activar por WhatsApp</a>
+                </div>
+
+                <!-- Plan Business - RECOMENDADO -->
+                <div class="relative p-[2px] rounded-[2rem] bg-gradient-to-b from-ai-cyanLight via-ai-500 to-ai-fuchsia shadow-[0_0_40px_rgba(139,92,246,0.25)] flex flex-col h-full" data-aos="fade-up" data-aos-delay="300">
+                    <div class="absolute -top-4 left-1/2 transform -translate-x-1/2 bg-gradient-to-r from-ai-cyanLight to-ai-500 text-white px-5 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest shadow-lg whitespace-nowrap z-20">Recomendado</div>
+                    <div class="bg-dark-950 rounded-[calc(2rem-2px)] p-8 h-full flex flex-col">
+                        <h4 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-ai-cyanLight to-ai-fuchsiaLight mb-2">Business</h4>
+                        <p class="text-slate-400 text-sm mb-6 min-h-[40px] font-inter">Todo Pro + sitio web profesional para tu salon.</p>
+                        <div class="mb-8 flex flex-col gap-1"><span class="text-5xl font-black text-white">$49.900</span><span class="text-slate-500 font-medium text-sm font-inter">COP / mes</span></div>
+                        <ul class="flex-1 flex flex-col gap-4 mb-8 border-t border-slate-800 pt-6">
+                            <li class="flex items-start gap-3 text-sm text-white font-semibold font-inter"><i class="fa-solid fa-bolt text-ai-cyanLight mt-0.5"></i> <span>Todo lo del plan Pro.</span></li>
+                            <li class="flex items-start gap-3 text-sm text-white font-semibold font-inter"><i class="fa-solid fa-robot text-ai-cyanLight mt-0.5"></i> <span>Asistente IA por WhatsApp.</span></li>
+                            <li class="flex items-start gap-3 text-sm text-white font-semibold font-inter"><i class="fa-solid fa-globe text-ai-cyanLight mt-0.5"></i> <span>Sitio web profesional incluido.</span></li>
+                            <li class="flex items-start gap-3 text-sm text-white font-semibold font-inter"><i class="fa-solid fa-user-shield text-ai-cyanLight mt-0.5"></i> <span>Panel Administrador avanzado.</span></li>
+                            <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-chart-line text-ai-600 mt-0.5"></i> <span>Reportes y analitica.</span></li>
+                        </ul>
+                        <a href="https://wa.me/573000000000?text=Hola%2C%20quiero%20activar%20el%20plan%20Business%20%28%2449.900%2Fmes%29%20para%20mi%20salon" target="_blank" class="block w-full text-center py-4 rounded-full btn-primary text-white font-bold transition-transform hover:scale-105 shadow-lg"><i class="fa-brands fa-whatsapp"></i> Activar por WhatsApp</a>
+                    </div>
+                </div>
+
+                <!-- Plan Enterprise -->
+                <div class="glass-card p-8 rounded-[2rem] flex flex-col h-full border-slate-700/50" data-aos="fade-up" data-aos-delay="400">
+                    <h4 class="text-xl font-bold text-white mb-2">Enterprise</h4>
+                    <p class="text-slate-500 text-sm mb-6 min-h-[40px] font-inter">Control absoluto para cadenas y franquicias. Multisite.</p>
+                    <div class="mb-8 flex flex-col gap-1"><span class="text-5xl font-black text-white">$99.900</span><span class="text-slate-500 font-medium text-sm font-inter">COP / mes</span></div>
+                    <ul class="flex-1 flex flex-col gap-4 mb-8 border-t border-slate-800 pt-6">
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-building text-ai-fuchsia mt-0.5"></i> <span>Todo lo del plan Business.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-sitemap text-ai-fuchsia mt-0.5"></i> <span>Multiples sucursales (Multisite).</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-chart-pie text-ai-fuchsia mt-0.5"></i> <span>Analitica global avanzada.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-headset text-ai-fuchsia mt-0.5"></i> <span>Soporte VIP 24/7.</span></li>
+                    </ul>
+                    <a href="https://wa.me/573000000000?text=Hola%2C%20quiero%20activar%20el%20plan%20Enterprise%20%28%2499.900%2Fmes%29%20para%20mi%20salon" target="_blank" class="block w-full text-center py-3.5 rounded-full border border-slate-700 text-white font-bold hover:bg-dark-800 transition-colors"><i class="fa-brands fa-whatsapp"></i> Activar por WhatsApp</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Call to Action -->
+    <section class="py-20 relative overflow-hidden bg-dark-950">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+            <div class="bg-gradient-to-br from-ai-700 via-ai-500 to-ai-cyan rounded-[2rem] p-10 md:p-16 text-center relative overflow-hidden shadow-[0_0_50px_rgba(139,92,246,0.2)]" data-aos="zoom-in">
+                <div class="absolute top-0 right-0 -mr-20 -mt-20 w-64 h-64 bg-white/20 rounded-full blur-3xl"></div>
+                <div class="absolute bottom-0 left-0 -ml-20 -mb-20 w-64 h-64 bg-dark-950/40 rounded-full blur-3xl"></div>
+                <div class="relative z-10">
+                    <h2 class="text-3xl md:text-5xl font-extrabold text-white mb-6 tracking-tight">Tu competencia ya se esta actualizando</h2>
+                    <p class="text-ai-50 text-lg md:text-xl mb-10 max-w-2xl mx-auto font-medium font-inter">Deja de gestionar tu negocio con herramientas del pasado. Incorpora nuestro Agente Tupelukeria.com y mira como tu salon funciona y vende de forma autonoma.</p>
+                    <a href="https://app.tupelukeria.com/register-tenant" class="inline-flex items-center gap-3 px-10 py-5 rounded-full bg-dark-950 text-white font-extrabold text-lg hover:bg-dark-900 transition-all shadow-xl hover:-translate-y-1 hover:shadow-2xl hover:text-ai-cyanLight border border-dark-800">
+                        <i class="fa-solid fa-rocket"></i> Desplegar Sistema Tupelukeria
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-dark-950 border-t border-slate-900 pt-16 pb-8 relative z-10">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-12 mb-12">
+                <div class="col-span-1 md:col-span-1">
+                    <div class="flex items-center gap-2 mb-4">
+                        <img src="/logo-light.png" alt="Tupelukeria" class="h-8 drop-shadow-[0_0_8px_rgba(139,92,246,0.4)]">
+                    </div>
+                    <p class="text-slate-500 text-sm mb-6 leading-relaxed font-inter">El primer sistema completop impulsado por IA y notas de voz para la industria de la belleza y bienestar.</p>
+                </div>
+                <div>
+                    <h4 class="text-white font-bold mb-4 text-sm uppercase tracking-wider">Modulos</h4>
+                    <ul class="space-y-3 font-inter">
+                        <li><a href="#soluciones" class="text-slate-500 text-sm hover:text-ai-400 transition-colors">Digiturno & GPS</a></li>
+                        <li><a href="#soluciones" class="text-slate-500 text-sm hover:text-ai-400 transition-colors">Agente Tupelukeria.com</a></li>
+                        <li><a href="#soluciones" class="text-slate-500 text-sm hover:text-ai-400 transition-colors">Inventario Inteligente</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="text-white font-bold mb-4 text-sm uppercase tracking-wider">Integraciones</h4>
+                    <ul class="space-y-3 font-inter">
+                        <li><a href="#" class="text-slate-500 text-sm hover:text-ai-400 transition-colors">WhatsApp API</a></li>
+                        <li><a href="#" class="text-slate-500 text-sm hover:text-ai-400 transition-colors">Proveedores L'Oreal</a></li>
+                        <li><a href="#" class="text-slate-500 text-sm hover:text-ai-400 transition-colors">Pagos Digitales</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="text-white font-bold mb-4 text-sm uppercase tracking-wider">Compania</h4>
+                    <ul class="space-y-3 font-inter">
+                        <li><a href="#" class="text-slate-500 text-sm hover:text-ai-400 transition-colors">Privacidad</a></li>
+                        <li><a href="#" class="text-slate-500 text-sm hover:text-ai-400 transition-colors">Terminos de Servicio</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="border-t border-slate-900 pt-8 flex flex-col md:flex-row justify-between items-center gap-4">
+                <p class="text-slate-600 text-xs font-mono">&copy; 2026 TUPELUKERIA SYSTEMS. ALL RIGHTS RESERVED.</p>
+                <div class="flex items-center gap-2 text-slate-600 text-xs font-mono">
+                    <span class="w-2 h-2 rounded-full bg-ai-cyanLight animate-pulse"></span> SISTEMAS OPERACIONALES: OPTIMOS
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- AOS JS -->
+    <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+    <script>
+        AOS.init({ once: true, offset: 50, duration: 800 });
+
+        var btnMenu = document.getElementById('mobile-menu-btn');
+        var menuMobile = document.getElementById('mobile-menu');
+        if (btnMenu && menuMobile) {
+            var iconMenu = btnMenu.querySelector('i');
+            btnMenu.addEventListener('click', function() {
+                menuMobile.classList.toggle('hidden');
+                if(menuMobile.classList.contains('hidden')) {
+                    iconMenu.classList.remove('fa-xmark');
+                    iconMenu.classList.add('fa-bars-staggered');
+                } else {
+                    iconMenu.classList.remove('fa-bars-staggered');
+                    iconMenu.classList.add('fa-xmark');
+                }
+            });
+
+            document.querySelectorAll('.mobile-link').forEach(function(link) {
+                link.addEventListener('click', function() {
+                    menuMobile.classList.add('hidden');
+                    if(iconMenu) { iconMenu.classList.remove('fa-xmark'); iconMenu.classList.add('fa-bars-staggered'); }
+                });
+            });
+        }
+
+        var navbar = document.getElementById('navbar');
+        if (navbar) {
+            window.addEventListener('scroll', function() {
+                if (window.scrollY > 20) {
+                    navbar.classList.add('bg-dark-950/90', 'shadow-2xl');
+                } else {
+                    navbar.classList.remove('bg-dark-950/90', 'shadow-2xl');
+                }
+            });
+        }
+    </script>
+</body>
+</html>

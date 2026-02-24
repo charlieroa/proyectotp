@@ -1,0 +1,576 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This table contains exclusion constraints and requires additional setup for migrations. Visit https://pris.ly/d/exclusion-constraints for more info.
+model appointments {
+  id                                   String     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenant_id                            String?    @db.Uuid
+  client_id                            String?    @db.Uuid
+  stylist_id                           String?    @db.Uuid
+  service_id                           String?    @db.Uuid
+  start_time                           DateTime   @db.Timestamptz(6)
+  end_time                             DateTime   @db.Timestamptz(6)
+  status                               String?    @default("scheduled") @db.VarChar(50)
+  created_at                           DateTime?  @default(now()) @db.Timestamptz(6)
+  updated_at                           DateTime?  @default(now()) @db.Timestamptz(6)
+  reminder_sent_1h                     Boolean?   @default(false)
+  reminder_sent_24h                    Boolean?   @default(false)
+  users_appointments_client_idTousers  users?     @relation("appointments_client_idTousers", fields: [client_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  services                             services?  @relation(fields: [service_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_appointments_stylist_idTousers users?     @relation("appointments_stylist_idTousers", fields: [stylist_id], references: [id], onUpdate: NoAction)
+  tenants                              tenants?   @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  payments                             payments[]
+
+  @@index([status], map: "idx_appt_status")
+  @@index([stylist_id, start_time, end_time], map: "idx_appt_stylist_time")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model cash_movements {
+  id                  String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenant_id           String         @db.Uuid
+  user_id             String?        @db.Uuid
+  related_user_id     String?        @db.Uuid
+  type                String         @db.VarChar(50)
+  description         String
+  amount              Decimal        @db.Decimal(10, 2)
+  created_at          DateTime?      @default(now()) @db.Timestamptz(6)
+  related_entity_type String?        @db.VarChar(64)
+  related_entity_id   String?        @db.Uuid
+  payment_method      String?        @db.VarChar(32)
+  purpose             String?        @db.VarChar(64)
+  category            String?
+  invoice_ref         String?
+  cash_session_id     String?        @db.Uuid
+  invoice_id          String?        @db.Uuid
+  status              String         @default("pending") @db.VarChar(20)
+  cash_sessions       cash_sessions? @relation(fields: [cash_session_id], references: [id], onUpdate: NoAction)
+  invoices            invoices?      @relation(fields: [invoice_id], references: [id], onUpdate: NoAction)
+
+  @@index([cash_session_id], map: "idx_cash_movements_cash_session_id")
+  @@index([related_entity_type, related_entity_id], map: "idx_cash_movements_related_entity")
+  @@index([tenant_id, created_at], map: "idx_cash_movements_tenant_created")
+  @@index([tenant_id, type, created_at], map: "idx_cash_movements_tenant_type_created")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model cash_sessions {
+  id                                           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id                                    String           @db.Uuid
+  status                                       String           @db.VarChar(20)
+  opened_at                                    DateTime         @default(now()) @db.Timestamptz(6)
+  opened_by_user_id                            String           @db.Uuid
+  initial_amount                               Decimal          @default(0) @db.Decimal(12, 2)
+  closed_at                                    DateTime?        @db.Timestamptz(6)
+  closed_by_user_id                            String?          @db.Uuid
+  final_amount_counted                         Decimal?         @db.Decimal(12, 2)
+  expected_cash_amount                         Decimal?         @db.Decimal(12, 2)
+  difference                                   Decimal?         @db.Decimal(12, 2)
+  notes                                        String?
+  created_at                                   DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at                                   DateTime         @default(now()) @db.Timestamptz(6)
+  cash_movements                               cash_movements[]
+  users_cash_sessions_closed_by_user_idTousers users?           @relation("cash_sessions_closed_by_user_idTousers", fields: [closed_by_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_cash_sessions_opened_by_user_idTousers users            @relation("cash_sessions_opened_by_user_idTousers", fields: [opened_by_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants                                      tenants          @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  invoices                                     invoices[]
+  payments                                     payments[]
+
+  @@index([tenant_id, status], map: "idx_cash_sessions_tenant_id_status")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model inventory_movements {
+  id            String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenant_id     String?   @db.Uuid
+  product_id    String?   @db.Uuid
+  type          String    @db.VarChar(50)
+  quantity      Int
+  movement_date DateTime? @default(now()) @db.Timestamptz(6)
+  products      products? @relation(fields: [product_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants       tenants?  @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model invoice_items {
+  id                   String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  invoice_id           String    @db.Uuid
+  item_type            String    @db.VarChar(20)
+  related_id           String?   @db.Uuid
+  description          String
+  quantity             Int
+  unit_price           Decimal   @db.Decimal(10, 2)
+  total_price          Decimal   @db.Decimal(10, 2)
+  seller_id            String?   @db.Uuid
+  commission_percent   Decimal?  @db.Decimal(5, 2)
+  commission_value     Decimal?  @db.Decimal(12, 2)
+  commission_source    String?   @db.VarChar(20)
+  commission_locked    Boolean   @default(false)
+  commission_frozen_at DateTime? @db.Timestamptz(6)
+  admin_fee_rate       Decimal?  @db.Decimal
+  admin_fee_value      Decimal?  @db.Decimal
+  tenant_id            String    @db.Uuid
+  tenants              tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_invoice_items_tenant")
+  invoices             invoices  @relation(fields: [invoice_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                users?    @relation(fields: [seller_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([seller_id], map: "idx_invoice_items_seller_id")
+}
+
+model invoices {
+  id                     String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenant_id              String           @db.Uuid
+  client_id              String           @db.Uuid
+  cash_session_id        String?          @db.Uuid
+  total_amount           Decimal          @db.Decimal(10, 2)
+  tip_amount             Decimal?         @default(0) @db.Decimal(10, 2)
+  status                 String           @default("paid") @db.VarChar(20)
+  created_at             DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime         @default(now()) @db.Timestamptz(6)
+  admin_fee_rate_at_sale Decimal?         @db.Decimal
+  cash_movements         cash_movements[]
+  invoice_items          invoice_items[]
+  cash_sessions          cash_sessions?   @relation(fields: [cash_session_id], references: [id], onUpdate: NoAction)
+  users                  users            @relation(fields: [client_id], references: [id], onUpdate: NoAction)
+  tenants                tenants          @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  payments               payments[]
+}
+
+model payments {
+  id                 String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenant_id          String?        @db.Uuid
+  old_appointment_id String?        @db.Uuid
+  amount             Decimal        @db.Decimal(12, 2)
+  payment_method     String?        @db.VarChar(50)
+  payment_date       DateTime?      @default(now()) @db.Timestamptz(6)
+  cashier_id         String?        @db.Uuid
+  cash_session_id    String?        @db.Uuid
+  invoice_id         String?        @db.Uuid
+  appointments       appointments?  @relation(fields: [old_appointment_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "payments_appointment_id_fkey")
+  cash_sessions      cash_sessions? @relation(fields: [cash_session_id], references: [id], onUpdate: NoAction)
+  users              users?         @relation(fields: [cashier_id], references: [id], onUpdate: NoAction)
+  invoices           invoices?      @relation(fields: [invoice_id], references: [id], onUpdate: NoAction)
+  tenants            tenants?       @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([cash_session_id], map: "idx_payments_cash_session_id")
+}
+
+model payroll_runs {
+  id                      String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id               String     @db.Uuid
+  start_date              DateTime   @db.Date
+  end_date                DateTime   @db.Date
+  total_gross_amount      Decimal    @db.Decimal(12, 2)
+  total_deductions_amount Decimal    @db.Decimal(12, 2)
+  total_net_amount        Decimal    @db.Decimal(12, 2)
+  generated_by_user_id    String?    @db.Uuid
+  created_at              DateTime   @default(now()) @db.Timestamptz(6)
+  users                   users?     @relation(fields: [generated_by_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants                 tenants    @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  payrolls                payrolls[]
+
+  @@unique([tenant_id, start_date, end_date])
+}
+
+model payrolls {
+  id                       String                    @id(map: "payroll_pkey") @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenant_id                String?                   @db.Uuid
+  stylist_id               String?                   @db.Uuid
+  start_date               DateTime                  @db.Date
+  end_date                 DateTime                  @db.Date
+  base_salary              Decimal?                  @default(0) @db.Decimal(12, 2)
+  commissions              Decimal?                  @default(0) @db.Decimal(12, 2)
+  total_paid               Decimal                   @db.Decimal(12, 2)
+  payment_date             DateTime?                 @default(now()) @db.Timestamptz(6)
+  commission_rate_snapshot Decimal?                  @db.Decimal(5, 2)
+  payroll_run_id           String?                   @db.Uuid
+  payroll_runs             payroll_runs?             @relation(fields: [payroll_run_id], references: [id], onUpdate: NoAction, map: "payroll_payroll_run_id_fkey")
+  users                    users?                    @relation(fields: [stylist_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "payroll_stylist_id_fkey")
+  tenants                  tenants?                  @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "payroll_tenant_id_fkey")
+  staff_loan_installments  staff_loan_installments[]
+  staff_loan_payments      staff_loan_payments[]
+}
+
+model product_categories {
+  id                         String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id                  String     @db.Uuid
+  name                       String     @db.VarChar(255)
+  created_at                 DateTime?  @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime?  @default(now()) @db.Timestamptz(6)
+  product_commission_percent Decimal?   @db.Decimal(5, 2)
+  tenants                    tenants    @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  products                   products[]
+
+  @@unique([tenant_id, name])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model products {
+  id                         String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenant_id                  String?                @db.Uuid
+  name                       String                 @db.VarChar(255)
+  description                String?
+  stock                      Int                    @default(0)
+  created_at                 DateTime?              @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime?              @default(now()) @db.Timestamptz(6)
+  cost_price                 Decimal?               @default(0.00) @db.Decimal(10, 2)
+  sale_price                 Decimal?               @default(0.00) @db.Decimal(10, 2)
+  staff_price                Decimal?               @default(0.00) @db.Decimal(10, 2)
+  audience_type              product_audience       @default(ambos)
+  category_id                String?                @db.Uuid
+  image_url                  String?                @db.VarChar(255)
+  is_active                  Boolean                @default(true)
+  product_commission_percent Decimal?               @db.Decimal(5, 2)
+  commission_percent_stylist Decimal?               @db.Decimal(5, 2)
+  inventory_movements        inventory_movements[]
+  product_categories         product_categories?    @relation(fields: [category_id], references: [id], onUpdate: NoAction)
+  tenants                    tenants?               @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  staff_purchase_items       staff_purchase_items[]
+}
+
+model roles {
+  id    Int     @id @default(autoincrement())
+  name  String  @unique @db.VarChar(50)
+  users users[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model schedule_blocks {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  stylist_id String    @db.Uuid
+  tenant_id  String    @db.Uuid
+  start_date DateTime  @db.Date
+  end_date   DateTime  @db.Date
+  reason     String?
+  status     String?   @default("pending") @db.VarChar(20)
+  admin_note String?
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at DateTime? @default(now()) @db.Timestamptz(6)
+  users      users     @relation(fields: [stylist_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants    tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+}
+
+model service_categories {
+  id         String     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenant_id  String?    @db.Uuid
+  name       String     @db.VarChar(100)
+  created_at DateTime?  @default(now()) @db.Timestamptz(6)
+  updated_at DateTime?  @default(now()) @db.Timestamptz(6)
+  tenants    tenants?   @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  services   services[]
+
+  @@unique([tenant_id, name])
+}
+
+model services {
+  id                 String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenant_id          String?             @db.Uuid
+  category_id        String?             @db.Uuid
+  name               String              @db.VarChar(255)
+  description        String?
+  price              Decimal             @db.Decimal(12, 2)
+  duration_minutes   Int                 @default(30)
+  created_at         DateTime?           @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime?           @default(now()) @db.Timestamptz(6)
+  is_active          Boolean?            @default(true)
+  commission_percent Decimal?            @db.Decimal(5, 2)
+  appointments       appointments[]
+  service_categories service_categories? @relation(fields: [category_id], references: [id], onUpdate: NoAction)
+  tenants            tenants?            @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  stylist_services   stylist_services[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model staff_loan_installments {
+  id               String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  loan_id          String      @db.Uuid
+  payroll_id       String?     @db.Uuid
+  installment_no   Int
+  due_date         DateTime    @db.Date
+  principal_amount Decimal     @db.Decimal(10, 2)
+  interest_amount  Decimal     @db.Decimal(10, 2)
+  total_amount     Decimal     @db.Decimal(10, 2)
+  status           String      @default("pending")
+  deducted_at      DateTime?   @db.Timestamptz(6)
+  staff_loans      staff_loans @relation(fields: [loan_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  payrolls         payrolls?   @relation(fields: [payroll_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([loan_id, installment_no])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model staff_loan_payments {
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id     String      @db.Uuid
+  loan_id       String      @db.Uuid
+  stylist_id    String      @db.Uuid
+  payroll_id    String?     @db.Uuid
+  period_start  DateTime?   @db.Date
+  period_end    DateTime?   @db.Date
+  capital_paid  Decimal     @db.Decimal(12, 2)
+  interest_paid Decimal     @db.Decimal(12, 2)
+  paid_at       DateTime    @default(now()) @db.Timestamptz(6)
+  created_at    DateTime    @default(now()) @db.Timestamptz(6)
+  staff_loans   staff_loans @relation(fields: [loan_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  payrolls      payrolls?   @relation(fields: [payroll_id], references: [id], onUpdate: NoAction)
+  users         users       @relation(fields: [stylist_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants       tenants     @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([loan_id], map: "staff_loan_payments_loan_idx")
+  @@index([tenant_id, stylist_id], map: "staff_loan_payments_tenant_stylist_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model staff_loans {
+  id                      String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id               String                    @db.Uuid
+  stylist_id              String                    @db.Uuid
+  principal               Decimal                   @db.Decimal(12, 2)
+  interest_rate_percent   Decimal                   @db.Decimal(5, 2)
+  term_weeks              Int
+  start_date              DateTime                  @default(dbgenerated("CURRENT_DATE")) @db.Date
+  status                  String                    @default("active") @db.VarChar(20)
+  notes                   String?
+  created_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime                  @default(now()) @db.Timestamptz(6)
+  staff_loan_installments staff_loan_installments[]
+  staff_loan_payments     staff_loan_payments[]
+  users                   users                     @relation(fields: [stylist_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants                 tenants                   @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([stylist_id], map: "staff_loans_stylist_idx")
+  @@index([tenant_id, status], map: "staff_loans_tenant_status_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model staff_purchase_items {
+  id              String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  purchase_id     String          @db.Uuid
+  product_id      String?         @db.Uuid
+  quantity        Int
+  price_at_sale   Decimal         @db.Decimal(10, 2)
+  products        products?       @relation(fields: [product_id], references: [id], onUpdate: NoAction)
+  staff_purchases staff_purchases @relation(fields: [purchase_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([purchase_id, product_id])
+  @@index([product_id])
+  @@index([purchase_id])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model staff_purchases {
+  id                                          String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenant_id                                   String                 @db.Uuid
+  stylist_id                                  String                 @db.Uuid
+  total_amount                                Decimal                @db.Decimal(10, 2)
+  purchase_date                               DateTime               @default(now()) @db.Timestamptz(6)
+  status                                      purchase_status_enum   @default(pendiente)
+  created_at                                  DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at                                  DateTime               @default(now()) @db.Timestamptz(6)
+  payment_terms_weeks                         Int                    @default(1)
+  seller_user_id                              String?                @db.Uuid
+  staff_purchase_items                        staff_purchase_items[]
+  users_staff_purchases_seller_user_idTousers users?                 @relation("staff_purchases_seller_user_idTousers", fields: [seller_user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_staff_purchases_stylist_idTousers     users                  @relation("staff_purchases_stylist_idTousers", fields: [stylist_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants                                     tenants                @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([stylist_id])
+  @@index([tenant_id])
+}
+
+model stylist_branch_assignments {
+  id               String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  stylist_id       String   @db.Uuid
+  branch_tenant_id String   @db.Uuid
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+  users            users    @relation(fields: [stylist_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants          tenants  @relation(fields: [branch_tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([stylist_id, branch_tenant_id])
+  @@index([stylist_id], map: "idx_sba_stylist")
+  @@index([branch_tenant_id], map: "idx_sba_branch")
+}
+
+model stylist_services {
+  user_id                   String    @db.Uuid
+  service_id                String    @db.Uuid
+  last_completed_at         DateTime? @db.Timestamptz(6)
+  commission_percent        Decimal?  @db.Decimal(5, 2)
+  duration_override_minutes Int?
+  total_completed           Int?      @default(0)
+  services                  services  @relation(fields: [service_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                     users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([user_id, service_id])
+  @@index([last_completed_at], map: "idx_styl_srv_last_completed")
+  @@index([user_id, service_id], map: "idx_styl_srv_user_service")
+  @@index([service_id], map: "idx_stylist_services_service")
+  @@index([user_id], map: "idx_stylist_services_user")
+}
+
+model tenant_numbers {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id            String   @db.Uuid
+  phone_number_id      String   @unique
+  display_phone_number String?
+  provider             String   @default("whatsapp")
+  created_at           DateTime @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime @default(now()) @db.Timestamptz(6)
+  tenants              tenants  @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([tenant_id], map: "idx_tenant_numbers_tenant_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model tenants {
+  id                         String                          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name                       String                          @db.VarChar(255)
+  slug                       String?                         @unique @db.VarChar(255)
+  address                    String?                         @db.VarChar(255)
+  phone                      String?                         @db.VarChar(50)
+  working_hours              Json?
+  created_at                 DateTime?                       @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime?                       @default(now()) @db.Timestamptz(6)
+  email                      String?                         @db.VarChar(255)
+  website                    String?                         @db.VarChar(255)
+  logo_url                   String?                         @db.VarChar(512)
+  tax_rate                   Decimal?                        @default(0.00) @db.Decimal(5, 4)
+  admin_fee_rate             Decimal?                        @default(0.00) @db.Decimal(5, 4)
+  products_for_staff_enabled Boolean                         @default(true)
+  admin_fee_enabled          Boolean                         @default(false)
+  loans_to_staff_enabled     Boolean                         @default(false)
+  allow_past_appointments    Boolean                         @default(false)
+  shared_stylists_enabled    Boolean                         @default(false)
+  tip_salon_percent          Decimal?                        @default(10.00) @db.Decimal(5, 2)
+  branch_color               String?                         @default("#3788d8") @db.VarChar(7)
+  openai_api_key             String?
+  elevenlabs_api_key         String?
+  elevenlabs_voice_id        String?
+  geofence_center_lat        Float?
+  geofence_center_lng        Float?
+  geofence_radius            Float?                          @default(200)
+  parent_tenant_id           String?                         @db.Uuid
+  business_type              String?                         @default("peluqueria") @db.VarChar(50)
+  plan                       String                          @default("free") @db.VarChar(50)
+  parent_tenant              tenants?                        @relation("TenantBranches", fields: [parent_tenant_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  child_tenants              tenants[]                       @relation("TenantBranches")
+  appointments               appointments[]
+  cash_sessions              cash_sessions[]
+  inventory_movements        inventory_movements[]
+  invoice_items              invoice_items[]
+  invoices                   invoices[]
+  payments                   payments[]
+  payroll_runs               payroll_runs[]
+  payrolls                   payrolls[]
+  product_categories         product_categories[]
+  products                   products[]
+  schedule_blocks            schedule_blocks[]
+  service_categories         service_categories[]
+  services                   services[]
+  staff_loan_payments        staff_loan_payments[]
+  staff_loans                staff_loans[]
+  staff_purchases            staff_purchases[]
+  tenant_numbers             tenant_numbers[]
+  users                      users[]
+  stylist_branch_assignments stylist_branch_assignments[]
+
+  @@index([parent_tenant_id], map: "idx_tenants_parent")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model users {
+  id                                                    String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenant_id                                             String?               @db.Uuid
+  role_id                                               Int?
+  first_name                                            String                @db.VarChar(100)
+  last_name                                             String?               @db.VarChar(100)
+  email                                                 String                @unique @db.Citext
+  password_hash                                         String                @db.VarChar(255)
+  phone                                                 String?               @db.VarChar(50)
+  status                                                String?               @default("active") @db.VarChar(50)
+  last_service_at                                       DateTime?             @db.Timestamptz(6)
+  payment_type                                          String?               @db.VarChar(50)
+  base_salary                                           Decimal?              @default(0) @db.Decimal(12, 0)
+  commission_rate                                       Decimal?              @default(0) @db.Decimal(5, 4)
+  created_at                                            DateTime?             @default(now()) @db.Timestamptz(6)
+  updated_at                                            DateTime?             @default(now()) @db.Timestamptz(6)
+  last_turn_at                                          DateTime?             @db.Timestamptz(6)
+  working_hours                                         Json?
+  is_active                                             Boolean?              @default(true)
+  schedule_type                                         String?               @default("salon") @db.VarChar(50)
+  avatar_url                                            String?
+  password                                              String?               @db.VarChar(255)
+  current_lat                                           Decimal?              @db.Decimal(10, 8)
+  current_lng                                           Decimal?              @db.Decimal(11, 8)
+  is_inside_geofence                                    Boolean?              @default(false)
+  last_location_update                                  DateTime?             @db.Timestamp(6)
+  appointments_appointments_client_idTousers            appointments[]        @relation("appointments_client_idTousers")
+  appointments_appointments_stylist_idTousers           appointments[]        @relation("appointments_stylist_idTousers")
+  cash_sessions_cash_sessions_closed_by_user_idTousers  cash_sessions[]       @relation("cash_sessions_closed_by_user_idTousers")
+  cash_sessions_cash_sessions_opened_by_user_idTousers  cash_sessions[]       @relation("cash_sessions_opened_by_user_idTousers")
+  invoice_items                                         invoice_items[]
+  invoices                                              invoices[]
+  payments                                              payments[]
+  payroll_runs                                          payroll_runs[]
+  payrolls                                              payrolls[]
+  schedule_blocks                                       schedule_blocks[]
+  staff_loan_payments                                   staff_loan_payments[]
+  staff_loans                                           staff_loans[]
+  staff_purchases_staff_purchases_seller_user_idTousers staff_purchases[]     @relation("staff_purchases_seller_user_idTousers")
+  staff_purchases_staff_purchases_stylist_idTousers     staff_purchases[]     @relation("staff_purchases_stylist_idTousers")
+  stylist_services                                      stylist_services[]
+  stylist_branch_assignments                            stylist_branch_assignments[]
+  roles                                                 roles?                @relation(fields: [role_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants                                               tenants?              @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([tenant_id, email], map: "users_email_ci_uniq")
+  @@index([last_service_at], map: "idx_users_last_service_at")
+  @@index([last_turn_at], map: "idx_users_last_turn_at")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model users_backup_20250828 {
+  id              String?   @db.Uuid
+  tenant_id       String?   @db.Uuid
+  role_id         Int?
+  first_name      String?   @db.VarChar(100)
+  last_name       String?   @db.VarChar(100)
+  email           String?   @db.VarChar(255)
+  password_hash   String?   @db.VarChar(255)
+  phone           String?   @db.VarChar(50)
+  status          String?   @db.VarChar(50)
+  last_service_at DateTime? @db.Timestamptz(6)
+  payment_type    String?   @db.VarChar(50)
+  base_salary     Decimal?  @db.Decimal(12, 2)
+  commission_rate Decimal?  @db.Decimal(5, 4)
+  created_at      DateTime? @db.Timestamptz(6)
+  updated_at      DateTime? @db.Timestamptz(6)
+  last_turn_at    DateTime? @db.Timestamptz(6)
+  working_hours   Json?
+  is_active       Boolean?
+
+  @@ignore
+}
+
+enum product_audience {
+  cliente
+  estilista
+  ambos
+}
+
+enum purchase_status_enum {
+  pendiente
+  deducido
+  parcial
+}

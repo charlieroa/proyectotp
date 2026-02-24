@@ -1,13 +1,36 @@
-﻿node_modules/
+# Dependencias
+node_modules/
+
+# Variables de entorno
 .env
 .env.*
-*.zip
-*.sql
+
+# Credenciales
 *.p12
 *.key
 *.crt
-*.txt
+
+# Builds y archivos compilados
 dist/
 build/
-.DS_Store
+*.zip
+*.tar.gz
+
+# Logs
 *.log
+server_logs*.txt
+server_error_logs*.txt
+
+# Backups de base de datos (NO init_schema.sql)
+*_dump.sql
+*_backup.sql
+
+# Artefactos del SO
+.DS_Store
+Thumbs.db
+nul
+
+# Apps Flutter eliminadas (seguridad)
+appestilistav2/
+tupelukeria_stylist_v3/
+appestilista/

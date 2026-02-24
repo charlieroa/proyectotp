@@ -10,11 +10,13 @@ const prisma = require('../config/prisma');
  */
 exports.createInvoiceAndPayments = async (req, res) => {
   const { tenant_id, id: cashier_id } = req.user;
-  const { client_id, services = [], products = [], payments = [] } = req.body;
+  const { client_id, services = [], products = [], payments = [], tip_amount: rawTipAmount = 0 } = req.body;
 
   if (!client_id || (services.length === 0 && products.length === 0) || payments.length === 0) {
     return res.status(400).json({ error: 'Faltan datos clave: cliente, items a facturar o información de pago.' });
   }
+
+  const tipAmount = Number(rawTipAmount) || 0;
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -69,13 +71,14 @@ exports.createInvoiceAndPayments = async (req, res) => {
         distinctStylists = stylistsRes.map(r => r.stylist_id);
       }
 
-      // 4) Crear factura
+      // 4) Crear factura (con propina si aplica)
       const invoice = await tx.invoices.create({
         data: {
           tenant_id,
           client_id,
           cash_session_id,
           total_amount: calculatedTotal,
+          tip_amount: tipAmount,
           status: 'open',
         },
         select: { id: true }
@@ -204,13 +207,39 @@ exports.createInvoiceAndPayments = async (req, res) => {
         }
       }
 
-      // 8) Poner factura en 'paid'
+      // 8) Registrar propina del salón como ingreso en caja
+      if (tipAmount > 0) {
+        const tenantInfo = await tx.tenants.findUnique({
+          where: { id: tenant_id },
+          select: { tip_salon_percent: true }
+        });
+        const tipSalonPercent = Number(tenantInfo?.tip_salon_percent ?? 10);
+        const salonTip = Math.round(tipAmount * (tipSalonPercent / 100));
+
+        if (salonTip > 0) {
+          await tx.cash_movements.create({
+            data: {
+              tenant_id,
+              user_id: cashier_id,
+              invoice_id: invoiceId,
+              type: 'income',
+              description: `Propina salón (${tipSalonPercent}%) - Factura #${String(invoiceId).slice(0, 8)}`,
+              amount: salonTip,
+              category: 'propina_salon',
+              payment_method: 'cash',
+              cash_session_id,
+            }
+          });
+        }
+      }
+
+      // 9) Poner factura en 'paid'
       await tx.invoices.update({
         where: { id: invoiceId },
         data: { status: 'paid' }
       });
 
-      return { invoiceId, calculatedTotal };
+      return { invoiceId, calculatedTotal, tipAmount };
     });
 
     return res.status(201).json({
@@ -218,6 +247,7 @@ exports.createInvoiceAndPayments = async (req, res) => {
       message: 'Pago y factura creados con éxito',
       invoiceId: result.invoiceId,
       total_amount: result.calculatedTotal,
+      tip_amount: result.tipAmount,
     });
   } catch (error) {
     console.error('Error al crear la factura y el pago:', error);

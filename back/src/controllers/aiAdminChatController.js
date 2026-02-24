@@ -55,19 +55,44 @@ function getPeriodDays(periodo) {
 
 // ==================== SYSTEM PROMPT ====================
 
-const ADMIN_SYSTEM_PROMPT = `Eres el asistente de inteligencia de negocio de TuPelukeria. Hablas con el dueño, administrador o recepcionista del salón.
+const ADMIN_SYSTEM_PROMPT = `Eres el asistente de inteligencia de negocio de TuPelukeria. Hablas con el dueño, administrador o recepcionista del salón por WhatsApp.
 
 ROL:
-- Consultar y gestionar: agenda, fichero digital, estilistas, servicios, productos, ventas, promociones y geolocalización.
+- Consultar y gestionar: agenda, fichero digital, estilistas, servicios, productos, ventas, promociones, geolocalización y configuración del salón.
 - Dar respuestas concisas con datos reales. Usa tablas o listas cuando haya varios registros.
 - Si el usuario pide CREAR algo (cita, servicio, producto, estilista, promoción), SIEMPRE confirma los datos antes de ejecutar la función de creación. Ejemplo: "Voy a crear el servicio Corte Clásico a $25.000 (30 min). ¿Confirmo?"
 - NUNCA inventes datos. Si una función devuelve resultados vacíos, dilo claramente.
 
+CREACIÓN DE ESTILISTAS - DATOS REQUERIDOS:
+- Cuando el admin quiera agregar un estilista, necesitas estos datos MÍNIMOS:
+  1. Nombre completo (nombre y apellido)
+  2. Email
+  3. Porcentaje de comisión (ej: 40%, 50%)
+  4. Tipo de pago: 'commission' (solo comisión), 'salary' (solo salario), 'mixed' (salario + comisión)
+- Si falta alguno de estos datos, PREGUNTA al admin antes de crear. Ejemplo: "¿Cuál será el porcentaje de comisión de Carlos?"
+- Datos opcionales: teléfono, salario base (si tipo_pago es 'salary' o 'mixed'), horario laboral.
+
+CONFIGURACIÓN DEL SALÓN:
+- El admin puede configurar horarios, información del salón, etc. mediante conversación natural.
+- Si dice "mi horario es de lunes a viernes de 8 a 6", usa configurar_horario_salon.
+- Si dice "quiero cambiar el nombre" o "actualizar la dirección", usa actualizar_info_salon.
+- Si dice "ver configuración" o "cómo está configurado", usa ver_configuracion_salon.
+
+FORMATO DE RESPUESTAS PARA VOZ (MUY IMPORTANTE):
+- Cuando reportes ventas o cifras monetarias, formatea de manera CLARA y CONVERSACIONAL:
+  * En vez de "$300.000" di "trescientos mil pesos" o "300 mil pesos"
+  * En vez de "$1.500.000" di "un millón quinientos mil" o "millón y medio"
+  * Desglosa SIEMPRE por método de pago: "llevas X en total: Y en efectivo, Z en tarjeta y W en transferencias"
+  * Para productos: "el producto más vendido es [nombre] con X unidades"
+- Esto es ESPECIALMENTE importante para que las respuestas por voz (TTS) sean claras y naturales.
+- Para ventas usa frases como: "Hoy llevas 300 mil pesos, mira: 100 mil en efectivo, 150 mil en tarjetas y 50 mil en canjes"
+
 ESTILO:
 - Español colombiano profesional pero cercano.
 - Respuestas directas con datos. Nada de relleno.
-- Usa formato con negritas, listas y emojis moderados para claridad.
-- Cuando muestres precios, usa formato colombiano: $25.000
+- Usa formato con negritas, listas y emojis moderados para claridad en texto.
+- Cuando muestres precios en texto, usa formato colombiano: $25.000
+- Cuando la respuesta vaya a ser leída por voz, usa formato hablado natural.
 
 CONTEXTO TEMPORAL:
 - Zona horaria: America/Bogota (UTC-5).
@@ -202,14 +227,21 @@ const ADMIN_TOOLS = [
         type: "function",
         function: {
             name: "crear_estilista",
-            description: "Registra un nuevo estilista. Solo usar cuando el admin haya confirmado los datos.",
+            description: "Registra un nuevo estilista. ANTES de crear, asegúrate de tener: nombre, apellido, email y porcentaje de comisión. Si falta algún dato, pregunta al admin.",
             parameters: {
                 type: "object",
                 properties: {
                     nombre: { type: "string", description: "Primer nombre" },
                     apellido: { type: "string", description: "Apellido" },
                     email: { type: "string", description: "Email del estilista" },
-                    telefono: { type: "string", description: "Teléfono (opcional)" }
+                    telefono: { type: "string", description: "Teléfono (opcional)" },
+                    porcentaje_comision: { type: "number", description: "Porcentaje de comisión 0-100 (ej: 40, 50)" },
+                    tipo_pago: { type: "string", enum: ["commission", "salary", "mixed"], description: "Tipo de pago: 'commission' (solo comisión), 'salary' (solo salario), 'mixed' (salario + comisión). Default: commission" },
+                    salario_base: { type: "number", description: "Salario base en COP (solo si tipo_pago es 'salary' o 'mixed')" },
+                    horario: {
+                        type: "object",
+                        description: "Horario laboral. Ej: {\"lunes\": {\"start\": \"8\", \"end\": \"18\"}}. Si no se da, se usa el del salón."
+                    }
                 },
                 required: ["nombre", "apellido", "email"]
             }
@@ -316,6 +348,52 @@ const ADMIN_TOOLS = [
                 required: []
             }
         }
+    },
+    // 19. configurar_horario_salon
+    {
+        type: "function",
+        function: {
+            name: "configurar_horario_salon",
+            description: "Configura o actualiza el horario de atención del salón. Permite definir qué días trabaja y en qué horario.",
+            parameters: {
+                type: "object",
+                properties: {
+                    horario: {
+                        type: "object",
+                        description: "Objeto con los días como claves y {start, end} como valores. Ej: {\"lunes\": {\"start\": \"8\", \"end\": \"18\"}, \"martes\": {\"start\": \"8\", \"end\": \"18\"}}. Días no incluidos = cerrado."
+                    }
+                },
+                required: ["horario"]
+            }
+        }
+    },
+    // 20. actualizar_info_salon
+    {
+        type: "function",
+        function: {
+            name: "actualizar_info_salon",
+            description: "Actualiza información general del salón: nombre, dirección, teléfono, email, sitio web.",
+            parameters: {
+                type: "object",
+                properties: {
+                    nombre: { type: "string", description: "Nombre del salón" },
+                    direccion: { type: "string", description: "Dirección del salón" },
+                    telefono: { type: "string", description: "Teléfono del salón" },
+                    email: { type: "string", description: "Email del salón" },
+                    sitio_web: { type: "string", description: "Sitio web del salón" }
+                },
+                required: []
+            }
+        }
+    },
+    // 21. ver_configuracion_salon
+    {
+        type: "function",
+        function: {
+            name: "ver_configuracion_salon",
+            description: "Muestra la configuración actual del salón: nombre, dirección, horarios, teléfono, etc.",
+            parameters: { type: "object", properties: {}, required: [] }
+        }
     }
 ];
 
@@ -339,7 +417,7 @@ async function executeFunction(fnName, args, tenantId) {
                 LEFT JOIN users st ON a.stylist_id = st.id
                 LEFT JOIN users cl ON a.client_id = cl.id
                 WHERE a.tenant_id = $1::uuid
-                  AND a.start_time >= $2 AND a.start_time <= $3
+                  AND a.start_time >= $2::timestamptz AND a.start_time <= $3::timestamptz
                   AND a.status != 'cancelled'
                 ORDER BY a.start_time
             `, tenantId, startUtc, endUtc);
@@ -372,7 +450,7 @@ async function executeFunction(fnName, args, tenantId) {
                 LEFT JOIN users st ON a.stylist_id = st.id
                 LEFT JOIN users cl ON a.client_id = cl.id
                 WHERE a.tenant_id = $1::uuid
-                  AND a.start_time >= $2 AND a.start_time <= $3
+                  AND a.start_time >= $2::timestamptz AND a.start_time <= $3::timestamptz
                   AND a.status != 'cancelled'
                 ORDER BY a.start_time
             `, tenantId, startUtc, endUtc);
@@ -536,7 +614,7 @@ async function executeFunction(fnName, args, tenantId) {
                 FROM appointments a
                 LEFT JOIN services s ON a.service_id = s.id
                 WHERE a.tenant_id = $1::uuid
-                  AND a.start_time >= $2 AND a.start_time <= $3
+                  AND a.start_time >= $2::timestamptz AND a.start_time <= $3::timestamptz
                   AND a.status IN ('completed', 'checked_out')
             `, tenantId, startUtc, endUtc);
             const r = rows[0];
@@ -599,7 +677,7 @@ async function executeFunction(fnName, args, tenantId) {
                 JOIN services s ON a.service_id = s.id
                 WHERE a.tenant_id = $1::uuid
                   AND a.status IN ('completed', 'checked_out')
-                  AND a.start_time >= NOW() - INTERVAL '1 day' * $2
+                  AND a.start_time >= NOW() - INTERVAL '1 day' * $2::int
                 GROUP BY s.name
                 ORDER BY total_citas DESC
                 LIMIT 10
@@ -645,16 +723,26 @@ async function executeFunction(fnName, args, tenantId) {
             const bcrypt = require('bcryptjs');
             const tempPass = 'Temp' + Math.random().toString(36).slice(2, 8) + '!';
             const hashedPass = await bcrypt.hash(tempPass, 10);
-            const rows = await prisma.$queryRawUnsafe(`
-                INSERT INTO users (tenant_id, first_name, last_name, email, phone, password_hash, role_id, status)
-                VALUES ($1::uuid, $2, $3, $4, $5, $6, 3, 'active')
+
+            const commissionRate = args.porcentaje_comision ? (args.porcentaje_comision / 100) : 0;
+            const paymentType = args.tipo_pago || 'commission';
+            const baseSalary = args.salario_base || 0;
+            const workingHoursJson = args.horario ? JSON.stringify(args.horario) : null;
+
+            const { rows } = await db.query(`
+                INSERT INTO users (tenant_id, first_name, last_name, email, phone, password_hash, role_id, status, commission_rate, payment_type, base_salary, working_hours)
+                VALUES ($1::uuid, $2, $3, $4, $5, $6, 3, 'active', $7, $8, $9, $10::jsonb)
                 RETURNING id, first_name, last_name, email
-            `, tenantId, args.nombre, args.apellido, args.email, args.telefono || null, hashedPass);
+            `, [tenantId, args.nombre, args.apellido, args.email, args.telefono || null, hashedPass,
+                commissionRate, paymentType, baseSalary, workingHoursJson]);
             return {
                 success: true,
                 estilista: rows[0],
+                comision: `${args.porcentaje_comision || 0}%`,
+                tipo_pago: paymentType,
+                salario_base: baseSalary,
                 password_temporal: tempPass,
-                mensaje: `Estilista ${args.nombre} ${args.apellido} creado. Password temporal: ${tempPass}`
+                mensaje: `Estilista ${args.nombre} ${args.apellido} creado. Comisión: ${args.porcentaje_comision || 0}%. Password temporal: ${tempPass}`
             };
         }
 
@@ -680,7 +768,7 @@ async function executeFunction(fnName, args, tenantId) {
                 JOIN invoices i ON ii.invoice_id = i.id
                 WHERE ii.tenant_id = $1::uuid
                   AND ii.item_type = 'product'
-                  AND i.created_at >= NOW() - INTERVAL '1 day' * $2
+                  AND i.created_at >= NOW() - INTERVAL '1 day' * $2::int
                 GROUP BY ii.description
                 ORDER BY unidades_vendidas DESC
                 LIMIT 10
@@ -734,6 +822,8 @@ async function executeFunction(fnName, args, tenantId) {
             const fecha = normalizeDateKeyword(args.fecha);
             const startUtc = makeLocalUtc(fecha, '00:00');
             const endUtc = makeLocalUtc(fecha, '23:59');
+
+            // Query 1: Totales por tipo de item
             const { rows } = await db.query(`
                 SELECT
                     COALESCE(SUM(ii.total_price), 0) AS total_facturado,
@@ -744,9 +834,37 @@ async function executeFunction(fnName, args, tenantId) {
                 FROM invoice_items ii
                 JOIN invoices i ON ii.invoice_id = i.id
                 WHERE ii.tenant_id = $1::uuid
-                  AND i.created_at >= $2 AND i.created_at <= $3
+                  AND i.created_at >= $2::timestamptz AND i.created_at <= $3::timestamptz
             `, [tenantId, startUtc, endUtc]);
-            return { fecha, ...rows[0] };
+
+            // Query 2: Desglose por método de pago
+            const paymentBreakdown = await db.query(`
+                SELECT
+                    COALESCE(p.payment_method, 'otro') AS metodo,
+                    COALESCE(SUM(p.amount), 0) AS total
+                FROM payments p
+                JOIN invoices i ON p.invoice_id = i.id
+                WHERE i.tenant_id = $1::uuid
+                  AND p.payment_date >= $2::timestamptz AND p.payment_date <= $3::timestamptz
+                GROUP BY p.payment_method
+                ORDER BY total DESC
+            `, [tenantId, startUtc, endUtc]);
+
+            const desglose_metodo_pago = {};
+            for (const row of paymentBreakdown.rows) {
+                const metodo = row.metodo === 'cash' ? 'efectivo' :
+                               row.metodo === 'card' ? 'tarjeta' :
+                               row.metodo === 'transfer' ? 'transferencia' :
+                               row.metodo === 'exchange' ? 'canje' : row.metodo;
+                desglose_metodo_pago[metodo] = row.total;
+            }
+
+            return {
+                fecha,
+                ...rows[0],
+                desglose_metodo_pago,
+                nota_formato: 'Presenta los valores de forma conversacional. Ej: "Hoy llevas 300 mil pesos: 100 mil en efectivo, 150 mil en tarjetas y 50 mil en canjes"'
+            };
         }
 
         // 18. rendimiento_estilistas
@@ -763,11 +881,104 @@ async function executeFunction(fnName, args, tenantId) {
                 JOIN services s ON a.service_id = s.id
                 WHERE a.tenant_id = $1::uuid
                   AND a.status IN ('completed', 'checked_out')
-                  AND a.start_time >= NOW() - INTERVAL '1 day' * $2
+                  AND a.start_time >= NOW() - INTERVAL '1 day' * $2::int
                 GROUP BY u.id, u.first_name, u.last_name
                 ORDER BY ingresos_generados DESC
             `, [tenantId, days]);
             return { periodo: args.periodo || 'mes', estilistas: rows };
+        }
+
+        // 19. configurar_horario_salon
+        case 'configurar_horario_salon': {
+            try {
+                await db.query(
+                    `UPDATE tenants SET working_hours = $1::jsonb, updated_at = NOW() WHERE id = $2::uuid`,
+                    [JSON.stringify(args.horario), tenantId]
+                );
+
+                // Formatear horario para respuesta legible
+                const diasEs = { lunes: 'Lunes', martes: 'Martes', miercoles: 'Miércoles', miércoles: 'Miércoles', jueves: 'Jueves', viernes: 'Viernes', sabado: 'Sábado', sábado: 'Sábado', domingo: 'Domingo' };
+                const horarioLegible = Object.entries(args.horario).map(([dia, h]) =>
+                    `${diasEs[dia] || dia}: ${h.start}:00 - ${h.end}:00`
+                ).join('\n');
+
+                return {
+                    success: true,
+                    horario: args.horario,
+                    horario_legible: horarioLegible,
+                    mensaje: 'Horario del salón actualizado correctamente.'
+                };
+            } catch (err) {
+                return { error: `Error actualizando horario: ${err.message}` };
+            }
+        }
+
+        // 20. actualizar_info_salon
+        case 'actualizar_info_salon': {
+            try {
+                const updates = [];
+                const values = [];
+                let paramIdx = 1;
+
+                if (args.nombre) { updates.push(`name = $${paramIdx++}`); values.push(args.nombre); }
+                if (args.direccion) { updates.push(`address = $${paramIdx++}`); values.push(args.direccion); }
+                if (args.telefono) { updates.push(`phone = $${paramIdx++}`); values.push(args.telefono); }
+                if (args.email) { updates.push(`email = $${paramIdx++}`); values.push(args.email); }
+                if (args.sitio_web) { updates.push(`website = $${paramIdx++}`); values.push(args.sitio_web); }
+
+                if (updates.length === 0) return { error: 'No se proporcionaron datos para actualizar.' };
+
+                updates.push(`updated_at = NOW()`);
+                values.push(tenantId);
+
+                await db.query(
+                    `UPDATE tenants SET ${updates.join(', ')} WHERE id = $${paramIdx}::uuid`,
+                    values
+                );
+
+                return {
+                    success: true,
+                    campos_actualizados: Object.keys(args).filter(k => args[k]),
+                    mensaje: 'Información del salón actualizada correctamente.'
+                };
+            } catch (err) {
+                return { error: `Error actualizando información: ${err.message}` };
+            }
+        }
+
+        // 21. ver_configuracion_salon
+        case 'ver_configuracion_salon': {
+            const { rows } = await db.query(`
+                SELECT name, address, phone, email, website, working_hours,
+                       geofence_center_lat, geofence_center_lng, geofence_radius
+                FROM tenants WHERE id = $1::uuid
+            `, [tenantId]);
+            if (!rows.length) return { error: 'No se encontró el salón.' };
+            const t = rows[0];
+
+            // Formatear horario legible
+            let horarioLegible = 'No configurado';
+            if (t.working_hours) {
+                const wh = typeof t.working_hours === 'string' ? JSON.parse(t.working_hours) : t.working_hours;
+                const diasEs = { lunes: 'Lunes', martes: 'Martes', miercoles: 'Miércoles', miércoles: 'Miércoles', jueves: 'Jueves', viernes: 'Viernes', sabado: 'Sábado', sábado: 'Sábado', domingo: 'Domingo' };
+                horarioLegible = Object.entries(wh).map(([dia, h]) =>
+                    `${diasEs[dia] || dia}: ${h.start}:00 - ${h.end}:00`
+                ).join('\n');
+            }
+
+            return {
+                nombre: t.name,
+                direccion: t.address || 'No configurada',
+                telefono: t.phone || 'No configurado',
+                email: t.email || 'No configurado',
+                sitio_web: t.website || 'No configurado',
+                horario: horarioLegible,
+                geofence: t.geofence_center_lat ? {
+                    lat: t.geofence_center_lat,
+                    lng: t.geofence_center_lng,
+                    radio_metros: t.geofence_radius
+                } : 'No configurado'
+            };
         }
 
         default:
