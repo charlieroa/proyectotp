@@ -55,40 +55,56 @@ function getPeriodDays(periodo) {
 
 // ==================== SYSTEM PROMPT ====================
 
-const ADMIN_SYSTEM_PROMPT = `Eres el asistente de inteligencia de negocio de TuPelukeria. Hablas con el dueño, administrador o recepcionista del salón por WhatsApp.
+const ADMIN_SYSTEM_PROMPT = `Eres el asistente de inteligencia de negocio de TuPelukeria. Hablas con el JEFE — el dueño, administrador o recepcionista del salón por WhatsApp.
+
+PERSONALIDAD (MUY IMPORTANTE):
+- Siempre tratas al usuario como "jefe". Es tu forma natural de dirigirte a él.
+- Al saludar o cuando te hablen por primera vez, responde: "Hola jefe 👋"
+- Cuando te pidan hacer cambios o ejecutar acciones, confirma con actitud de servicio: "Como ordene jefe", "Listo jefe", "A la orden jefe", "Claro que sí jefe".
+- Cuando reportes datos o respondas consultas: "Mire jefe, aquí le tengo...", "Jefe, esto es lo que encontré...", "Aquí tiene jefe..."
+- Cuando confirmes algo exitoso: "Listo jefe, ya quedó", "Hecho jefe ✅", "Ya le dejé eso listo jefe"
+- Eres leal, eficiente y siempre dispuesto. Como un asistente de confianza que respeta y sirve al jefe con buena actitud.
 
 ROL:
 - Consultar y gestionar: agenda, fichero digital, estilistas, servicios, productos, ventas, promociones, geolocalización y configuración del salón.
 - Dar respuestas concisas con datos reales. Usa tablas o listas cuando haya varios registros.
-- Si el usuario pide CREAR algo (cita, servicio, producto, estilista, promoción), SIEMPRE confirma los datos antes de ejecutar la función de creación. Ejemplo: "Voy a crear el servicio Corte Clásico a $25.000 (30 min). ¿Confirmo?"
-- NUNCA inventes datos. Si una función devuelve resultados vacíos, dilo claramente.
+- Si el usuario pide CREAR algo (cita, servicio, producto, estilista, promoción), SIEMPRE confirma los datos antes de ejecutar la función de creación. Ejemplo: "Jefe, voy a crear el servicio Corte Clásico a $25.000 (30 min). ¿Le doy?"
+- NUNCA inventes datos. Si una función devuelve resultados vacíos, dilo claramente: "Jefe, no encontré nada con esos datos."
 
 CREACIÓN DE ESTILISTAS - DATOS REQUERIDOS:
-- Cuando el admin quiera agregar un estilista, necesitas estos datos MÍNIMOS:
+- Cuando el jefe quiera agregar un estilista, necesitas estos datos MÍNIMOS:
   1. Nombre completo (nombre y apellido)
   2. Email
   3. Porcentaje de comisión (ej: 40%, 50%)
   4. Tipo de pago: 'commission' (solo comisión), 'salary' (solo salario), 'mixed' (salario + comisión)
-- Si falta alguno de estos datos, PREGUNTA al admin antes de crear. Ejemplo: "¿Cuál será el porcentaje de comisión de Carlos?"
+- Si falta alguno de estos datos, PREGUNTA al jefe antes de crear. Ejemplo: "Jefe, ¿cuál será el porcentaje de comisión de Carlos?"
 - Datos opcionales: teléfono, salario base (si tipo_pago es 'salary' o 'mixed'), horario laboral.
 
 CONFIGURACIÓN DEL SALÓN:
-- El admin puede configurar horarios, información del salón, etc. mediante conversación natural.
-- Si dice "mi horario es de lunes a viernes de 8 a 6", usa configurar_horario_salon.
+- El jefe puede configurar horarios, información del salón, etc. mediante conversación natural.
+- Si dice "mi horario es de lunes a viernes de 8 a 6", usa configurar_horario_salon y confirma: "Como ordene jefe, le actualizo el horario."
 - Si dice "quiero cambiar el nombre" o "actualizar la dirección", usa actualizar_info_salon.
 - Si dice "ver configuración" o "cómo está configurado", usa ver_configuracion_salon.
+
+HORARIOS DE ESTILISTAS:
+- El jefe puede cambiar el horario de un estilista individual. Ejemplos:
+  * "Carlos ya no trabaja los lunes" → usa modificar_horario_estilista con accion='quitar_dia'
+  * "María va a trabajar martes de 2 a 5" → usa modificar_horario_estilista con accion='agregar_dia'
+  * "Pedro trabaja de lunes a viernes de 8 a 6" → usa modificar_horario_estilista con accion='actualizar'
+  * "¿Cuál es el horario de Carlos?" → usa ver_horario_estilista
+- SIEMPRE confirma antes de hacer cambios: "Jefe, le voy a quitar los lunes a Carlos. ¿Le doy?"
 
 FORMATO DE RESPUESTAS PARA VOZ (MUY IMPORTANTE):
 - Cuando reportes ventas o cifras monetarias, formatea de manera CLARA y CONVERSACIONAL:
   * En vez de "$300.000" di "trescientos mil pesos" o "300 mil pesos"
   * En vez de "$1.500.000" di "un millón quinientos mil" o "millón y medio"
-  * Desglosa SIEMPRE por método de pago: "llevas X en total: Y en efectivo, Z en tarjeta y W en transferencias"
-  * Para productos: "el producto más vendido es [nombre] con X unidades"
+  * Desglosa SIEMPRE por método de pago: "jefe, llevas X en total: Y en efectivo, Z en tarjeta y W en transferencias"
+  * Para productos: "jefe, el producto más vendido es [nombre] con X unidades"
 - Esto es ESPECIALMENTE importante para que las respuestas por voz (TTS) sean claras y naturales.
-- Para ventas usa frases como: "Hoy llevas 300 mil pesos, mira: 100 mil en efectivo, 150 mil en tarjetas y 50 mil en canjes"
+- Para ventas usa frases como: "Jefe, hoy llevas 300 mil pesos, mire: 100 mil en efectivo, 150 mil en tarjetas y 50 mil en canjes"
 
 ESTILO:
-- Español colombiano profesional pero cercano.
+- Español colombiano profesional pero cercano y respetuoso. Siempre dices "jefe".
 - Respuestas directas con datos. Nada de relleno.
 - Usa formato con negritas, listas y emojis moderados para claridad en texto.
 - Cuando muestres precios en texto, usa formato colombiano: $25.000
@@ -393,6 +409,41 @@ const ADMIN_TOOLS = [
             name: "ver_configuracion_salon",
             description: "Muestra la configuración actual del salón: nombre, dirección, horarios, teléfono, etc.",
             parameters: { type: "object", properties: {}, required: [] }
+        }
+    },
+    // 22. modificar_horario_estilista
+    {
+        type: "function",
+        function: {
+            name: "modificar_horario_estilista",
+            description: "Modifica el horario laboral de un estilista específico. Permite cambiar días y horas de trabajo. Ejemplos: 'Carlos ya no trabaja los lunes', 'María trabaja martes de 2 a 5', 'Pedro trabaja de lunes a viernes de 8 a 6'.",
+            parameters: {
+                type: "object",
+                properties: {
+                    estilista: { type: "string", description: "Nombre del estilista" },
+                    horario: {
+                        type: "object",
+                        description: "Objeto con los días como claves y {start, end} como valores. Días con 'cerrado' o no incluidos = no trabaja. Ej: {\"lunes\": \"cerrado\", \"martes\": {\"start\": \"14\", \"end\": \"17\"}}"
+                    },
+                    accion: { type: "string", enum: ["actualizar", "quitar_dia", "agregar_dia"], description: "'actualizar' para set completo, 'quitar_dia' para remover un día, 'agregar_dia' para agregar un día con horario" }
+                },
+                required: ["estilista", "horario"]
+            }
+        }
+    },
+    // 23. ver_horario_estilista
+    {
+        type: "function",
+        function: {
+            name: "ver_horario_estilista",
+            description: "Muestra el horario laboral actual de un estilista específico.",
+            parameters: {
+                type: "object",
+                properties: {
+                    estilista: { type: "string", description: "Nombre del estilista" }
+                },
+                required: ["estilista"]
+            }
         }
     }
 ];
@@ -891,20 +942,55 @@ async function executeFunction(fnName, args, tenantId) {
         // 19. configurar_horario_salon
         case 'configurar_horario_salon': {
             try {
+                // Convertir formato de la IA {start, end} al formato de la DB "HH:MM-HH:MM"
+                const allDays = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
+                const diasEs = { lunes: 'Lunes', martes: 'Martes', miercoles: 'Miércoles', miércoles: 'Miércoles', jueves: 'Jueves', viernes: 'Viernes', sabado: 'Sábado', sábado: 'Sábado', domingo: 'Domingo' };
+
+                // Normalizar keys con tilde → sin tilde
+                const normalized = {};
+                for (const [key, val] of Object.entries(args.horario)) {
+                    const normalKey = key.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+                    normalized[normalKey] = val;
+                }
+
+                // Obtener horario actual para preservar días no mencionados
+                const currentResult = await db.query('SELECT working_hours FROM tenants WHERE id = $1::uuid', [tenantId]);
+                const currentHours = currentResult.rows[0]?.working_hours || {};
+                const dbHorario = typeof currentHours === 'string' ? JSON.parse(currentHours) : currentHours;
+
+                // Construir horario final: días mencionados se actualizan, el resto se preserva
+                const finalHorario = {};
+                for (const day of allDays) {
+                    if (normalized[day]) {
+                        const h = normalized[day];
+                        if (typeof h === 'object' && h.start !== undefined && h.end !== undefined) {
+                            const start = String(h.start).padStart(2, '0');
+                            const end = String(h.end).padStart(2, '0');
+                            finalHorario[day] = `${start}:00-${end}:00`;
+                        } else if (typeof h === 'string') {
+                            // Ya viene en formato string (ej: "08:00-15:00" o "cerrado")
+                            finalHorario[day] = h;
+                        } else {
+                            finalHorario[day] = 'cerrado';
+                        }
+                    } else {
+                        // Preservar valor anterior o poner cerrado
+                        finalHorario[day] = dbHorario[day] || 'cerrado';
+                    }
+                }
+
                 await db.query(
                     `UPDATE tenants SET working_hours = $1::jsonb, updated_at = NOW() WHERE id = $2::uuid`,
-                    [JSON.stringify(args.horario), tenantId]
+                    [JSON.stringify(finalHorario), tenantId]
                 );
 
-                // Formatear horario para respuesta legible
-                const diasEs = { lunes: 'Lunes', martes: 'Martes', miercoles: 'Miércoles', miércoles: 'Miércoles', jueves: 'Jueves', viernes: 'Viernes', sabado: 'Sábado', sábado: 'Sábado', domingo: 'Domingo' };
-                const horarioLegible = Object.entries(args.horario).map(([dia, h]) =>
-                    `${diasEs[dia] || dia}: ${h.start}:00 - ${h.end}:00`
+                const horarioLegible = allDays.map(day =>
+                    `${diasEs[day] || day}: ${finalHorario[day] === 'cerrado' ? 'Cerrado' : finalHorario[day].replace('-', ' - ')}`
                 ).join('\n');
 
                 return {
                     success: true,
-                    horario: args.horario,
+                    horario: finalHorario,
                     horario_legible: horarioLegible,
                     mensaje: 'Horario del salón actualizado correctamente.'
                 };
@@ -979,6 +1065,138 @@ async function executeFunction(fnName, args, tenantId) {
                     radio_metros: t.geofence_radius
                 } : 'No configurado'
             };
+        }
+
+        // 22. modificar_horario_estilista
+        case 'modificar_horario_estilista': {
+            try {
+                // Buscar estilista por nombre
+                const stRows = await prisma.$queryRawUnsafe(`
+                    SELECT id, first_name, last_name, working_hours FROM users
+                    WHERE tenant_id = $1::uuid AND role_id = 3
+                      AND COALESCE(NULLIF(status,''),'active') = 'active'
+                      AND (LOWER(first_name) LIKE $2 OR LOWER(last_name) LIKE $2
+                           OR LOWER(CONCAT(first_name, ' ', last_name)) LIKE $2)
+                    LIMIT 1
+                `, tenantId, `%${args.estilista.toLowerCase()}%`);
+
+                if (!stRows.length) return { error: `No encontré un estilista llamado "${args.estilista}".` };
+                const stylist = stRows[0];
+                const stylistName = `${stylist.first_name} ${stylist.last_name || ''}`.trim();
+
+                // Obtener horario actual
+                let currentHours = stylist.working_hours || {};
+                if (typeof currentHours === 'string') currentHours = JSON.parse(currentHours);
+
+                const allDays = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
+                const diasEs = { lunes: 'Lunes', martes: 'Martes', miercoles: 'Miércoles', jueves: 'Jueves', viernes: 'Viernes', sabado: 'Sábado', domingo: 'Domingo' };
+                const accion = args.accion || 'actualizar';
+
+                // Normalizar keys del horario recibido
+                const normalized = {};
+                for (const [key, val] of Object.entries(args.horario)) {
+                    const normalKey = key.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+                    normalized[normalKey] = val;
+                }
+
+                let finalHorario;
+
+                if (accion === 'quitar_dia') {
+                    // Remover días específicos del horario actual
+                    finalHorario = { ...currentHours };
+                    for (const day of Object.keys(normalized)) {
+                        delete finalHorario[day];
+                    }
+                } else if (accion === 'agregar_dia') {
+                    // Agregar/actualizar días específicos, preservar el resto
+                    finalHorario = { ...currentHours };
+                    for (const day of Object.keys(normalized)) {
+                        const h = normalized[day];
+                        if (h === 'cerrado') {
+                            delete finalHorario[day];
+                        } else if (typeof h === 'object' && h.start !== undefined && h.end !== undefined) {
+                            finalHorario[day] = { start: String(h.start), end: String(h.end) };
+                        }
+                    }
+                } else {
+                    // Actualizar completo
+                    finalHorario = {};
+                    for (const day of allDays) {
+                        if (normalized[day] && normalized[day] !== 'cerrado') {
+                            const h = normalized[day];
+                            if (typeof h === 'object' && h.start !== undefined && h.end !== undefined) {
+                                finalHorario[day] = { start: String(h.start), end: String(h.end) };
+                            }
+                        }
+                    }
+                }
+
+                // Guardar en DB
+                await db.query(
+                    `UPDATE users SET working_hours = $1::jsonb, updated_at = NOW() WHERE id = $2::uuid`,
+                    [JSON.stringify(finalHorario), stylist.id]
+                );
+
+                const horarioLegible = allDays
+                    .filter(day => finalHorario[day])
+                    .map(day => {
+                        const h = finalHorario[day];
+                        return `${diasEs[day] || day}: ${h.start}:00 - ${h.end}:00`;
+                    }).join('\n');
+
+                return {
+                    success: true,
+                    estilista: stylistName,
+                    horario: finalHorario,
+                    horario_legible: horarioLegible || 'Sin horario definido (usa horario del salón)',
+                    mensaje: `Horario de ${stylistName} actualizado correctamente.`
+                };
+            } catch (err) {
+                return { error: `Error actualizando horario del estilista: ${err.message}` };
+            }
+        }
+
+        // 23. ver_horario_estilista
+        case 'ver_horario_estilista': {
+            try {
+                const stRows = await prisma.$queryRawUnsafe(`
+                    SELECT id, first_name, last_name, working_hours FROM users
+                    WHERE tenant_id = $1::uuid AND role_id = 3
+                      AND COALESCE(NULLIF(status,''),'active') = 'active'
+                      AND (LOWER(first_name) LIKE $2 OR LOWER(last_name) LIKE $2
+                           OR LOWER(CONCAT(first_name, ' ', last_name)) LIKE $2)
+                    LIMIT 1
+                `, tenantId, `%${args.estilista.toLowerCase()}%`);
+
+                if (!stRows.length) return { error: `No encontré un estilista llamado "${args.estilista}".` };
+                const stylist = stRows[0];
+                const stylistName = `${stylist.first_name} ${stylist.last_name || ''}`.trim();
+
+                let workingHours = stylist.working_hours || {};
+                if (typeof workingHours === 'string') workingHours = JSON.parse(workingHours);
+
+                const allDays = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
+                const diasEs = { lunes: 'Lunes', martes: 'Martes', miercoles: 'Miércoles', jueves: 'Jueves', viernes: 'Viernes', sabado: 'Sábado', domingo: 'Domingo' };
+
+                const hasCustomHours = Object.keys(workingHours).length > 0;
+
+                const horarioLegible = allDays.map(day => {
+                    const h = workingHours[day];
+                    if (!h) return `${diasEs[day] || day}: No trabaja`;
+                    if (typeof h === 'string') return `${diasEs[day] || day}: ${h}`;
+                    return `${diasEs[day] || day}: ${h.start}:00 - ${h.end}:00`;
+                }).join('\n');
+
+                return {
+                    estilista: stylistName,
+                    tiene_horario_personalizado: hasCustomHours,
+                    horario: workingHours,
+                    horario_legible: hasCustomHours ? horarioLegible : 'Usa el horario del salón (no tiene horario personalizado)',
+                    nota: hasCustomHours ? '' : 'Este estilista no tiene horario personalizado. Trabaja según el horario general del salón.'
+                };
+            } catch (err) {
+                return { error: `Error consultando horario: ${err.message}` };
+            }
         }
 
         default:

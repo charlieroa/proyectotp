@@ -1,0 +1,47 @@
+/*
+Template Name: Velzon - Admin & Dashboard Template
+Author: Themesbrand
+Website: https://themesbrand.com/
+Contact: support@themesbrand.com
+File: Custom Css File
+*/
+
+/* Tenant Switcher - collapsed sidebar */
+[data-sidebar-size="sm"] {
+  .tenant-switcher-sidebar {
+    padding: 8px 4px !important;
+
+    .sidebar-switcher-text {
+      display: none;
+    }
+
+    .ri-arrow-up-s-line {
+      display: none !important;
+    }
+
+    .btn {
+      justify-content: center;
+      padding: 8px !important;
+    }
+  }
+}
+
+/* Tenant Switcher - hover on collapsed sidebar */
+[data-sidebar-size="sm"] .navbar-menu:hover {
+  .tenant-switcher-sidebar {
+    padding: 12px 0 !important;
+
+    .sidebar-switcher-text {
+      display: block;
+    }
+
+    .ri-arrow-up-s-line {
+      display: inline-block !important;
+    }
+
+    .btn {
+      justify-content: flex-start;
+      padding: 8px 12px !important;
+    }
+  }
+}

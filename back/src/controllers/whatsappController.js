@@ -10,6 +10,7 @@ const { getGlobalOpenAIKey } = require('../services/openaiKeyService');
 const { trackUsage } = require('../services/tokenTracker');
 const { executeFunction: executeAdminFunction, ADMIN_TOOLS, ADMIN_SYSTEM_PROMPT } = require('./aiAdminChatController');
 const bcrypt = require('bcryptjs');
+const { isPlanAtLeast, getTenantPlan } = require('../middleware/planMiddleware');
 
 console.log('🚀 [DEBUG] whatsappController.js cargado v15 (Fixes: ORM, cache, security)');
 
@@ -426,6 +427,9 @@ exports.handleWahaWebhook = async (req, res) => {
             // ═══════════════════════════════════════════════════════════
             // ══════  INTERCEPTOR: ADMIN POR WHATSAPP  ═════════════════
             // ═══════════════════════════════════════════════════════════
+            // Verificar plan business+ para admin chat por WhatsApp
+            const tenantPlan = await getTenantPlan(tenantId);
+
             if (userMessage && typeof userMessage === 'string') {
                 const adminCacheKey = `${tenantId}:${chatId}`;
                 const adminSession = adminSessionCache.get(adminCacheKey);
@@ -435,6 +439,12 @@ exports.handleWahaWebhook = async (req, res) => {
 
                 // 1. Si ya tiene sesión admin activa
                 if (adminSession && (Date.now() - adminSession.lastActivity < ADMIN_SESSION_TIMEOUT)) {
+                    // Verificar que el plan siga siendo business+ para sesiones admin activas
+                    if (!isPlanAtLeast(tenantPlan, 'business')) {
+                        adminSessionCache.delete(adminCacheKey);
+                        await wahaService.sendMessage(tenantId, chatId, '🔒 El modo administrador por WhatsApp requiere el plan Business o superior. Tu sesión admin ha sido cerrada.');
+                        return res.status(200).send('OK');
+                    }
                     // Comando para salir
                     if (/^(salir|cerrar\s*sesion|cerrar\s*sesión|exit|logout)$/i.test(msgTrimmed)) {
                         adminSessionCache.delete(adminCacheKey);
@@ -707,6 +717,11 @@ exports.handleWahaWebhook = async (req, res) => {
 
                 // 3. Si envía la palabra clave "admin"
                 if (/^admin(istrador)?$/i.test(msgTrimmed)) {
+                    // Verificar plan business+ para admin por WhatsApp
+                    if (!isPlanAtLeast(tenantPlan, 'business')) {
+                        await wahaService.sendMessage(tenantId, chatId, '🔒 El modo administrador por WhatsApp requiere el plan Business o superior. Visita app.tupelukeria.com/settings para actualizar tu plan.');
+                        return res.status(200).send('OK');
+                    }
                     // Verificar si hay bloqueo activo
                     const blockedState = adminAuthStateCache.get(adminCacheKey);
                     if (blockedState && blockedState.blockedUntil && Date.now() < blockedState.blockedUntil) {
@@ -961,6 +976,13 @@ exports.handleWahaWebhook = async (req, res) => {
 
             console.log(`\n💬 [MENSAJE] De: ${senderName} (${chatId})`);
             console.log(`   Texto: "${userMessage}"`);
+
+            // Verificar plan pro+ para bot de cliente por WhatsApp
+            if (!isPlanAtLeast(tenantPlan, 'pro')) {
+                console.log(`   🔒 Tenant ${tenantId} tiene plan ${tenantPlan}, bot cliente requiere pro+`);
+                await wahaService.sendMessage(tenantId, chatId, '🔒 El asistente por WhatsApp requiere un plan superior. Contacta al administrador del salón.');
+                return res.status(200).send('OK');
+            }
 
             // Obtener API Key global y datos del tenant
             const apiKey = await getGlobalOpenAIKey();

@@ -4,6 +4,7 @@ const router = express.Router();
 
 const requireAuth = require('../middleware/authMiddleware'); // 👈 default export: es una función
 const tenantController = require('../controllers/tenantController'); // objeto con handlers
+const { requirePlan } = require('../middleware/planMiddleware');
 
 // 🧪 Debug en caliente: confirma que ambos son funciones
 console.log('[tenantRoutes] typeof requireAuth =', typeof requireAuth);
@@ -19,7 +20,7 @@ const ensureFn = (fn, name) =>
       };
 
 // POST /api/tenants/branch - Crear sucursal (protegido, debe ir ANTES de /:id)
-router.post('/branch', ensureFn(requireAuth, 'requireAuth'), ensureFn(tenantController.createBranch, 'createBranch'));
+router.post('/branch', ensureFn(requireAuth, 'requireAuth'), requirePlan('enterprise'), ensureFn(tenantController.createBranch, 'createBranch'));
 
 // GET /api/tenants/my-businesses - Listar negocios del admin (protegido)
 router.get('/my-businesses', ensureFn(requireAuth, 'requireAuth'), ensureFn(tenantController.getMyBusinesses, 'getMyBusinesses'));

@@ -324,11 +324,21 @@ exports.createBranch = async (req, res) => {
     // Determinar el parent: si el tenant actual ya es hijo, usar su parent; si no, él mismo es el parent
     const currentTenant = await prisma.tenants.findUnique({
       where: { id: tenant_id },
-      select: { id: true, parent_tenant_id: true },
+      select: { id: true, parent_tenant_id: true, plan: true },
     });
     if (!currentTenant) return res.status(404).json({ error: 'Tenant actual no encontrado.' });
 
     const parentId = currentTenant.parent_tenant_id || currentTenant.id;
+
+    // Si el tenant actual es hijo, obtener el plan del padre real
+    let parentPlan = currentTenant.plan || 'free';
+    if (currentTenant.parent_tenant_id) {
+      const parentTenant = await prisma.tenants.findUnique({
+        where: { id: currentTenant.parent_tenant_id },
+        select: { plan: true },
+      });
+      parentPlan = parentTenant?.plan || parentPlan;
+    }
 
     const slug = createSlug(name);
 
@@ -341,6 +351,7 @@ exports.createBranch = async (req, res) => {
         email: clean(email),
         business_type: business_type || 'peluqueria',
         parent_tenant_id: parentId,
+        plan: parentPlan, // Heredar plan del padre
       },
     });
 
