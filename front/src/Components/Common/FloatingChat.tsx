@@ -10,6 +10,8 @@ import {
     Alert
 } from "reactstrap";
 import { jwtDecode } from "jwt-decode";
+import { useDispatch } from "react-redux";
+import { fetchSetupStatus } from "../../slices/Settings/settingsSlice";
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000/api';
 
@@ -49,7 +51,27 @@ const getUserId = (): string | null => {
     }
 };
 
+// Obtener role_id del token
+const getUserRole = (): number | null => {
+    try {
+        const token = localStorage.getItem('token');
+        if (!token) return null;
+        const decoded: any = jwtDecode(token);
+        return decoded?.user?.role_id || null;
+    } catch {
+        return null;
+    }
+};
+
+const isAdminRole = (): boolean => {
+    const role = getUserRole();
+    return role !== null && [1, 2].includes(role);
+};
+
+const SETUP_FUNCTIONS = ['crear_servicio', 'crear_estilista', 'configurar_horario_salon', 'actualizar_info_salon'];
+
 const FloatingChat: React.FC<FloatingChatProps> = ({ isOpen, toggle }) => {
+    const dispatch: any = useDispatch();
     const [chatMessage, setChatMessage] = useState('');
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [isAiTyping, setIsAiTyping] = useState(false);
@@ -108,6 +130,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({ isOpen, toggle }) => {
     const callAiChat = async (userMessage: string) => {
         const tenantId = getTenantId();
         const clientId = getUserId();
+        const admin = isAdminRole();
 
         if (!tenantId) {
             setError('No se encontró el tenant. Por favor, inicia sesión.');
@@ -115,8 +138,10 @@ const FloatingChat: React.FC<FloatingChatProps> = ({ isOpen, toggle }) => {
             return;
         }
 
+        const chatEndpoint = admin ? `${API_BASE_URL}/ai-admin-chat` : `${API_BASE_URL}/ai-chat`;
+
         try {
-            const response = await fetch(`${API_BASE_URL}/ai-chat`, {
+            const response = await fetch(chatEndpoint, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -137,6 +162,11 @@ const FloatingChat: React.FC<FloatingChatProps> = ({ isOpen, toggle }) => {
 
             const data = await response.json();
             typeResponse(data.response);
+
+            // Refresh setup status if AI executed a setup-relevant function
+            if (data.functionExecuted && SETUP_FUNCTIONS.some(fn => data.functionExecuted.includes(fn))) {
+                dispatch(fetchSetupStatus());
+            }
 
         } catch (err: any) {
             console.error('Error en AI Chat:', err);
@@ -183,13 +213,25 @@ const FloatingChat: React.FC<FloatingChatProps> = ({ isOpen, toggle }) => {
         setChatMessage('');
     };
 
-    const suggestions = [
+    const admin = isAdminRole();
+
+    const adminSuggestions = [
+        { text: '📅 Citas de hoy', query: '¿Cuántas citas hay hoy?' },
+        { text: '💰 Ventas de hoy', query: 'Dame el resumen de ventas de hoy' },
+        { text: '✂️ Crear servicio', query: 'Quiero crear un nuevo servicio' },
+        { text: '👤 Ver estilistas', query: '¿Quiénes son los estilistas?' },
+        { text: '📊 Rendimiento', query: '¿Cuál es el rendimiento de los estilistas este mes?' },
+    ];
+
+    const clientSuggestions = [
         { text: '📝 Ver servicios', query: '¿Qué servicios tienen?' },
         { text: '👤 Ver estilistas', query: '¿Quiénes son los estilistas?' },
         { text: '📅 Agendar cita', query: 'Quiero agendar una cita para mañana' },
         { text: '📍 ¿Dónde están ubicados?', query: '¿Cuál es su dirección?' },
         { text: '💰 Precios', query: '¿Cuáles son los precios de los servicios?' },
     ];
+
+    const suggestions = admin ? adminSuggestions : clientSuggestions;
 
     return (
         <Offcanvas
@@ -210,7 +252,7 @@ const FloatingChat: React.FC<FloatingChatProps> = ({ isOpen, toggle }) => {
                 <div className="d-flex align-items-center justify-content-between w-100">
                     <span className="m-0 text-white d-flex align-items-center gap-2">
                         <span style={{ fontSize: '20px' }}>✨</span>
-                        <span style={{ fontWeight: 600 }}>Asistente de Citas</span>
+                        <span style={{ fontWeight: 600 }}>{admin ? 'Asistente Admin' : 'Asistente de Citas'}</span>
                     </span>
                 </div>
             </OffcanvasHeader>

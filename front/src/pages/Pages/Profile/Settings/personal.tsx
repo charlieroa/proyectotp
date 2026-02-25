@@ -154,27 +154,19 @@ const ServiceMultiSelect: React.FC<{
 
     return (
       <div>
-        <div className="flex items-center flex-wrap gap-2 mb-2">
+        <div className="d-flex align-items-center flex-wrap gap-1 mb-2">
           <button
             type="button"
-            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors cursor-pointer ${
-              catFilter === "all"
-                ? 'bg-indigo-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
+            className={`btn btn-sm rounded-pill ${catFilter === "all" ? 'btn-primary' : 'btn-light'}`}
             onClick={() => onCatFilter("all")}
           >
-            Todas las categorías
+            Todas
           </button>
           {categories.map(c => (
             <button
               key={c.id}
               type="button"
-              className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors cursor-pointer ${
-                catFilter === c.id
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
+              className={`btn btn-sm rounded-pill ${catFilter === c.id ? 'btn-primary' : 'btn-light'}`}
               onClick={() => onCatFilter(c.id)}
             >
               {c.name}
@@ -182,28 +174,25 @@ const ServiceMultiSelect: React.FC<{
           ))}
         </div>
 
-        <div className="relative">
+        <div className="position-relative">
           <button
             type="button"
             onClick={() => setOpen(v => !v)}
-            className="w-full flex items-center justify-between rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 shadow-sm hover:bg-gray-50"
+            className="form-select text-start"
           >
-            <span>
-              {selectedCount === 0 ? "Selecciona servicios…" : selectedCount === 1 ? "1 servicio seleccionado" : `${selectedCount} servicios seleccionados`}
-            </span>
-            <i className={`ri-arrow-down-s-line transition-transform ${open ? 'rotate-180' : ''}`} />
+            {selectedCount === 0 ? "Selecciona servicios…" : selectedCount === 1 ? "1 servicio seleccionado" : `${selectedCount} servicios seleccionados`}
           </button>
           {open && (
-            <div className="absolute z-10 mt-1 w-full rounded-lg border border-gray-200 bg-white shadow-lg max-h-[360px] overflow-y-auto p-2">
-              <input
-                ref={searchRef}
-                placeholder="Buscar servicios…"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                className="block w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm mb-2 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              />
-              <div>
-                {filtered.length === 0 && <div className="text-gray-400 px-2 py-1 text-sm">Sin resultados</div>}
+            <div className="position-absolute w-100 mt-1 border rounded bg-white shadow" style={{ zIndex: 10, maxHeight: 360, overflowY: 'auto' }}>
+              <div className="p-2">
+                <input
+                  ref={searchRef}
+                  placeholder="Buscar servicios…"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  className="form-control form-control-sm mb-2"
+                />
+                {filtered.length === 0 && <div className="text-muted small px-2 py-1">Sin resultados</div>}
                 {filtered.map(s => {
                   const checked = selectedIds.includes(s.id);
                   const catName = categories.find(c => c.id === s.category_id)?.name || "—";
@@ -211,14 +200,17 @@ const ServiceMultiSelect: React.FC<{
                     <button
                       key={s.id}
                       type="button"
-                      className="w-full flex items-center justify-between px-2 py-1.5 text-sm rounded-md hover:bg-gray-50 text-left"
+                      className="d-flex align-items-center justify-content-between w-100 border-0 bg-transparent px-2 py-1 rounded text-start"
+                      style={{ cursor: 'pointer' }}
                       onClick={() => onToggle(s.id)}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#f8f9fa')}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
                     >
-                      <div className="mr-2">
-                        <div className="font-medium text-gray-900">{s.name}</div>
-                        <div className="text-xs text-gray-500">{s.duration_minutes} min · ${s.price.toLocaleString()} · {catName}</div>
+                      <div className="me-2">
+                        <div className="fw-medium">{s.name}</div>
+                        <div className="text-muted" style={{ fontSize: '0.75rem' }}>{s.duration_minutes} min · ${s.price.toLocaleString()} · {catName}</div>
                       </div>
-                      <i className={`ri-check-line text-indigo-600 ${checked ? '' : 'invisible'}`} />
+                      {checked && <i className="ri-check-line text-primary" />}
                     </button>
                   );
                 })}
@@ -228,18 +220,19 @@ const ServiceMultiSelect: React.FC<{
         </div>
 
         <div className="mt-2">
-          {selectedIds.length === 0 && <span className="text-sm text-gray-400">No hay servicios seleccionados.</span>}
+          {selectedIds.length === 0 && <span className="text-muted small">No hay servicios seleccionados.</span>}
           {selectedIds.map(id => {
             const s = services.find(x => x.id === id);
             if (!s) return null;
             return (
               <span
                 key={id}
-                className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700 mr-1 mb-1 cursor-pointer hover:bg-gray-200 transition-colors"
+                className="badge bg-primary-subtle text-primary rounded-pill me-1 mb-1"
+                style={{ cursor: 'pointer' }}
                 title="Quitar"
                 onClick={() => onToggle(id)}
               >
-                {s.name} <i className="ri-close-line ml-1" />
+                {s.name} <i className="ri-close-line ms-1" />
               </span>
             );
           })}
@@ -468,12 +461,12 @@ const StaffModal: React.FC<{
         <Modal isOpen={isOpen} toggle={onClose} size="lg" centered>
             <ModalHeader toggle={onClose}>{edit ? `Editar ${roleName}` : `Nuevo Personal`}</ModalHeader>
             <ModalBody>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="row g-3">
                     {!edit && (
-                        <div className="md:col-span-2">
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de Personal</label>
+                        <div className="col-12">
+                            <label className="form-label">Tipo de Personal</label>
                             <select
-                                className="block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                className="form-select"
                                 value={roleId}
                                 onChange={(e) => setRoleId(Number(e.target.value))}
                             >
@@ -483,53 +476,53 @@ const StaffModal: React.FC<{
                         </div>
                     )}
 
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Nombre</label>
+                    <div className="col-md-6">
+                        <label className="form-label">Nombre</label>
                         <input
-                            className="block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            className="form-control"
                             value={firstName}
                             onChange={(e) => setFirstName(e.target.value)}
                             placeholder="Ej: Marcos"
                         />
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Apellido</label>
+                    <div className="col-md-6">
+                        <label className="form-label">Apellido</label>
                         <input
-                            className="block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            className="form-control"
                             value={lastName}
                             onChange={(e) => setLastName(e.target.value)}
                             placeholder="Ej: Barbero"
                         />
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                    <div className="col-md-6">
+                        <label className="form-label">Email</label>
                         <input
                             type="email"
-                            className="block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            className="form-control"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
                             placeholder="marcos@example.com"
                         />
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Teléfono</label>
+                    <div className="col-md-6">
+                        <label className="form-label">Teléfono</label>
                         <input
-                            className="block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            className="form-control"
                             value={phone}
                             onChange={(e) => setPhone(e.target.value)}
                             placeholder="3001234567"
                         />
                     </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <div className="col-md-6">
+                        <label className="form-label">
                             Contraseña
-                            {edit && <small className="block text-gray-400 font-normal">(dejar vacío para no cambiar)</small>}
+                            {edit && <small className="d-block text-muted fw-normal">(dejar vacío para no cambiar)</small>}
                         </label>
-                        <div className="flex rounded-lg shadow-sm">
+                        <div className="input-group">
                             <input
                                 type={showPass ? "text" : "password"}
-                                className="block w-full rounded-l-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                className="form-control"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 placeholder={edit ? "Dejar vacío para no cambiar" : "••••••••"}
@@ -537,7 +530,7 @@ const StaffModal: React.FC<{
                             <button
                                 type="button"
                                 onClick={() => setShowPass(v => !v)}
-                                className="inline-flex items-center rounded-r-lg border border-l-0 border-gray-300 bg-gray-50 px-3 text-gray-500 hover:bg-gray-100 transition-colors"
+                                className="btn btn-light border"
                                 title={showPass ? "Ocultar" : "Mostrar"}
                             >
                                 <i className={showPass ? "ri-eye-off-line" : "ri-eye-line"} />
@@ -546,81 +539,63 @@ const StaffModal: React.FC<{
                     </div>
 
                     {roleId === 3 && (
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Comisión (%)</label>
+                        <div className="col-md-6">
+                            <label className="form-label">Comisión (%)</label>
                             <input
                                 type="number"
                                 min={0}
                                 max={100}
                                 step={0.01}
-                                className="block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                className="form-control"
                                 value={commissionValue}
                                 onChange={(e) => setCommissionValue(e.target.value)}
                                 placeholder="Ej: 55"
                             />
-                            <small className="text-xs text-gray-400 mt-1">Porcentaje que recibe por servicio</small>
+                            <small className="text-muted">Porcentaje que recibe por servicio</small>
                         </div>
                     )}
 
                     {roleId === 3 && (
-                        <div className="md:col-span-2">
-                            <div className="border-b border-gray-200 mb-4">
-                                <nav className="-mb-px flex space-x-4">
-                                    <button
-                                        type="button"
-                                        onClick={() => setTab("services")}
-                                        className={`whitespace-nowrap border-b-2 pb-3 px-1 text-sm font-medium transition-colors ${
-                                            tab === "services"
-                                                ? 'border-indigo-500 text-indigo-600'
-                                                : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                                        }`}
-                                    >
-                                        <i className="ri-scissors-2-line mr-1" /> Servicios que realiza
+                        <div className="col-12">
+                            <ul className="nav nav-tabs nav-tabs-custom mb-3">
+                                <li className="nav-item">
+                                    <button type="button" onClick={() => setTab("services")}
+                                        className={`nav-link ${tab === "services" ? 'active' : ''}`}>
+                                        <i className="ri-scissors-2-line me-1" /> Servicios
                                     </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setTab("hours")}
-                                        className={`whitespace-nowrap border-b-2 pb-3 px-1 text-sm font-medium transition-colors ${
-                                            tab === "hours"
-                                                ? 'border-indigo-500 text-indigo-600'
-                                                : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                                        }`}
-                                    >
-                                        <i className="ri-time-line mr-1" /> Horarios
+                                </li>
+                                <li className="nav-item">
+                                    <button type="button" onClick={() => setTab("hours")}
+                                        className={`nav-link ${tab === "hours" ? 'active' : ''}`}>
+                                        <i className="ri-time-line me-1" /> Horarios
                                     </button>
-                                    {sharedStylistsEnabled && branches.length > 1 && (
-                                        <button
-                                            type="button"
-                                            onClick={() => setTab("branches")}
-                                            className={`whitespace-nowrap border-b-2 pb-3 px-1 text-sm font-medium transition-colors ${
-                                                tab === "branches"
-                                                    ? 'border-indigo-500 text-indigo-600'
-                                                    : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
-                                            }`}
-                                        >
-                                            <i className="ri-building-2-line mr-1" /> Sedes
+                                </li>
+                                {sharedStylistsEnabled && branches.length > 1 && (
+                                    <li className="nav-item">
+                                        <button type="button" onClick={() => setTab("branches")}
+                                            className={`nav-link ${tab === "branches" ? 'active' : ''}`}>
+                                            <i className="ri-building-2-line me-1" /> Sedes
                                         </button>
-                                    )}
-                                </nav>
-                            </div>
+                                    </li>
+                                )}
+                            </ul>
 
                             {tab === "services" && (
                                 <ServiceMultiSelect services={services} categories={categories} selectedIds={selectedServiceIds} onToggle={toggleService} catFilter={catFilter} onCatFilter={setCatFilter} />
                             )}
 
                             {tab === "hours" && (
-                                <div className="border border-gray-200 rounded-lg p-4">
-                                    <div className="flex items-center gap-3 mb-3">
-                                        <button
-                                            type="button"
+                                <div className="border rounded p-3">
+                                    <div className="form-check form-switch mb-3">
+                                        <input
+                                            className="form-check-input"
+                                            type="checkbox"
                                             role="switch"
-                                            aria-checked={inheritTenant}
-                                            onClick={() => setInheritTenant(v => !v)}
-                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${inheritTenant ? 'bg-indigo-600' : 'bg-gray-200'}`}
-                                        >
-                                            <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${inheritTenant ? 'translate-x-5' : 'translate-x-0'}`} />
-                                        </button>
-                                        <label className="text-sm text-gray-700">
+                                            id="inheritTenantSwitch"
+                                            checked={inheritTenant}
+                                            onChange={() => setInheritTenant(v => !v)}
+                                        />
+                                        <label className="form-check-label small" htmlFor="inheritTenantSwitch">
                                             Usar el mismo horario del negocio. Si desmarcas, puedes elegir su propio horario.
                                         </label>
                                     </div>
@@ -630,50 +605,48 @@ const StaffModal: React.FC<{
                                                 const d = week[key];
                                                 const isMonday = key === "lunes";
                                                 return (
-                                                    <div className="border border-gray-200 rounded-lg p-3 mb-3" key={key}>
-                                                        <div className="flex items-center justify-between flex-wrap gap-3">
-                                                            <div className="flex items-center gap-3">
-                                                                <button
-                                                                    type="button"
-                                                                    role="switch"
-                                                                    aria-checked={d.active}
-                                                                    onClick={() => toggleDay(key)}
-                                                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2 ${d.active ? 'bg-indigo-600' : 'bg-gray-200'}`}
-                                                                >
-                                                                    <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${d.active ? 'translate-x-5' : 'translate-x-0'}`} />
-                                                                </button>
-                                                                <span className="text-sm font-semibold text-gray-900">
-                                                                    {label} {d.active ? "(Abierto)" : "(Cerrado)"}
+                                                    <div className="border rounded p-2 mb-2" key={key}>
+                                                        <div className="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                                                            <div className="d-flex align-items-center gap-2">
+                                                                <div className="form-check form-switch mb-0">
+                                                                    <input
+                                                                        className="form-check-input"
+                                                                        type="checkbox"
+                                                                        role="switch"
+                                                                        checked={d.active}
+                                                                        onChange={() => toggleDay(key)}
+                                                                    />
+                                                                </div>
+                                                                <span className="fw-semibold small">
+                                                                    {label} {d.active ? <span className="text-success">(Abierto)</span> : <span className="text-muted">(Cerrado)</span>}
                                                                 </span>
                                                             </div>
-                                                            <div className="flex items-center gap-3">
-                                                                <div className="flex items-center gap-2">
-                                                                    <label className="text-sm text-gray-700" htmlFor={`open-${key}`}>Inicio</label>
-                                                                    <input
-                                                                        id={`open-${key}`}
-                                                                        type="time"
-                                                                        value={d.open}
-                                                                        disabled={!d.active}
-                                                                        onChange={(e) => changeHour(key, "open", e.target.value)}
-                                                                        className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-500"
-                                                                    />
-                                                                </div>
-                                                                <div className="flex items-center gap-2">
-                                                                    <label className="text-sm text-gray-700" htmlFor={`close-${key}`}>Fin</label>
-                                                                    <input
-                                                                        id={`close-${key}`}
-                                                                        type="time"
-                                                                        value={d.close}
-                                                                        disabled={!d.active}
-                                                                        onChange={(e) => changeHour(key, "close", e.target.value)}
-                                                                        className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-500"
-                                                                    />
-                                                                </div>
+                                                            <div className="d-flex align-items-center gap-2">
+                                                                <label className="small text-muted mb-0" htmlFor={`open-${key}`}>Inicio</label>
+                                                                <input
+                                                                    id={`open-${key}`}
+                                                                    type="time"
+                                                                    value={d.open}
+                                                                    disabled={!d.active}
+                                                                    onChange={(e) => changeHour(key, "open", e.target.value)}
+                                                                    className="form-control form-control-sm"
+                                                                    style={{ width: 120 }}
+                                                                />
+                                                                <label className="small text-muted mb-0" htmlFor={`close-${key}`}>Fin</label>
+                                                                <input
+                                                                    id={`close-${key}`}
+                                                                    type="time"
+                                                                    value={d.close}
+                                                                    disabled={!d.active}
+                                                                    onChange={(e) => changeHour(key, "close", e.target.value)}
+                                                                    className="form-control form-control-sm"
+                                                                    style={{ width: 120 }}
+                                                                />
                                                                 {isMonday && (
                                                                     <button
                                                                         type="button"
                                                                         onClick={applyMondayToAll}
-                                                                        className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 shadow-sm hover:bg-gray-50 transition-colors ml-2"
+                                                                        className="btn btn-soft-primary btn-sm ms-1"
                                                                     >
                                                                         Aplicar a todos
                                                                     </button>
@@ -689,25 +662,24 @@ const StaffModal: React.FC<{
                             )}
 
                             {tab === "branches" && sharedStylistsEnabled && branches.length > 1 && (
-                                <div className="border border-gray-200 rounded-lg p-4">
-                                    <p className="text-sm text-gray-500 mb-3">Selecciona las sedes donde este estilista puede trabajar:</p>
-                                    <div className="space-y-2">
-                                        {branches.map(branch => (
-                                            <label key={branch.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 cursor-pointer">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={selectedBranchIds.includes(branch.id)}
-                                                    onChange={() => toggleBranch(branch.id)}
-                                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-600"
-                                                />
-                                                <span
-                                                    className="inline-block w-3 h-3 rounded-full"
-                                                    style={{ backgroundColor: branch.branch_color || '#3788d8' }}
-                                                />
-                                                <span className="text-sm text-gray-900">{branch.name}</span>
-                                            </label>
-                                        ))}
-                                    </div>
+                                <div className="border rounded p-3">
+                                    <p className="text-muted small mb-3">Selecciona las sedes donde este estilista puede trabajar:</p>
+                                    {branches.map(branch => (
+                                        <div key={branch.id} className="form-check d-flex align-items-center gap-2 mb-2">
+                                            <input
+                                                type="checkbox"
+                                                className="form-check-input"
+                                                checked={selectedBranchIds.includes(branch.id)}
+                                                onChange={() => toggleBranch(branch.id)}
+                                                id={`branch-${branch.id}`}
+                                            />
+                                            <span
+                                                className="d-inline-block rounded-circle"
+                                                style={{ width: 12, height: 12, backgroundColor: branch.branch_color || '#3788d8' }}
+                                            />
+                                            <label className="form-check-label" htmlFor={`branch-${branch.id}`}>{branch.name}</label>
+                                        </div>
+                                    ))}
                                 </div>
                             )}
                         </div>
@@ -715,25 +687,11 @@ const StaffModal: React.FC<{
                 </div>
             </ModalBody>
             <ModalFooter>
-                <button
-                    type="button"
-                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-medium text-gray-700 border border-gray-300 shadow-sm hover:bg-gray-50 transition-colors"
-                    onClick={onClose}
-                >
+                <button type="button" className="btn btn-light" onClick={onClose}>
                     Cancelar
                 </button>
-                <button
-                    type="button"
-                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    onClick={save}
-                    disabled={saving}
-                >
-                    {saving && (
-                        <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
-                    )}
+                <button type="button" className="btn btn-primary d-flex align-items-center gap-1" onClick={save} disabled={saving}>
+                    {saving && <span className="spinner-border spinner-border-sm" />}
                     Guardar
                 </button>
             </ModalFooter>
@@ -849,15 +807,9 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
         const items = [];
         for (let p = start; p <= end; p++) {
           items.push(
-            <button
-              key={p}
-              onClick={() => setPage(p)}
-              className={`min-w-[32px] h-8 rounded-lg text-sm font-medium transition-colors ${
-                p === page ? 'bg-indigo-600 text-white' : 'text-gray-700 hover:bg-gray-100'
-              }`}
-            >
-              {p}
-            </button>
+            <li key={p} className={`page-item ${p === page ? 'active' : ''}`}>
+              <button className="page-link" onClick={() => setPage(p)}>{p}</button>
+            </li>
           );
         }
         return items;
@@ -880,98 +832,64 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
     return (
       <div>
         {error && (
-          <div className="rounded-lg bg-red-50 border border-red-200 p-4 mb-4">
-            <span className="text-sm text-red-700">{error}</span>
+          <div className="alert alert-danger mb-3">
+            <span>{error}</span>
           </div>
         )}
 
-        <div className="flex justify-between items-center mb-3">
-            <h5 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-              <i className="ri-team-line text-indigo-600"></i>Personal
+        <div className="d-flex justify-content-between align-items-center mb-3">
+            <h5 className="fw-semibold mb-0 d-flex align-items-center gap-2">
+              <i className="ri-team-line text-primary"></i>Personal
             </h5>
-            <div className="flex items-center gap-2">
-              {staffLoading && (
-                <svg className="animate-spin h-4 w-4 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-              )}
-              <button
-                type="button"
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition-colors"
-                onClick={openNewStaff}
-              >
+            <div className="d-flex align-items-center gap-2">
+              {staffLoading && <span className="spinner-border spinner-border-sm text-primary"></span>}
+              <button type="button" className="btn btn-primary btn-sm d-flex align-items-center gap-1" onClick={openNewStaff}>
                 <i className="ri-add-line" /> Nuevo Personal
               </button>
             </div>
         </div>
 
         {/* Role filter chips */}
-        <div className="flex flex-wrap gap-2 mb-4">
-          <button
-            type="button"
-            onClick={() => { setRoleFilter("all"); setPage(1); }}
-            className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-              roleFilter === "all"
-                ? 'bg-indigo-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
+        <div className="d-flex flex-wrap gap-2 mb-3">
+          <button type="button" onClick={() => { setRoleFilter("all"); setPage(1); }}
+            className={`btn btn-sm rounded-pill ${roleFilter === "all" ? 'btn-primary' : 'btn-light'}`}>
             Todos ({staff.length})
           </button>
-          <button
-            type="button"
-            onClick={() => { setRoleFilter(3); setPage(1); }}
-            className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-              roleFilter === 3
-                ? 'bg-emerald-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            <i className="ri-scissors-line mr-1"></i>Estilistas ({stylistsCount})
+          <button type="button" onClick={() => { setRoleFilter(3); setPage(1); }}
+            className={`btn btn-sm rounded-pill ${roleFilter === 3 ? 'btn-success' : 'btn-light'}`}>
+            <i className="ri-scissors-line me-1"></i>Estilistas ({stylistsCount})
           </button>
-          <button
-            type="button"
-            onClick={() => { setRoleFilter(2); setPage(1); }}
-            className={`inline-flex items-center rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-              roleFilter === 2
-                ? 'bg-sky-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            <i className="ri-cash-line mr-1"></i>Cajeros ({cashiersCount})
+          <button type="button" onClick={() => { setRoleFilter(2); setPage(1); }}
+            className={`btn btn-sm rounded-pill ${roleFilter === 2 ? 'btn-info' : 'btn-light'}`}>
+            <i className="ri-cash-line me-1"></i>Cajeros ({cashiersCount})
           </button>
         </div>
 
-        <div className="overflow-x-auto rounded-lg border border-gray-200">
-            <table className="min-w-full divide-y divide-gray-200">
-            <thead>
-                <tr className="bg-gray-50">
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Nombre</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Rol</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Comisión</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Contacto</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Servicios que realiza</th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider" style={{width: 120}}>Acciones</th>
+        <div className="table-responsive">
+            <table className="table table-hover align-middle mb-0">
+            <thead className="table-light">
+                <tr>
+                  <th>Nombre</th>
+                  <th>Rol</th>
+                  <th>Comisión</th>
+                  <th>Contacto</th>
+                  <th>Servicios</th>
+                  <th style={{width: 100}}>Acciones</th>
                 </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200 bg-white">
+            <tbody>
                 {paginatedStaff.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-12 text-center">
-                      <i className="ri-team-line text-5xl text-gray-300 block mb-3"></i>
-                      <h6 className="text-sm font-medium text-gray-900 mb-1">
+                    <td colSpan={6} className="text-center py-5">
+                      <i className="ri-team-line fs-36 text-muted d-block mb-2"></i>
+                      <h6 className="fw-medium mb-1">
                         {roleFilter === "all" ? "No hay personal registrado" : roleFilter === 3 ? "No hay estilistas registrados" : "No hay cajeros registrados"}
                       </h6>
-                      <p className="text-sm text-gray-500 mb-4">
+                      <p className="text-muted fs-13 mb-3">
                         {roleFilter === "all" ? "Agrega a tu equipo para gestionar citas y servicios." : "Prueba con otro filtro o agrega nuevo personal."}
                       </p>
-                      <button
-                        type="button"
-                        className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-indigo-700 transition-colors"
-                        onClick={openNewStaff}
-                      >
-                        <i className="ri-add-line"></i> Agregar personal
+                      <button type="button" className="btn btn-primary btn-sm" onClick={openNewStaff}>
+                        <i className="ri-add-line me-1"></i> Agregar personal
                       </button>
                     </td>
                   </tr>
@@ -981,73 +899,59 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
                   const show = svcs.slice(0, 3);
                   const more = Math.max(0, svcs.length - show.length);
                   return (
-                    <tr key={u.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-3 text-sm text-gray-900">
-                        <div className="flex items-center gap-2">
-                          <div className={`flex-shrink-0 h-9 w-9 rounded-full flex items-center justify-center ${
-                            u.role_id === 3 ? 'bg-emerald-100' : 'bg-sky-100'
+                    <tr key={u.id}>
+                      <td>
+                        <div className="d-flex align-items-center gap-2">
+                          <div className={`avatar-xs rounded-circle d-flex align-items-center justify-content-center ${
+                            u.role_id === 3 ? 'bg-success-subtle' : 'bg-info-subtle'
                           }`}>
-                            <span className={`text-sm font-medium ${
-                              u.role_id === 3 ? 'text-emerald-700' : 'text-sky-700'
-                            }`}>
+                            <span className={`fw-medium ${u.role_id === 3 ? 'text-success' : 'text-info'}`}>
                               {u.first_name.charAt(0).toUpperCase()}
                             </span>
                           </div>
-                          <div>
-                            <span className="font-medium text-sm text-gray-900">{u.first_name} {u.last_name || ""}</span>
-                          </div>
+                          <span className="fw-medium">{u.first_name} {u.last_name || ""}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-sm">
+                      <td>
                         {u.role_id === 2
-                          ? <span className="inline-flex items-center rounded-full bg-sky-50 px-2.5 py-0.5 text-xs font-medium text-sky-700">Cajero</span>
-                          : <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">Estilista</span>
+                          ? <span className="badge bg-info-subtle text-info rounded-pill">Cajero</span>
+                          : <span className="badge bg-success-subtle text-success rounded-pill">Estilista</span>
                         }
                       </td>
-                      <td className="px-4 py-3 text-sm">
+                      <td>
                         {u.role_id === 3 && u.commission_rate ? (
-                          <span className="font-semibold text-gray-900">{(u.commission_rate * 100).toFixed(0)}%</span>
+                          <span className="fw-semibold">{(u.commission_rate * 100).toFixed(0)}%</span>
                         ) : (
-                          <span className="text-gray-400">—</span>
+                          <span className="text-muted">—</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-sm">
+                      <td>
                         <div>
-                          {u.email && <div className="text-xs text-gray-600"><i className="ri-mail-line mr-1 text-gray-400"></i>{u.email}</div>}
-                          {u.phone && <div className="text-xs text-gray-600"><i className="ri-phone-line mr-1 text-gray-400"></i>{u.phone}</div>}
-                          {!u.email && !u.phone && <span className="text-gray-400">—</span>}
+                          {u.email && <div className="fs-12 text-muted"><i className="ri-mail-line me-1"></i>{u.email}</div>}
+                          {u.phone && <div className="fs-12 text-muted"><i className="ri-phone-line me-1"></i>{u.phone}</div>}
+                          {!u.email && !u.phone && <span className="text-muted">—</span>}
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-sm">
+                      <td>
                         {u.role_id === 3 ? (
                           <>
-                            {show.length === 0 && <span className="text-gray-400 text-xs">Sin asignar</span>}
+                            {show.length === 0 && <span className="text-muted fs-12">Sin asignar</span>}
                             {show.map(s => (
-                              <span key={s.id} className="inline-flex items-center rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-medium text-indigo-700 mr-1 mb-1">{s.name}</span>
+                              <span key={s.id} className="badge bg-primary-subtle text-primary rounded-pill me-1 mb-1">{s.name}</span>
                             ))}
-                            {more > 0 && <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700 mb-1">+{more}</span>}
+                            {more > 0 && <span className="badge bg-light text-muted rounded-pill mb-1">+{more}</span>}
                           </>
                         ) : (
-                          <span className="text-gray-400 text-xs">N/A</span>
+                          <span className="text-muted fs-12">N/A</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-sm">
-                        <div className="flex gap-1">
-                          <button
-                            type="button"
-                            className="inline-flex items-center justify-center rounded-lg p-2 text-indigo-600 hover:bg-indigo-50 transition-colors"
-                            onClick={() => openEditStaff(u)}
-                            title="Editar"
-                          >
-                            <i className="ri-edit-line text-base" />
+                      <td>
+                        <div className="d-flex gap-1">
+                          <button type="button" className="btn btn-soft-primary btn-sm" onClick={() => openEditStaff(u)} title="Editar">
+                            <i className="ri-edit-line" />
                           </button>
-                          <button
-                            type="button"
-                            className="inline-flex items-center justify-center rounded-lg p-2 text-red-500 hover:bg-red-50 transition-colors"
-                            onClick={() => deleteStaff(u)}
-                            title="Eliminar"
-                          >
-                            <i className="ri-delete-bin-line text-base" />
+                          <button type="button" className="btn btn-soft-danger btn-sm" onClick={() => deleteStaff(u)} title="Eliminar">
+                            <i className="ri-delete-bin-line" />
                           </button>
                         </div>
                       </td>
@@ -1059,40 +963,22 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
         </div>
 
         {filteredStaff.length > PAGE_SIZE && (
-          <nav className="flex items-center justify-end gap-1 mt-4">
-              <button
-                type="button"
-                disabled={page === 1}
-                onClick={() => setPage(1)}
-                className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-gray-400 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                <i className="ri-arrow-left-double-line text-sm" />
-              </button>
-              <button
-                type="button"
-                disabled={page === 1}
-                onClick={() => setPage(p => Math.max(1, p - 1))}
-                className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-gray-400 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                <i className="ri-arrow-left-s-line text-sm" />
-              </button>
+          <nav className="d-flex justify-content-end mt-3">
+            <ul className="pagination pagination-sm mb-0">
+              <li className={`page-item ${page === 1 ? 'disabled' : ''}`}>
+                <button className="page-link" onClick={() => setPage(1)}><i className="ri-arrow-left-double-line" /></button>
+              </li>
+              <li className={`page-item ${page === 1 ? 'disabled' : ''}`}>
+                <button className="page-link" onClick={() => setPage(p => Math.max(1, p - 1))}><i className="ri-arrow-left-s-line" /></button>
+              </li>
               {renderPageNumbers()}
-              <button
-                type="button"
-                disabled={page === totalPages}
-                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-gray-400 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                <i className="ri-arrow-right-s-line text-sm" />
-              </button>
-              <button
-                type="button"
-                disabled={page === totalPages}
-                onClick={() => setPage(totalPages)}
-                className="inline-flex items-center justify-center h-8 w-8 rounded-lg text-gray-400 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                <i className="ri-arrow-right-double-line text-sm" />
-              </button>
+              <li className={`page-item ${page === totalPages ? 'disabled' : ''}`}>
+                <button className="page-link" onClick={() => setPage(p => Math.min(totalPages, p + 1))}><i className="ri-arrow-right-s-line" /></button>
+              </li>
+              <li className={`page-item ${page === totalPages ? 'disabled' : ''}`}>
+                <button className="page-link" onClick={() => setPage(totalPages)}><i className="ri-arrow-right-double-line" /></button>
+              </li>
+            </ul>
           </nav>
         )}
 

@@ -33,6 +33,7 @@ const whatsappRoutes = require('./routes/whatsappRoutes'); // ✅ NUEVO: Importa
 const aiChatRoutes = require('./routes/aiChatRoutes'); // ✅ Chat con IA (OpenAI)
 const aiAdminChatRoutes = require('./routes/aiAdminChatRoutes'); // ✅ Chat IA Admin (18 funciones)
 const superAdminRoutes = require('./routes/superAdminRoutes'); // ✅ Super Admin
+const bulkImportRoutes = require('./routes/bulkImportRoutes'); // ✅ Bulk import Excel
 const { uploadTenantLogo, uploadTenantBrochure, deleteTenantBrochure } = require('./controllers/tenantController');
 
 // Inicialización de la aplicación Express
@@ -138,6 +139,7 @@ app.use('/api/whatsapp-booking', require('./routes/Whatsappbookingroutes')); // 
 app.use('/api/ai-chat', aiChatRoutes); // ✅ Chat con IA (OpenAI + Orquestador)
 app.use('/api/ai-admin-chat', aiAdminChatRoutes); // ✅ Chat IA Admin (18 funciones)
 app.use('/api/super-admin', superAdminRoutes); // ✅ Super Admin panel
+app.use('/api/bulk-import', bulkImportRoutes); // ✅ Bulk import Excel
 app.post('/api/tenants/:tenantId/logo', upload.single('logo'), uploadTenantLogo);
 app.post('/api/tenants/:tenantId/brochure', brochureUpload.single('brochure'), uploadTenantBrochure);
 app.delete('/api/tenants/:tenantId/brochure', deleteTenantBrochure);

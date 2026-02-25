@@ -31,6 +31,9 @@ router.post('/', ensureFn(requireAuth, 'requireAuth'), ensureFn(tenantController
 // GET /api/tenants?slug=... - Listar todos o uno por slug
 router.get('/', ensureFn(tenantController.getAllTenants, 'getAllTenants'));
 
+// GET /api/tenants/:id/setup-status - Obtener estado de setup
+router.get('/:id/setup-status', ensureFn(requireAuth, 'requireAuth'), ensureFn(tenantController.getSetupStatus, 'getSetupStatus'));
+
 // GET /api/tenants/:id - Obtener un tenant por ID
 router.get('/:id', ensureFn(tenantController.getTenantById, 'getTenantById'));
 

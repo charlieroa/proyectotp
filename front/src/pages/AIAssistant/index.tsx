@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Spinner } from 'reactstrap';
+import { Spinner, Modal, ModalHeader, ModalBody } from 'reactstrap';
 import { jwtDecode } from 'jwt-decode';
+import { useDispatch } from 'react-redux';
+import { fetchSetupStatus } from '../../slices/Settings/settingsSlice';
+import { toast } from 'react-toastify';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000/api';
 
@@ -71,16 +74,65 @@ const clientSuggestions = [
     { icon: 'ri-money-dollar-circle-line', text: 'Como puedo mejorar mis precios', color: '#f5576c' },
 ];
 
+const SETUP_FUNCTIONS = ['crear_servicio', 'crear_estilista', 'configurar_horario_salon', 'actualizar_info_salon'];
+
 const AIAssistant: React.FC = () => {
+    const dispatch: any = useDispatch();
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState('');
     const [isTyping, setIsTyping] = useState(false);
     const [conversationHistory, setConversationHistory] = useState<{ role: string; content: string }[]>([]);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [showImportModal, setShowImportModal] = useState(false);
+    const [importType, setImportType] = useState<string | null>(null);
+    const [isUploading, setIsUploading] = useState(false);
     const userName = getUserName();
     const isAdmin = isAdminRole();
     const suggestions = isAdmin ? adminSuggestions : clientSuggestions;
+
+    const handleImportSelect = (type: string) => {
+        setImportType(type);
+        setShowImportModal(false);
+        setTimeout(() => fileInputRef.current?.click(), 100);
+    };
+
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !importType) return;
+
+        setIsUploading(true);
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/bulk-import/${importType}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('token') || ''}` },
+                body: formData,
+            });
+
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Error al importar');
+
+            toast.success(data.message);
+            // Add a message to the chat showing the result
+            setMessages(prev => [...prev, {
+                id: Date.now(),
+                role: 'assistant',
+                content: `📊 ${data.message}${data.errors?.length ? `\n⚠️ Errores: ${data.errors.slice(0, 3).join(', ')}` : ''}`,
+            }]);
+
+            if (importType === 'stylists') dispatch(fetchSetupStatus());
+        } catch (err: any) {
+            toast.error(err.message);
+        } finally {
+            setIsUploading(false);
+            setImportType(null);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -145,6 +197,11 @@ const AIAssistant: React.FC = () => {
 
             const data = await response.json();
             typeResponse(data.response);
+
+            // Refresh setup status if AI executed a setup-relevant function
+            if (data.functionExecuted && SETUP_FUNCTIONS.some(fn => data.functionExecuted.includes(fn))) {
+                dispatch(fetchSetupStatus());
+            }
         } catch (err: any) {
             setIsTyping(false);
             typeResponse(`Lo siento, ocurrio un error: ${err.message}`);
@@ -395,6 +452,14 @@ const AIAssistant: React.FC = () => {
                         </button>
                     </div>
                 )}
+                {/* Hidden file input for Excel upload */}
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    style={{ display: 'none' }}
+                    onChange={handleFileUpload}
+                />
                 <div style={{
                     display: 'flex',
                     alignItems: 'flex-end',
@@ -406,6 +471,29 @@ const AIAssistant: React.FC = () => {
                     boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
                     transition: 'border-color 0.2s',
                 }}>
+                    {isAdmin && (
+                        <button
+                            onClick={() => setShowImportModal(true)}
+                            disabled={isUploading}
+                            title="Importar desde Excel"
+                            style={{
+                                width: 36,
+                                height: 36,
+                                borderRadius: '50%',
+                                border: 'none',
+                                background: 'transparent',
+                                color: 'var(--vz-secondary-color, #878a99)',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                                transition: 'all 0.2s',
+                            }}
+                        >
+                            {isUploading ? <Spinner size="sm" /> : <i className="ri-file-excel-2-line" style={{ fontSize: 20 }}></i>}
+                        </button>
+                    )}
                     <textarea
                         ref={textareaRef}
                         style={{
@@ -470,6 +558,36 @@ const AIAssistant: React.FC = () => {
                     Asistente IA de TuPelukeria — puede cometer errores. Verifica la informacion importante.
                 </p>
             </div>
+
+            {/* Import Type Modal */}
+            <Modal isOpen={showImportModal} toggle={() => setShowImportModal(false)} centered size="sm">
+                <ModalHeader toggle={() => setShowImportModal(false)}>
+                    Importar desde Excel
+                </ModalHeader>
+                <ModalBody>
+                    <p className="text-muted small mb-3">Selecciona qué tipo de datos quieres importar:</p>
+                    <div className="d-flex flex-column gap-2">
+                        {[
+                            { key: 'clients', icon: 'ri-user-line', label: 'Clientes', desc: 'Nombre, email, teléfono' },
+                            { key: 'stylists', icon: 'ri-scissors-line', label: 'Estilistas', desc: 'Nombre, email, comisión' },
+                            { key: 'products', icon: 'ri-shopping-bag-line', label: 'Productos', desc: 'Nombre, precio, stock' },
+                        ].map(opt => (
+                            <button
+                                key={opt.key}
+                                onClick={() => handleImportSelect(opt.key)}
+                                className="btn btn-light d-flex align-items-center gap-3 text-start p-3"
+                                style={{ borderRadius: 12 }}
+                            >
+                                <i className={opt.icon} style={{ fontSize: 22, color: '#667eea' }}></i>
+                                <div>
+                                    <div style={{ fontWeight: 600, fontSize: 14 }}>{opt.label}</div>
+                                    <div className="text-muted" style={{ fontSize: 12 }}>{opt.desc}</div>
+                                </div>
+                            </button>
+                        ))}
+                    </div>
+                </ModalBody>
+            </Modal>
 
             <style>{`
                 @keyframes aiCursorBlink {

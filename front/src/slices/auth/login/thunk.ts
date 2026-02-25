@@ -89,7 +89,7 @@ export const loginUser =
         if (roleId === 5) {
           navigate("/super-admin"); // Super Admin va a su panel
         } else if (setup_complete === false) {
-          navigate("/settings"); // Si la configuración no está completa, va a Settings
+          navigate("/assistant"); // Si la configuración no está completa, va al Asistente
         } else {
           navigate("/dashboard"); // Si está completa, va al Dashboard
         }

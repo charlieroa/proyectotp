@@ -82,17 +82,22 @@ CREACIÓN DE ESTILISTAS - DATOS REQUERIDOS:
 
 CONFIGURACIÓN DEL SALÓN:
 - El jefe puede configurar horarios, información del salón, etc. mediante conversación natural.
-- Si dice "mi horario es de lunes a viernes de 8 a 6", usa configurar_horario_salon y confirma: "Como ordene jefe, le actualizo el horario."
+- Si dice "mi horario es de lunes a viernes de 8 a 6", usa configurar_horario_salon con dias="lunes,martes,miercoles,jueves,viernes", hora_inicio="8", hora_fin="18". Confirma brevemente y EJECUTA.
 - Si dice "quiero cambiar el nombre" o "actualizar la dirección", usa actualizar_info_salon.
 - Si dice "ver configuración" o "cómo está configurado", usa ver_configuracion_salon.
 
 HORARIOS DE ESTILISTAS:
 - El jefe puede cambiar el horario de un estilista individual. Ejemplos:
-  * "Carlos ya no trabaja los lunes" → usa modificar_horario_estilista con accion='quitar_dia'
-  * "María va a trabajar martes de 2 a 5" → usa modificar_horario_estilista con accion='agregar_dia'
-  * "Pedro trabaja de lunes a viernes de 8 a 6" → usa modificar_horario_estilista con accion='actualizar'
+  * "Carlos ya no trabaja los lunes" → usa modificar_horario_estilista con estilista="Carlos", dias="lunes", accion="quitar_dia"
+  * "María va a trabajar martes de 2 a 5" → usa modificar_horario_estilista con estilista="María", dias="martes", hora_inicio="14", hora_fin="17", accion="agregar_dia"
+  * "Pedro trabaja de lunes a viernes de 8 a 6" → usa modificar_horario_estilista con estilista="Pedro", dias="lunes,martes,miercoles,jueves,viernes", hora_inicio="8", hora_fin="18", accion="actualizar"
   * "¿Cuál es el horario de Carlos?" → usa ver_horario_estilista
-- SIEMPRE confirma antes de hacer cambios: "Jefe, le voy a quitar los lunes a Carlos. ¿Le doy?"
+
+EJECUCIÓN DE FUNCIONES - MUY IMPORTANTE:
+- Cuando el jefe confirme un cambio (dice "sí", "dale", "hazlo", "correcto"), EJECUTA la función INMEDIATAMENTE. No pidas más confirmaciones.
+- Cuando el jefe diga "cambia mi horario de 8 a 5" y ya sabes los días, EJECUTA la función directamente.
+- NUNCA pidas confirmación más de UNA vez. Si el jefe ya dijo "sí", ejecuta.
+- SIEMPRE llena TODOS los parámetros requeridos de la función. Si te dice "de 8 a 5pm", hora_inicio="8", hora_fin="17".
 
 FORMATO DE RESPUESTAS PARA VOZ (MUY IMPORTANTE):
 - Cuando reportes ventas o cifras monetarias, formatea de manera CLARA y CONVERSACIONAL:
@@ -370,16 +375,24 @@ const ADMIN_TOOLS = [
         type: "function",
         function: {
             name: "configurar_horario_salon",
-            description: "Configura o actualiza el horario de atención del salón. Permite definir qué días trabaja y en qué horario.",
+            description: "Configura el horario de atención del salón. Usa 'dias' para indicar los días que trabaja y hora_inicio/hora_fin para el horario.",
             parameters: {
                 type: "object",
                 properties: {
-                    horario: {
-                        type: "object",
-                        description: "Objeto con los días como claves y {start, end} como valores. Ej: {\"lunes\": {\"start\": \"8\", \"end\": \"18\"}, \"martes\": {\"start\": \"8\", \"end\": \"18\"}}. Días no incluidos = cerrado."
+                    dias: {
+                        type: "string",
+                        description: "Días separados por coma. Ej: 'lunes,martes,miercoles,jueves,viernes' o 'lunes,martes,miercoles,jueves,viernes,sabado'"
+                    },
+                    hora_inicio: {
+                        type: "string",
+                        description: "Hora de apertura. Ej: '8', '9', '10'"
+                    },
+                    hora_fin: {
+                        type: "string",
+                        description: "Hora de cierre. Ej: '17', '18', '20'"
                     }
                 },
-                required: ["horario"]
+                required: ["dias", "hora_inicio", "hora_fin"]
             }
         }
     },
@@ -416,18 +429,17 @@ const ADMIN_TOOLS = [
         type: "function",
         function: {
             name: "modificar_horario_estilista",
-            description: "Modifica el horario laboral de un estilista específico. Permite cambiar días y horas de trabajo. Ejemplos: 'Carlos ya no trabaja los lunes', 'María trabaja martes de 2 a 5', 'Pedro trabaja de lunes a viernes de 8 a 6'.",
+            description: "Modifica el horario laboral de un estilista. Ejemplos: 'Carlos ya no trabaja los lunes' → accion='quitar_dia', dias='lunes'. 'María trabaja martes de 2 a 5' → accion='agregar_dia', dias='martes', hora_inicio='14', hora_fin='17'. 'Pedro trabaja lunes a viernes de 8 a 6' → accion='actualizar', dias='lunes,martes,miercoles,jueves,viernes', hora_inicio='8', hora_fin='18'.",
             parameters: {
                 type: "object",
                 properties: {
                     estilista: { type: "string", description: "Nombre del estilista" },
-                    horario: {
-                        type: "object",
-                        description: "Objeto con los días como claves y {start, end} como valores. Días con 'cerrado' o no incluidos = no trabaja. Ej: {\"lunes\": \"cerrado\", \"martes\": {\"start\": \"14\", \"end\": \"17\"}}"
-                    },
-                    accion: { type: "string", enum: ["actualizar", "quitar_dia", "agregar_dia"], description: "'actualizar' para set completo, 'quitar_dia' para remover un día, 'agregar_dia' para agregar un día con horario" }
+                    dias: { type: "string", description: "Días separados por coma. Ej: 'lunes,martes,miercoles'" },
+                    hora_inicio: { type: "string", description: "Hora inicio. Ej: '8', '14'. No requerido para quitar_dia." },
+                    hora_fin: { type: "string", description: "Hora fin. Ej: '17', '18'. No requerido para quitar_dia." },
+                    accion: { type: "string", enum: ["actualizar", "quitar_dia", "agregar_dia"], description: "'actualizar' para set completo, 'quitar_dia' para remover días, 'agregar_dia' para agregar días con horario" }
                 },
-                required: ["estilista", "horario"]
+                required: ["estilista", "dias", "accion"]
             }
         }
     },
@@ -942,40 +954,36 @@ async function executeFunction(fnName, args, tenantId) {
         // 19. configurar_horario_salon
         case 'configurar_horario_salon': {
             try {
-                // Convertir formato de la IA {start, end} al formato de la DB "HH:MM-HH:MM"
-                const allDays = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
-                const diasEs = { lunes: 'Lunes', martes: 'Martes', miercoles: 'Miércoles', miércoles: 'Miércoles', jueves: 'Jueves', viernes: 'Viernes', sabado: 'Sábado', sábado: 'Sábado', domingo: 'Domingo' };
-
-                // Normalizar keys con tilde → sin tilde
-                const normalized = {};
-                for (const [key, val] of Object.entries(args.horario)) {
-                    const normalKey = key.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-                    normalized[normalKey] = val;
+                if (!args.dias || !args.hora_inicio || !args.hora_fin) {
+                    return { error: 'Faltan parámetros. Necesito: dias (ej: "lunes,martes,miercoles,jueves,viernes"), hora_inicio (ej: "8"), hora_fin (ej: "17").' };
                 }
 
-                // Obtener horario actual para preservar días no mencionados
-                const currentResult = await db.query('SELECT working_hours FROM tenants WHERE id = $1::uuid', [tenantId]);
-                const currentHours = currentResult.rows[0]?.working_hours || {};
-                const dbHorario = typeof currentHours === 'string' ? JSON.parse(currentHours) : currentHours;
+                // Mapeo español → inglés (el frontend usa claves en inglés)
+                const esEnMap = { lunes: 'monday', martes: 'tuesday', miercoles: 'wednesday', jueves: 'thursday', viernes: 'friday', sabado: 'saturday', domingo: 'sunday' };
+                const allDaysEs = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
+                const allDaysEn = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+                const diasEs = { lunes: 'Lunes', martes: 'Martes', miercoles: 'Miércoles', jueves: 'Jueves', viernes: 'Viernes', sabado: 'Sábado', domingo: 'Domingo' };
 
-                // Construir horario final: días mencionados se actualizan, el resto se preserva
+                // Parsear días del string (normalizar tildes)
+                const diasInput = String(args.dias).toLowerCase()
+                    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                    .split(/[,\s]+/)
+                    .map(d => d.trim())
+                    .filter(Boolean);
+
+                // Parsear horas
+                const startH = String(parseInt(args.hora_inicio, 10)).padStart(2, '0');
+                const endH = String(parseInt(args.hora_fin, 10)).padStart(2, '0');
+
+                // Construir horario final con claves en inglés
                 const finalHorario = {};
-                for (const day of allDays) {
-                    if (normalized[day]) {
-                        const h = normalized[day];
-                        if (typeof h === 'object' && h.start !== undefined && h.end !== undefined) {
-                            const start = String(h.start).padStart(2, '0');
-                            const end = String(h.end).padStart(2, '0');
-                            finalHorario[day] = `${start}:00-${end}:00`;
-                        } else if (typeof h === 'string') {
-                            // Ya viene en formato string (ej: "08:00-15:00" o "cerrado")
-                            finalHorario[day] = h;
-                        } else {
-                            finalHorario[day] = 'cerrado';
-                        }
+                for (let i = 0; i < allDaysEs.length; i++) {
+                    const dayEs = allDaysEs[i];
+                    const dayEn = allDaysEn[i];
+                    if (diasInput.includes(dayEs)) {
+                        finalHorario[dayEn] = `${startH}:00-${endH}:00`;
                     } else {
-                        // Preservar valor anterior o poner cerrado
-                        finalHorario[day] = dbHorario[day] || 'cerrado';
+                        finalHorario[dayEn] = 'cerrado';
                     }
                 }
 
@@ -984,8 +992,9 @@ async function executeFunction(fnName, args, tenantId) {
                     [JSON.stringify(finalHorario), tenantId]
                 );
 
-                const horarioLegible = allDays.map(day =>
-                    `${diasEs[day] || day}: ${finalHorario[day] === 'cerrado' ? 'Cerrado' : finalHorario[day].replace('-', ' - ')}`
+                const enEsMap = { monday: 'Lunes', tuesday: 'Martes', wednesday: 'Miércoles', thursday: 'Jueves', friday: 'Viernes', saturday: 'Sábado', sunday: 'Domingo' };
+                const horarioLegible = allDaysEn.map(day =>
+                    `${enEsMap[day] || day}: ${finalHorario[day] === 'cerrado' ? 'Cerrado' : finalHorario[day].replace('-', ' - ')}`
                 ).join('\n');
 
                 return {
@@ -1042,14 +1051,20 @@ async function executeFunction(fnName, args, tenantId) {
             if (!rows.length) return { error: 'No se encontró el salón.' };
             const t = rows[0];
 
-            // Formatear horario legible
+            // Formatear horario legible (soporta claves en inglés o español)
             let horarioLegible = 'No configurado';
             if (t.working_hours) {
                 const wh = typeof t.working_hours === 'string' ? JSON.parse(t.working_hours) : t.working_hours;
-                const diasEs = { lunes: 'Lunes', martes: 'Martes', miercoles: 'Miércoles', miércoles: 'Miércoles', jueves: 'Jueves', viernes: 'Viernes', sabado: 'Sábado', sábado: 'Sábado', domingo: 'Domingo' };
-                horarioLegible = Object.entries(wh).map(([dia, h]) =>
-                    `${diasEs[dia] || dia}: ${h.start}:00 - ${h.end}:00`
-                ).join('\n');
+                const dayLabels = {
+                    monday: 'Lunes', tuesday: 'Martes', wednesday: 'Miércoles', thursday: 'Jueves', friday: 'Viernes', saturday: 'Sábado', sunday: 'Domingo',
+                    lunes: 'Lunes', martes: 'Martes', miercoles: 'Miércoles', miércoles: 'Miércoles', jueves: 'Jueves', viernes: 'Viernes', sabado: 'Sábado', sábado: 'Sábado', domingo: 'Domingo'
+                };
+                horarioLegible = Object.entries(wh).map(([dia, h]) => {
+                    const label = dayLabels[dia] || dia;
+                    if (typeof h === 'string') return `${label}: ${h === 'cerrado' ? 'Cerrado' : h.replace('-', ' - ')}`;
+                    if (h && h.start !== undefined) return `${label}: ${h.start}:00 - ${h.end}:00`;
+                    return `${label}: Cerrado`;
+                }).join('\n');
             }
 
             return {
@@ -1070,6 +1085,9 @@ async function executeFunction(fnName, args, tenantId) {
         // 22. modificar_horario_estilista
         case 'modificar_horario_estilista': {
             try {
+                if (!args.estilista) return { error: 'Debes indicar el nombre del estilista.' };
+                if (!args.dias) return { error: 'Debes indicar los días. Ej: "lunes,martes".' };
+
                 // Buscar estilista por nombre
                 const stRows = await prisma.$queryRawUnsafe(`
                     SELECT id, first_name, last_name, working_hours FROM users
@@ -1092,41 +1110,33 @@ async function executeFunction(fnName, args, tenantId) {
                 const diasEs = { lunes: 'Lunes', martes: 'Martes', miercoles: 'Miércoles', jueves: 'Jueves', viernes: 'Viernes', sabado: 'Sábado', domingo: 'Domingo' };
                 const accion = args.accion || 'actualizar';
 
-                // Normalizar keys del horario recibido
-                const normalized = {};
-                for (const [key, val] of Object.entries(args.horario)) {
-                    const normalKey = key.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-                    normalized[normalKey] = val;
-                }
+                // Parsear días del string
+                const diasInput = String(args.dias).toLowerCase()
+                    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                    .split(/[,\s]+/)
+                    .map(d => d.trim())
+                    .filter(Boolean);
 
                 let finalHorario;
 
                 if (accion === 'quitar_dia') {
-                    // Remover días específicos del horario actual
                     finalHorario = { ...currentHours };
-                    for (const day of Object.keys(normalized)) {
+                    for (const day of diasInput) {
                         delete finalHorario[day];
                     }
                 } else if (accion === 'agregar_dia') {
-                    // Agregar/actualizar días específicos, preservar el resto
+                    if (!args.hora_inicio || !args.hora_fin) return { error: 'Para agregar días necesito hora_inicio y hora_fin.' };
                     finalHorario = { ...currentHours };
-                    for (const day of Object.keys(normalized)) {
-                        const h = normalized[day];
-                        if (h === 'cerrado') {
-                            delete finalHorario[day];
-                        } else if (typeof h === 'object' && h.start !== undefined && h.end !== undefined) {
-                            finalHorario[day] = { start: String(h.start), end: String(h.end) };
-                        }
+                    for (const day of diasInput) {
+                        finalHorario[day] = { start: String(parseInt(args.hora_inicio, 10)), end: String(parseInt(args.hora_fin, 10)) };
                     }
                 } else {
                     // Actualizar completo
+                    if (!args.hora_inicio || !args.hora_fin) return { error: 'Para actualizar necesito hora_inicio y hora_fin.' };
                     finalHorario = {};
                     for (const day of allDays) {
-                        if (normalized[day] && normalized[day] !== 'cerrado') {
-                            const h = normalized[day];
-                            if (typeof h === 'object' && h.start !== undefined && h.end !== undefined) {
-                                finalHorario[day] = { start: String(h.start), end: String(h.end) };
-                            }
+                        if (diasInput.includes(day)) {
+                            finalHorario[day] = { start: String(parseInt(args.hora_inicio, 10)), end: String(parseInt(args.hora_fin, 10)) };
                         }
                     }
                 }
@@ -1206,6 +1216,103 @@ async function executeFunction(fnName, args, tenantId) {
 
 // ==================== ENDPOINT PRINCIPAL ====================
 
+// ==================== ONBOARDING ====================
+
+async function checkTenantSetup(tenantId) {
+    const [tenant, servicesCount, staffCount] = await Promise.all([
+        prisma.tenants.findUnique({
+            where: { id: tenantId },
+            select: { name: true, working_hours: true },
+        }),
+        prisma.services.count({ where: { tenant_id: tenantId } }),
+        prisma.users.count({ where: { tenant_id: tenantId, role_id: 3 } }),
+    ]);
+
+    if (!tenant) return { isComplete: true, steps: {} };
+
+    const hours = typeof tenant.working_hours === 'string'
+        ? JSON.parse(tenant.working_hours || '{}')
+        : (tenant.working_hours || {});
+    const hasHours = Object.values(hours).some(day => day && typeof day === 'object' && day.active === true);
+
+    const steps = {
+        name: Boolean((tenant.name || '').trim()),
+        services: servicesCount > 0,
+        staff: staffCount > 0,
+        hours: hasHours,
+    };
+
+    const completed = Object.values(steps).filter(Boolean).length;
+    const total = Object.keys(steps).length;
+
+    return {
+        isComplete: completed === total,
+        steps,
+        progress: Math.round((completed / total) * 100),
+        servicesCount,
+        staffCount,
+    };
+}
+
+function buildOnboardingPrompt(setupStatus) {
+    const { steps, servicesCount, staffCount } = setupStatus;
+
+    let nextStep = '';
+    if (!steps.services) {
+        nextStep = `PASO ACTUAL: Crear al menos un servicio.
+- Pregunta al jefe qué servicios ofrece (ej: Corte, Tinte, Alisado, etc.)
+- Necesitas: nombre, precio y duración en minutos.
+- Usa la función crear_servicio cuando tenga los datos.
+- Ejemplo: "Jefe, ¿qué servicios ofreces? Dime el nombre, precio y cuánto dura cada uno."`;
+    } else if (!steps.staff) {
+        nextStep = `PASO ACTUAL: Agregar al menos un estilista.
+- Ya tiene ${servicesCount} servicio(s) creado(s). ¡Celebra!
+- Ahora necesita agregar estilistas. Necesitas: nombre, email, % comisión y tipo de pago.
+- Usa la función crear_estilista cuando tenga los datos.
+- Ejemplo: "Jefe, ¿quiénes trabajan contigo? Dime nombre, email y qué porcentaje de comisión les das."`;
+    } else if (!steps.hours) {
+        nextStep = `PASO ACTUAL: Configurar horario del salón.
+- Ya tiene ${servicesCount} servicio(s) y ${staffCount} estilista(s). ¡Celebra!
+- Ahora falta configurar el horario de atención.
+- Pregunta qué días trabaja y en qué horario.
+- Usa la función configurar_horario_salon con los datos.
+- Ejemplo: "Jefe, ¿qué días abres y en qué horario? Por ejemplo: lunes a sábado de 8am a 6pm."`;
+    }
+
+    return `Eres el asistente de onboarding de TuPelukeria. Estás ayudando a un NUEVO dueño de salón a configurar su negocio por primera vez.
+
+PERSONALIDAD:
+- Siempre tratas al usuario como "jefe". Es tu forma natural de dirigirte a él.
+- Eres entusiasta, motivador y paciente. Este es su primer contacto con la plataforma.
+- Celebra cada paso completado con emojis y ánimo: "¡Excelente jefe! 🎉", "¡Ya casi! 💪"
+
+ESTADO ACTUAL DEL SETUP:
+- Nombre del salón: ${steps.name ? '✅' : '❌'}
+- Servicios creados: ${steps.services ? `✅ (${servicesCount})` : '❌ (0)'}
+- Estilistas registrados: ${steps.staff ? `✅ (${staffCount})` : '❌ (0)'}
+- Horario configurado: ${steps.hours ? '✅' : '❌'}
+
+${nextStep}
+
+REGLAS IMPORTANTES:
+- Guía al jefe paso a paso. NO lo abrumes con todo a la vez.
+- Si te saluda o es el primer mensaje, dale la bienvenida y muestra el progreso, luego guíalo al siguiente paso.
+- Cuando el jefe dé los datos, EJECUTA la función inmediatamente. No pidas confirmación más de una vez.
+- Si el jefe quiere saltar pasos o preguntar otra cosa, responde pero recuérdale amablemente qué falta por configurar.
+- Cuando TODOS los pasos estén completados, celebra y dile: "¡Tu salón está listo! 🎊 Tu plan actual es GRATIS. Si necesitas más funciones como inventario, nómina o WhatsApp bot, ve a Configuración → Planes."
+
+EJECUCIÓN DE FUNCIONES:
+- Cuando el jefe confirme un cambio (dice "sí", "dale", "hazlo"), EJECUTA la función INMEDIATAMENTE.
+- SIEMPRE llena TODOS los parámetros requeridos.
+
+CREACIÓN DE ESTILISTAS - DATOS REQUERIDOS:
+1. Nombre completo
+2. Email
+3. Porcentaje de comisión (ej: 40%, 50%)
+4. Tipo de pago: 'commission', 'salary', o 'mixed'
+Si falta alguno, pregunta antes de crear.`;
+}
+
 exports.chat = async (req, res) => {
     try {
         const { message, conversationHistory } = req.body;
@@ -1220,9 +1327,14 @@ exports.chat = async (req, res) => {
             return res.status(500).json({ error: 'No hay API key de OpenAI configurada.' });
         }
 
+        // Check tenant setup status for onboarding
+        const setupStatus = await checkTenantSetup(tenantId);
+
         // Construir mensajes
         const now = formatInTimeZone(new Date(), TIME_ZONE, 'yyyy-MM-dd hh:mm a');
-        const systemPrompt = `${ADMIN_SYSTEM_PROMPT}\n\nFecha/hora actual: ${now}`;
+        const systemPrompt = setupStatus.isComplete
+            ? `${ADMIN_SYSTEM_PROMPT}\n\nFecha/hora actual: ${now}`
+            : `${buildOnboardingPrompt(setupStatus)}\n\nFecha/hora actual: ${now}`;
 
         const messages = [
             { role: 'system', content: systemPrompt },
@@ -1263,7 +1375,8 @@ exports.chat = async (req, res) => {
         if (!assistantMessage.tool_calls || assistantMessage.tool_calls.length === 0) {
             return res.json({
                 response: assistantMessage.content || 'No tengo respuesta en este momento.',
-                functionExecuted: null
+                functionExecuted: null,
+                setupStatus: setupStatus.isComplete ? undefined : setupStatus
             });
         }
 
@@ -1321,9 +1434,13 @@ exports.chat = async (req, res) => {
         const finalContent = secondData.choices[0].message.content || 'No pude generar una respuesta.';
         const executedFunctions = assistantMessage.tool_calls.map(tc => tc.function.name).join(', ');
 
+        // Re-check setup status after function execution (might have changed)
+        const updatedSetupStatus = await checkTenantSetup(tenantId);
+
         return res.json({
             response: finalContent,
-            functionExecuted: executedFunctions
+            functionExecuted: executedFunctions,
+            setupStatus: updatedSetupStatus.isComplete ? undefined : updatedSetupStatus
         });
 
     } catch (err) {

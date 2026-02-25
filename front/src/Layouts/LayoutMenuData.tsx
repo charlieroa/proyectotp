@@ -54,7 +54,7 @@ const LayoutMenuData = () => {
 
     const menuItems: any[] = [
         { label: "Menú Principal", isHeader: true },
-        { id: "ai-assistant", label: "Asistente IA", icon: "ri-sparkling-line", link: "/assistant", roles: [1, 2, 3], minPlan: "pro" },
+        { id: "ai-assistant", label: "Asistente IA", icon: "ri-sparkling-line", link: "/assistant", roles: [1, 2, 3], minPlan: "free" },
         { id: "dashboard", label: "Dashboard", icon: "ri-dashboard-2-line", link: "/dashboard", roles: [1, 2, 3], minPlan: "free" },
         { id: "stylists", label: "Crm", icon: "ri-user-heart-line", link: "/stylists", roles: [1, 3], minPlan: "free" },
         { id: "inventory", label: "Inventario", icon: "ri-archive-line", link: "/inventory", roles: [1], minPlan: "pro" },
@@ -92,8 +92,8 @@ const LayoutMenuData = () => {
             // Headers y super admin items pasan sin cambio
             if (item.isHeader || !item.id) return item;
 
-            // Settings siempre accesible
-            if (item.id === 'settings') return item;
+            // Settings y Asistente siempre accesibles
+            if (item.id === 'settings' || item.id === 'ai-assistant') return item;
 
             // Verificar restricción de plan (tiene prioridad visual sobre setup)
             const minPlan = item.minPlan || 'free';

@@ -65,6 +65,21 @@ export const fetchTenantSettings = createAsyncThunk(
   }
 );
 
+// Thunk para refrescar el estado de setup del tenant
+export const fetchSetupStatus = createAsyncThunk(
+  'settings/fetchSetupStatus',
+  async (_, { rejectWithValue }) => {
+    try {
+      const tenantId = getTenantIdFromToken();
+      if (!tenantId) return null;
+      const { data } = await api.get(`/tenants/${tenantId}/setup-status`);
+      return data;
+    } catch (error: any) {
+      return rejectWithValue(error?.response?.data?.message || error?.message || 'Error al verificar setup');
+    }
+  }
+);
+
 // Estado inicial
 const initialProgress = Number(localStorage.getItem('setupProgress') || 0);
 
@@ -104,6 +119,13 @@ const settingsSlice = createSlice({
         state.loading = false;
         state.loaded = false;
         state.error = action.payload as string;
+      })
+      .addCase(fetchSetupStatus.fulfilled, (state, action) => {
+        if (action.payload) {
+          state.progress = action.payload.progress;
+          state.isComplete = action.payload.isComplete;
+          localStorage.setItem('setupProgress', String(action.payload.progress));
+        }
       });
   },
 });

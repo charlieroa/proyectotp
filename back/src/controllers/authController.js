@@ -111,9 +111,7 @@ exports.login = async (req, res) => {
 
       if (tenant) {
         const hasBasicInfo = Boolean(
-          (tenant.name || '').trim() &&
-          (tenant.address || '').trim() &&
-          (tenant.phone || '').trim()
+          (tenant.name || '').trim()
         );
 
         const hasHours = hasActiveWorkingHours(tenant.working_hours);

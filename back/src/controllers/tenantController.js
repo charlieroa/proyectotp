@@ -411,6 +411,51 @@ exports.getMyBusinesses = async (req, res) => {
   }
 };
 
+// Obtener estado de setup del tenant
+exports.getSetupStatus = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [tenant, servicesCount, staffCount] = await Promise.all([
+      prisma.tenants.findUnique({
+        where: { id },
+        select: { name: true, working_hours: true },
+      }),
+      prisma.services.count({ where: { tenant_id: id } }),
+      prisma.users.count({ where: { tenant_id: id, role_id: 3 } }),
+    ]);
+
+    if (!tenant) return res.status(404).json({ error: 'Tenant no encontrado' });
+
+    const hours = safeParseJSON(typeof tenant.working_hours === 'string' ? tenant.working_hours : JSON.stringify(tenant.working_hours));
+    const hasHours = Object.values(hours).some((day) => {
+      if (!day || typeof day !== 'object') return false;
+      return day.active === true;
+    });
+
+    const steps = {
+      name: Boolean((tenant.name || '').trim()),
+      services: servicesCount > 0,
+      staff: staffCount > 0,
+      hours: hasHours,
+    };
+
+    const completed = Object.values(steps).filter(Boolean).length;
+    const total = Object.keys(steps).length;
+    const progress = Math.round((completed / total) * 100);
+
+    return res.json({
+      steps,
+      progress,
+      isComplete: progress === 100,
+      servicesCount,
+      staffCount,
+    });
+  } catch (error) {
+    console.error('Error al obtener setup status:', error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
 // Eliminar Tenant
 exports.deleteTenant = async (req, res) => {
   const { id } = req.params;

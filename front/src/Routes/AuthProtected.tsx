@@ -13,7 +13,6 @@ import { selectTenantPlan, isPlanAtLeast } from "../slices/Settings/settingsSlic
 const PLAN_PROTECTED_ROUTES: Record<string, string> = {
   '/inventory': 'pro',
   '/payroll': 'pro',
-  '/assistant': 'pro',
   '/checkout': 'pro',
   '/geo': 'enterprise',
 };

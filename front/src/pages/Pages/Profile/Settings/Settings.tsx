@@ -147,10 +147,20 @@ const formatRange = (d: DayState): string => {
   if (!d.start || !d.end) return "cerrado";
   return `${toTime(d.start)}-${toTime(d.end)}`;
 };
+const ES_TO_EN: Record<string, DayKey> = {
+  lunes: "monday", martes: "tuesday", miercoles: "wednesday", miércoles: "wednesday",
+  jueves: "thursday", viernes: "friday", sabado: "saturday", sábado: "saturday", domingo: "sunday",
+};
 const normalizeWorkingHoursFromAPI = (wh: Tenant["working_hours"]): WorkingHoursPerDay => {
   const base = defaultWeek();
   if (!wh || typeof wh !== "object") return base;
-  DAYS.forEach(({ key }) => { base[key] = parseRange(wh[key] ?? null); });
+  // Support both English and Spanish keys
+  const normalized: Record<string, string | null> = {};
+  for (const [k, v] of Object.entries(wh)) {
+    const enKey = ES_TO_EN[k.toLowerCase()] || k.toLowerCase();
+    normalized[enKey] = v;
+  }
+  DAYS.forEach(({ key }) => { base[key] = parseRange(normalized[key] ?? null); });
   return base;
 };
 const buildWorkingHoursPayload = (perDay: WorkingHoursPerDay): Record<string, string> => {
@@ -866,9 +876,15 @@ const Settings: React.FC = () => {
 
             {/* Main content */}
             <Col xl={9}>
-              <Card className="overflow-hidden position-relative">
-                {/* Tabs header */}
-                <CardHeader className="p-0" style={{ position: 'sticky', top: '70px', zIndex: 1003, background: '#fff' }}>
+              <Card className="overflow-hidden">
+                {/* Title + Tabs header */}
+                <CardHeader className="p-0">
+                  <div className="d-flex align-items-center px-4 pt-3 pb-2">
+                    <h4 className="fw-semibold mb-0">
+                      <i className="ri-settings-3-line me-2 text-primary"></i>
+                      Configuración
+                    </h4>
+                  </div>
                   <Nav tabs className="nav-tabs-custom px-4">
                     <NavItem>
                       <NavLink
@@ -943,7 +959,7 @@ const Settings: React.FC = () => {
                 </CardHeader>
 
                 {/* Tab content */}
-                <CardBody>
+                <CardBody className="pt-4">
                   {error && (
                     <div className="alert alert-danger" role="alert">
                       <span>{error}</span>
