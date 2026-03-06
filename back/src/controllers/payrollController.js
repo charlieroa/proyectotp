@@ -324,3 +324,6 @@ exports.getPayrollsByTenant = async (req, res) => {
         return res.status(500).json({ error: 'Error interno del servidor' });
     }
 };
+
+// Export shared function for AI assistant
+exports.calculateStylistPayrollBreakdown = calculateStylistPayrollBreakdown;

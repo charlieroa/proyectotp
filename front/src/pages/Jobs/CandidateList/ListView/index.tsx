@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import { Card, CardBody, Col, Container, Input, Row } from "reactstrap";
 import BreadCrumb from "../../../../Components/Common/BreadCrumb";
 import Pagination from "../../../../Components/Common/Pagination";
-import { ToastContainer } from "react-toastify";
 import { useDispatch, useSelector } from "react-redux";
 import { createSelector } from "reselect";
 
@@ -230,7 +229,6 @@ const CandidateList = () => {
           />
 
           <AddEditJobCandidateList show={modal} editItem={editItem} handleShow={handleShow} handleClose={handleAddModal} />
-          <ToastContainer closeButton={false} limit={1} />
 
         </Container>
       </div>

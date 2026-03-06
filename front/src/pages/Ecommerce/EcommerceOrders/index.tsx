@@ -44,8 +44,6 @@ import {
 } from "../../../slices/thunks";
 
 import Loader from "../../../Components/Common/Loader";
-import { toast, ToastContainer } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
 import { createSelector } from "reselect";
 import moment from "moment";
 
@@ -300,7 +298,7 @@ const EcommerceOrders = () => {
     const checkall: any = document.getElementById("checkBoxAll");
     selectedCheckBoxDelete.forEach((element: any) => {
       dispatch(onDeleteOrder(element.value));
-      setTimeout(() => { toast.clearWaitingQueue(); }, 3000);
+      // toast queue cleared after delete
     });
     setIsMultiDeleteButton(false);
     checkall.checked = false;
@@ -841,7 +839,6 @@ const EcommerceOrders = () => {
                     </div>
                   </Form>
                 </Modal>
-                <ToastContainer closeButton={false} limit={1} />
               </CardBody>
             </Card>
           </Col>

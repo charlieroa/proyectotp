@@ -1,6 +1,5 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
-import { toast } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
+import { sileo } from 'sileo';
 
 //Include Both Helper File with needed methods
 import {
@@ -25,10 +24,10 @@ export const addNewTodo = createAsyncThunk("todos/addNewTodo", async (todo : any
   try {
     const response = addNewTodoApi(todo);
     const data = await response;
-    toast.success("Todo Added Successfully", { autoClose: 3000 });
+    sileo.success({ title: "Todo agregado correctamente" });
     return data;
   } catch (error) {
-    toast.error("Todo Added Failed", { autoClose: 3000 });
+    sileo.error({ title: "Error al agregar todo" });
     return error;
   }
 });
@@ -37,10 +36,10 @@ export const updateTodo = createAsyncThunk("todos/updateTodo", async (todo : any
   try {
     const response = updateTodoApi(todo);
     const data = await response;
-    toast.success("Todo Updated Successfully", { autoClose: 3000 });
+    sileo.success({ title: "Todo actualizado correctamente" });
     return data;
   } catch (error) {
-    toast.error("Todo Updated Failed", { autoClose: 3000 });
+    sileo.error({ title: "Error al actualizar todo" });
     return error;
   }
 });
@@ -49,10 +48,10 @@ export const deleteTodo = createAsyncThunk("todos/deleteTodo", async (todo : any
   try {
     const response = deleteTodoApi(todo);
     const data = await response;
-    toast.success("Todo Delete Successfully", { autoClose: 3000 });
+    sileo.success({ title: "Todo eliminado correctamente" });
     return data;
   } catch (error) {
-    toast.error("Todo Delete Failed", { autoClose: 3000 });
+    sileo.error({ title: "Error al eliminar todo" });
     return error;
   }
 });
@@ -70,10 +69,10 @@ export const addNewProject = createAsyncThunk("todos/addNewProject", async (proj
   try {
     const response = addNewProjectApi(project);
     const data = await response;
-    toast.success("Project Added Successfully", { autoClose: 3000 });
+    sileo.success({ title: "Proyecto agregado correctamente" });
     return data;
   } catch (error) {
-    toast.error("Project Added Failed", { autoClose: 3000 });
+    sileo.error({ title: "Error al agregar proyecto" });
     return error;
   }
 });

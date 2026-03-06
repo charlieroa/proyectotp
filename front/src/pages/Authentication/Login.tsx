@@ -73,7 +73,7 @@ const Login = (props: any) => {
 
   useEffect(() => {
     if (errorMsg || error) {
-      const messageRaw = (errorMsg || error || "").toString();
+      const messageRaw = (error || "").toString();
       Swal.fire({
         icon: "error",
         title: "Credenciales inválidas",

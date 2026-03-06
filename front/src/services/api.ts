@@ -9,9 +9,7 @@ const API_BASE_URL = process.env.REACT_APP_API_URL;
 
 /** Instancia única de Axios para toda la app */
 export const api = axios.create({
-  // --- USO CORREGIDO ---
   baseURL: API_BASE_URL,
-  withCredentials: true,
   headers: {
     Accept: "application/json",
     // No fijamos "Content-Type" aquí para no romper FormData; lo seteamos en el request si hace falta.
@@ -23,7 +21,7 @@ export const api = axios.create({
  * Solo las rutas públicas de auth (login, register) se excluyen.
  * /auth/switch-tenant SÍ necesita token.
  */
-const PUBLIC_AUTH_PATHS = ["/auth/login", "/auth/register-tenant"];
+const PUBLIC_AUTH_PATHS = ["/auth/login", "/auth/register-tenant", "/auth/forgot-password", "/auth/reset-password"];
 
 const isAuthRoute = (url?: string): boolean => {
   if (!url) return false;
@@ -78,5 +76,9 @@ api.interceptors.response.use(
 export const setApiBaseURL = (baseURL: string) => {
   api.defaults.baseURL = baseURL;
 };
+
+/** Returns the base URL for /uploads paths (strips /api suffix) */
+export const getUploadsBaseUrl = (): string =>
+  (api.defaults.baseURL || '').replace(/\/api\/?$/, '');
 
 export default api;

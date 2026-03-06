@@ -10,6 +10,8 @@ import { createSelector } from 'reselect';
 
 import { registerTenant } from '../../slices/auth/tenantRegister/thunk';
 import { resetTenantRegisterFlag } from '../../slices/auth/tenantRegister/reducer';
+import { loginSuccess } from '../../slices/auth/login/reducer';
+import { setToken } from '../../services/auth';
 import logoLight from "../../assets/images/logo-light.png";
 
 import Swal from 'sweetalert2';
@@ -59,18 +61,33 @@ const TenantRegister = () => {
   useEffect(() => {
     if (success) {
       setIsLoading(false);
+
+      // Auto-login: the backend now returns a token
+      if (success.token) {
+        setToken(success.token);
+        const authUser = {
+          message: "Login Successful",
+          token: success.token,
+          user: success.user,
+          setup_complete: false,
+        };
+        sessionStorage.setItem("authUser", JSON.stringify(authUser));
+        localStorage.setItem("setupProgress", "0");
+        dispatch(loginSuccess(authUser));
+      }
+
       Swal.fire({
         icon: "success",
-        title: "Cuenta creada",
-        text: "Tu peluquería ha sido registrada. Redirigiendo al login...",
+        title: "Cuenta creada!",
+        text: "Vamos a configurar tu pelukeria...",
         confirmButtonColor: "#7c3aed",
         background: "#0f172a",
         color: "#e2e8f0",
-        timer: 2000,
+        timer: 1500,
         showConfirmButton: false,
       }).then(() => {
-        navigate('/login');
         dispatch(resetTenantRegisterFlag());
+        navigate('/assistant');
       });
     }
     if (error) {

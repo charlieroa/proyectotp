@@ -22,7 +22,7 @@ import {
 } from "../slices/thunks";
 
 // Settings (plan + setup progress)
-import { fetchTenantSettings, selectSettingsLoaded } from '../slices/Settings/settingsSlice';
+import { fetchTenantSettings, selectSettingsLoaded, selectIsSetupComplete, selectTenantPlan } from '../slices/Settings/settingsSlice';
 
 //redux
 import { useSelector, useDispatch } from "react-redux";
@@ -88,7 +88,14 @@ const Layout = (props: any) => {
     // Estado del chat flotante de Asistencia IA
     const [chatOpen, setChatOpen] = useState(false);
     const toggleChat = () => setChatOpen(!chatOpen);
-    const isSuperAdmin = getRoleFromToken() === 5;
+    const currentRole = getRoleFromToken();
+    const isSuperAdmin = currentRole === 5;
+    const hideAssistant = isSuperAdmin || currentRole === 2 || currentRole === 6;
+    const isSetupComplete = useSelector(selectIsSetupComplete);
+    const tenantPlan = useSelector(selectTenantPlan);
+
+    // Auto-open del chat de onboarding desactivado
+    // El chat sigue disponible al hacer clic en el botón flotante
 
     useEffect(() => {
         const tourCompleted = localStorage.getItem('settingsTourCompleted');
@@ -203,7 +210,8 @@ const Layout = (props: any) => {
                 <Header
                     headerClass={headerClass}
                     layoutModeType={layoutModeType}
-                    onChangeLayoutMode={onChangeLayoutMode} />
+                    onChangeLayoutMode={onChangeLayoutMode}
+                    startTour={startTour} />
 
                 {/* --- Pasamos la función startTour al Sidebar --- */}
                 <Sidebar layoutType={layoutType} startTour={startTour} />
@@ -214,7 +222,7 @@ const Layout = (props: any) => {
             </div>
 
             {/* Botón flotante de Asistencia IA (hidden for super admin) */}
-            {!isSuperAdmin && (
+            {!hideAssistant && (
                 <div className="customizer-setting d-none d-md-block">
                     <button
                         onClick={toggleChat}
@@ -228,7 +236,7 @@ const Layout = (props: any) => {
             )}
 
             {/* Chat flotante de Asistencia IA */}
-            {!isSuperAdmin && <FloatingChat isOpen={chatOpen} toggle={toggleChat} />}
+            {!hideAssistant && <FloatingChat isOpen={chatOpen} toggle={toggleChat} />}
         </React.Fragment>
     );
 };

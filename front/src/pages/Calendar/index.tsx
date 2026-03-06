@@ -20,6 +20,7 @@ import useCalendarSocket from "../../hooks/useCalendarSocket";
 import {
   getCalendarData as onGetCalendarData,
   updateAppointment as onUpdateAppointment,
+  cancelAppointment as onCancelAppointment,
 } from "../../slices/thunks";
 
 // ✅ Thunk de Settings (importado directamente)
@@ -169,9 +170,60 @@ const Calendar = () => {
   };
 
   const handleEventClick = (arg: any) => {
-    setSelectedEvent(arg.event.extendedProps);
-    setDefaultDate(null);
-    setModalOpen(true);
+    const eventData = arg.event.extendedProps;
+    const canModify = ['scheduled', 'rescheduled', 'pending_approval'].includes(eventData.status);
+
+    if (!canModify) {
+      setSelectedEvent(eventData);
+      setDefaultDate(null);
+      setModalOpen(true);
+      return;
+    }
+
+    const startTime = eventData.start_time
+      ? new Date(eventData.start_time).toLocaleString('es-CO', {
+          weekday: 'short', day: 'numeric', month: 'short',
+          hour: 'numeric', minute: '2-digit', hour12: true,
+        })
+      : '';
+
+    Swal.fire({
+      title: '¿Qué deseas hacer con esta cita?',
+      html: `<div class="text-start">
+        <p class="mb-1"><strong>${eventData.service_name || 'Servicio'}</strong></p>
+        <p class="mb-1" style="color:#878a99"><i class="ri-user-line me-1"></i>${eventData.client_first_name || ''} ${eventData.client_last_name || ''}</p>
+        <p class="mb-1" style="color:#878a99"><i class="ri-scissors-line me-1"></i>${eventData.stylist_first_name || ''} ${eventData.stylist_last_name || ''}</p>
+        <p class="mb-0" style="color:#878a99"><i class="ri-time-line me-1"></i>${startTime}</p>
+      </div>`,
+      showDenyButton: true,
+      showCancelButton: true,
+      confirmButtonText: '<i class="ri-calendar-event-line me-1"></i> Reprogramar',
+      denyButtonText: '<i class="ri-close-circle-line me-1"></i> Cancelar Cita',
+      cancelButtonText: 'Cerrar',
+      confirmButtonColor: '#f7b84b',
+      denyButtonColor: '#f06548',
+    }).then((result) => {
+      if (result.isConfirmed) {
+        setSelectedEvent(eventData);
+        setDefaultDate(null);
+        setModalOpen(true);
+      } else if (result.isDenied) {
+        Swal.fire({
+          title: '¿Confirmar cancelación?',
+          text: 'Esta acción marcará la cita como cancelada.',
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonColor: '#f06548',
+          cancelButtonColor: '#878a99',
+          confirmButtonText: 'Sí, cancelar cita',
+          cancelButtonText: 'No, volver',
+        }).then((confirmResult) => {
+          if (confirmResult.isConfirmed) {
+            dispatch(onCancelAppointment(eventData.id));
+          }
+        });
+      }
+    });
   };
 
   const handleNewAppointmentClick = () => {
@@ -303,16 +355,30 @@ const Calendar = () => {
                     dayMaxEvents={2}
                     moreLinkText="más"
                     eventTimeFormat={{
-                      hour: "2-digit",
+                      hour: "numeric",
                       minute: "2-digit",
-                      meridiem: false,
-                      hour12: false,
+                      meridiem: "short",
+                      hour12: true,
                     }}
                     slotLabelFormat={{
-                      hour: "2-digit",
+                      hour: "numeric",
                       minute: "2-digit",
-                      meridiem: false,
-                      hour12: false,
+                      meridiem: "short",
+                      hour12: true,
+                    }}
+                    eventContent={(arg) => {
+                      const ext = arg.event.extendedProps;
+                      const startDate = arg.event.start;
+                      const timeStr = startDate
+                        ? startDate.toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit', hour12: true })
+                        : '';
+                      return (
+                        <div className="p-1" style={{ fontSize: '0.73rem', lineHeight: 1.25, overflow: 'hidden' }}>
+                          <div className="fw-semibold text-truncate">{ext.service_name || arg.event.title}</div>
+                          <div className="text-truncate" style={{ opacity: 0.9 }}>{ext.client_first_name || ''}</div>
+                          <div className="text-truncate" style={{ opacity: 0.8 }}>{ext.stylist_first_name || ''} &middot; {timeStr}</div>
+                        </div>
+                      );
                     }}
                     // ✅ Configuración adicional para mejor UX
                     height="auto"

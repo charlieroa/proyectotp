@@ -24,6 +24,7 @@ const dbToApiTenant = (row) => ({
   id: row.id,
   name: row.name,
   address: row.address,
+  city: row.city,
   phone: row.phone,
   email: row.email,
   website: row.website,
@@ -42,6 +43,10 @@ const dbToApiTenant = (row) => ({
   allow_past_appointments: !!row.allow_past_appointments,
   // Payment plan
   plan: row.plan || 'free',
+  // Stripe subscription
+  subscription_status: row.subscription_status || null,
+  current_period_end: row.current_period_end || null,
+  has_stripe_subscription: !!row.stripe_subscription_id,
   // Saludo y brochure
   greeting_message: row.greeting_message || null,
   brochure_url: row.brochure_url || null,
@@ -54,6 +59,10 @@ const dbToApiTenant = (row) => ({
   shared_stylists_enabled: !!row.shared_stylists_enabled,
   tip_salon_percent: row.tip_salon_percent != null ? Number(row.tip_salon_percent) : 10,
   branch_color: row.branch_color || '#3788d8',
+  // Primary branch
+  is_primary_branch: !!row.is_primary_branch,
+  cross_branch_schedule_block: row.cross_branch_schedule_block !== false,
+  manage_all_branches_cash: !!row.manage_all_branches_cash,
   created_at: row.created_at,
   updated_at: row.updated_at,
 });
@@ -64,7 +73,7 @@ const dbToApiTenant = (row) => ({
 exports.createTenant = async (req, res) => {
   try {
     const {
-      name, address, phone, working_hours, email, website, logo_url,
+      name, address, city, phone, working_hours, email, website, logo_url,
       iva_rate, admin_fee_percent,
       products_for_staff_enabled = true,
       admin_fee_enabled = false,
@@ -80,6 +89,7 @@ exports.createTenant = async (req, res) => {
       data: {
         name: clean(name),
         address: clean(address),
+        city: clean(city),
         phone: clean(phone),
         working_hours: working_hours || null,
         slug,
@@ -128,6 +138,16 @@ exports.getTenantById = async (req, res) => {
   try {
     const tenant = await prisma.tenants.findUnique({ where: { id } });
     if (!tenant) return res.status(404).json({ message: 'Tenant no encontrado' });
+
+    // Si es sucursal hija, heredar el plan del padre
+    if (tenant.parent_tenant_id) {
+      const parent = await prisma.tenants.findUnique({
+        where: { id: tenant.parent_tenant_id },
+        select: { plan: true },
+      });
+      if (parent?.plan) tenant.plan = parent.plan;
+    }
+
     return res.status(200).json(dbToApiTenant(tenant));
   } catch (error) {
     console.error('Error al obtener tenant por ID:', error);
@@ -153,6 +173,7 @@ exports.updateTenant = async (req, res) => {
       data.slug = createSlug(body.name);
     }
     if (body.address !== undefined) data.address = clean(body.address);
+    if (body.city !== undefined) data.city = clean(body.city);
     if (body.phone !== undefined) data.phone = clean(body.phone);
     if (body.email !== undefined) data.email = clean(body.email);
     if (body.website !== undefined) data.website = clean(body.website);
@@ -181,10 +202,14 @@ exports.updateTenant = async (req, res) => {
       data.allow_past_appointments = !!body.allow_past_appointments;
 
     // Payment plan (accept both "plan" and "payment_plan" for backwards compatibility)
-    if (body.plan !== undefined)
-      data.plan = body.plan;
-    else if (body.payment_plan !== undefined)
-      data.plan = body.payment_plan;
+    // Solo se permite cambiar directamente a "free"; planes pagos requieren Stripe Checkout
+    const newPlan = body.plan !== undefined ? body.plan : body.payment_plan;
+    if (newPlan !== undefined) {
+      if (['pro', 'business', 'enterprise'].includes(newPlan)) {
+        return res.status(400).json({ error: 'Para activar un plan pago, usa el flujo de pago con Stripe.' });
+      }
+      data.plan = newPlan;
+    }
 
     // Saludo y brochure
     if (body.greeting_message !== undefined) data.greeting_message = clean(body.greeting_message);
@@ -202,6 +227,14 @@ exports.updateTenant = async (req, res) => {
     }
     if (body.branch_color !== undefined)
       data.branch_color = clean(body.branch_color) || '#3788d8';
+
+    // Cross-branch schedule blocking (primary branch only)
+    if (body.cross_branch_schedule_block !== undefined)
+      data.cross_branch_schedule_block = !!body.cross_branch_schedule_block;
+
+    // Multi-branch cash management
+    if (body.manage_all_branches_cash !== undefined)
+      data.manage_all_branches_cash = !!body.manage_all_branches_cash;
 
     if (Object.keys(data).length === 0) {
       const current = await prisma.tenants.findUnique({ where: { id } });
@@ -230,9 +263,13 @@ exports.uploadTenantLogo = async (req, res) => {
       return res.status(400).json({ message: 'No se ha subido ningun archivo.' });
     }
     const uploadedFileUrl = `/uploads/logos/${req.file.filename}`;
-    const tenant = await prisma.tenants.findUnique({ where: { id: tenantId }, select: { id: true } });
+    const tenant = await prisma.tenants.findUnique({ where: { id: tenantId }, select: { id: true, parent_tenant_id: true, is_primary_branch: true } });
     if (!tenant) {
       return res.status(404).json({ message: 'Tenant no encontrado.' });
+    }
+    // Block logo upload for non-primary branches
+    if (tenant.parent_tenant_id && !tenant.is_primary_branch) {
+      return res.status(403).json({ error: 'Solo la sede principal puede cambiar el logo.' });
     }
     await prisma.tenants.update({
       where: { id: tenantId },
@@ -342,6 +379,10 @@ exports.createBranch = async (req, res) => {
 
     const slug = createSlug(name);
 
+    // Check if this is the first child branch - it becomes primary
+    const existingChildren = await prisma.tenants.count({ where: { parent_tenant_id: parentId } });
+    const isFirstChild = existingChildren === 0;
+
     const branch = await prisma.tenants.create({
       data: {
         name: clean(name),
@@ -352,6 +393,7 @@ exports.createBranch = async (req, res) => {
         business_type: business_type || 'peluqueria',
         parent_tenant_id: parentId,
         plan: parentPlan, // Heredar plan del padre
+        is_primary_branch: isFirstChild,
       },
     });
 
@@ -393,18 +435,19 @@ exports.getMyBusinesses = async (req, res) => {
       }
     }
 
-    // Retornar parent + todos sus hijos
-    const allTenants = await prisma.tenants.findMany({
-      where: {
-        OR: [
-          { id: parentId },
-          { parent_tenant_id: parentId },
-        ],
-      },
+    // Retornar solo sedes hijas (no el parent grupo, que no tiene data propia)
+    const childTenants = await prisma.tenants.findMany({
+      where: { parent_tenant_id: parentId },
       orderBy: { created_at: 'asc' },
     });
 
-    return res.status(200).json(allTenants.map(dbToApiTenant));
+    // Si no hay hijos, retornar el parent como único negocio
+    if (childTenants.length === 0) {
+      const parent = await prisma.tenants.findUnique({ where: { id: parentId } });
+      return res.status(200).json([dbToApiTenant(parent)]);
+    }
+
+    return res.status(200).json(childTenants.map(dbToApiTenant));
   } catch (error) {
     console.error('Error al obtener negocios:', error);
     return res.status(500).json({ error: 'Error interno del servidor.' });
@@ -428,8 +471,12 @@ exports.getSetupStatus = async (req, res) => {
 
     const hours = safeParseJSON(typeof tenant.working_hours === 'string' ? tenant.working_hours : JSON.stringify(tenant.working_hours));
     const hasHours = Object.values(hours).some((day) => {
-      if (!day || typeof day !== 'object') return false;
-      return day.active === true;
+      if (!day) return false;
+      // Support object format: { active: true, start: "08:00", end: "18:00" }
+      if (typeof day === 'object') return day.active === true;
+      // Support string format: "08:00-18:00" (active if not "cerrado" and not empty)
+      if (typeof day === 'string') return day.trim() !== '' && day.toLowerCase() !== 'cerrado';
+      return false;
     });
 
     const steps = {
@@ -453,6 +500,125 @@ exports.getSetupStatus = async (req, res) => {
   } catch (error) {
     console.error('Error al obtener setup status:', error);
     return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+// Establecer una sucursal como sede principal
+exports.setPrimaryBranch = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const tenant = await prisma.tenants.findUnique({
+      where: { id },
+      select: { id: true, parent_tenant_id: true },
+    });
+    if (!tenant) return res.status(404).json({ error: 'Tenant no encontrado.' });
+    if (!tenant.parent_tenant_id) return res.status(400).json({ error: 'Solo sucursales pueden ser sede principal.' });
+
+    // Unset all siblings, then set this one
+    await prisma.$transaction([
+      prisma.tenants.updateMany({
+        where: { parent_tenant_id: tenant.parent_tenant_id },
+        data: { is_primary_branch: false },
+      }),
+      prisma.tenants.update({
+        where: { id },
+        data: { is_primary_branch: true, updated_at: new Date() },
+      }),
+    ]);
+
+    return res.status(200).json({ message: 'Sede principal actualizada.', id });
+  } catch (error) {
+    console.error('Error al establecer sede principal:', error);
+    return res.status(500).json({ error: 'Error interno del servidor.' });
+  }
+};
+
+// Cross-branch cash summary (primary only)
+exports.getCrossBranchCashSummary = async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const tenant = await prisma.tenants.findUnique({
+      where: { id: tenant_id },
+      select: { id: true, parent_tenant_id: true, is_primary_branch: true },
+    });
+    if (!tenant) return res.status(404).json({ error: 'Tenant no encontrado.' });
+    if (!tenant.is_primary_branch) return res.status(403).json({ error: 'Solo disponible desde la sede principal.' });
+
+    const parentId = tenant.parent_tenant_id || tenant.id;
+    const siblings = await prisma.tenants.findMany({
+      where: { parent_tenant_id: parentId },
+      select: { id: true, name: true },
+      orderBy: { created_at: 'asc' },
+    });
+
+    const summaries = await Promise.all(siblings.map(async (branch) => {
+      const session = await prisma.cash_sessions.findFirst({
+        where: { tenant_id: branch.id, status: 'open' },
+        orderBy: { opened_at: 'desc' },
+      });
+      const movements = session ? await prisma.cash_movements.aggregate({
+        where: { cash_session_id: session.id },
+        _sum: { amount: true },
+        _count: true,
+      }) : null;
+      return {
+        branch_id: branch.id,
+        branch_name: branch.name,
+        has_open_session: !!session,
+        session_id: session?.id || null,
+        opened_at: session?.opened_at || null,
+        initial_amount: session?.initial_amount || 0,
+        movements_count: movements?._count || 0,
+        movements_total: movements?._sum?.amount || 0,
+      };
+    }));
+
+    return res.status(200).json(summaries);
+  } catch (error) {
+    console.error('Error en cross-branch cash summary:', error);
+    return res.status(500).json({ error: 'Error interno del servidor.' });
+  }
+};
+
+// Cross-branch services (primary only)
+exports.getCrossBranchServices = async (req, res) => {
+  try {
+    const { tenant_id } = req.user;
+    const tenant = await prisma.tenants.findUnique({
+      where: { id: tenant_id },
+      select: { id: true, parent_tenant_id: true, is_primary_branch: true },
+    });
+    if (!tenant) return res.status(404).json({ error: 'Tenant no encontrado.' });
+    if (!tenant.is_primary_branch) return res.status(403).json({ error: 'Solo disponible desde la sede principal.' });
+
+    const parentId = tenant.parent_tenant_id || tenant.id;
+    const siblings = await prisma.tenants.findMany({
+      where: { parent_tenant_id: parentId },
+      select: { id: true, name: true },
+      orderBy: { created_at: 'asc' },
+    });
+
+    const result = await Promise.all(siblings.map(async (branch) => {
+      const services = await prisma.services.findMany({
+        where: { tenant_id: branch.id, is_active: true },
+        orderBy: { name: 'asc' },
+      });
+      return {
+        branch_id: branch.id,
+        branch_name: branch.name,
+        services: services.map(s => ({
+          id: s.id,
+          name: s.name,
+          price: s.price,
+          duration_minutes: s.duration_minutes,
+        })),
+      };
+    }));
+
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error('Error en cross-branch services:', error);
+    return res.status(500).json({ error: 'Error interno del servidor.' });
   }
 };
 

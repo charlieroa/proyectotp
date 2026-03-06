@@ -1,6 +1,5 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
-import { toast } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
+import { sileo } from 'sileo';
 
 //Include Both Helper File with needed methods
 import {
@@ -22,10 +21,10 @@ export const getInvoices = createAsyncThunk("invoice/getInvoices", async () => {
 export const addNewInvoice = createAsyncThunk("invoice/addNewInvoice", async (invoice : any) => {
   try {
     const response = addNewInvoiceApi(invoice);
-    toast.success("Invoice Added Successfully", { autoClose: 3000 });
+    sileo.success({ title: "Invoice Added Successfully" });
     return response;
   } catch (error) {
-    toast.error("Invoice Added Failed", { autoClose: 3000 });
+    sileo.error({ title: "Invoice Added Failed" });
     return error;
   }
 });
@@ -33,11 +32,11 @@ export const addNewInvoice = createAsyncThunk("invoice/addNewInvoice", async (in
 export const updateInvoice = createAsyncThunk("invoice/updateInvoice", async (invoice : any) => {
   try {
     const response = updateInvoiceApi(invoice);
-    toast.success("Invoice Updated Successfully", { autoClose: 3000 });
+    sileo.success({ title: "Invoice Updated Successfully" });
     const data = await response;
     return data;
   } catch (error) {
-    toast.error("Invoice Updated Failed", { autoClose: 3000 });
+    sileo.error({ title: "Invoice Updated Failed" });
     return error;
   }
 });
@@ -45,11 +44,11 @@ export const updateInvoice = createAsyncThunk("invoice/updateInvoice", async (in
 export const deleteInvoice = createAsyncThunk("invoice/deleteInvoice", async (invoice : any) => {
   try {
     const response = deleteInvoiceApi(invoice);
-    toast.success("Invoice Delete Successfully", { autoClose: 3000 });
+    sileo.success({ title: "Invoice Delete Successfully" });
     return { invoice, ...response };
   }
   catch (error) {
-    toast.error("Invoice Delete Failed", { autoClose: 3000 });
+    sileo.error({ title: "Invoice Delete Failed" });
     return error;
   }
 });

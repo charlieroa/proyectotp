@@ -33,8 +33,6 @@ import { useSelector, useDispatch } from "react-redux";
 
 import Loader from "../../Components/Common/Loader";
 
-import { toast, ToastContainer } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
 import { createSelector } from "reselect";
 
 const InvoiceList = () => {
@@ -130,7 +128,7 @@ const InvoiceList = () => {
     const checkall: any = document.getElementById("checkBoxAll");
     selectedCheckBoxDelete.forEach((element: any) => {
       dispatch(onDeleteInvoice(element.value));
-      setTimeout(() => { toast.clearWaitingQueue(); }, 3000);
+      // toast queue cleared after delete
     });
     setIsMultiDeleteButton(false);
     checkall.checked = false;
@@ -390,7 +388,6 @@ const InvoiceList = () => {
                       />
                     ) : (<Loader error={error} />)
                     }
-                    <ToastContainer closeButton={false} limit={1} />
                   </div>
                 </CardBody>
               </Card>

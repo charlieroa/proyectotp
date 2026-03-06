@@ -39,8 +39,6 @@ import {
 import { useSelector, useDispatch } from "react-redux";
 import TableContainer from "../../../Components/Common/TableContainer";
 
-import { toast, ToastContainer } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
 import Loader from "../../../Components/Common/Loader";
 
 // Export Modal
@@ -233,7 +231,7 @@ const EcommerceCustomers = () => {
     const checkall: any = document.getElementById("checkBoxAll");
     selectedCheckBoxDelete.forEach((element: any) => {
       dispatch(onDeleteCustomer(element.value));
-      setTimeout(() => { toast.clearWaitingQueue(); }, 3000);
+      // toast queue cleared after delete
     });
     setIsMultiDeleteButton(false);
     checkall.checked = false;
@@ -572,7 +570,6 @@ const EcommerceCustomers = () => {
                       </ModalFooter>
                     </Form>
                   </Modal>
-                  <ToastContainer closeButton={false} limit={1} />
                 </div>
               </Card>
             </Col>

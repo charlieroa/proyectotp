@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import ReactDOM from "react-dom";
 import { useNavigate } from "react-router-dom";
+import { useSelector } from "react-redux";
 import {
   Badge,
   Spinner,
@@ -14,8 +15,9 @@ import {
   Label,
   Input,
 } from "reactstrap";
-import { getMyBusinesses, switchTenant, createBranch, TenantBusiness } from "../../services/tenantApi";
+import { getMyBusinesses, switchTenant, createBranch, setPrimaryBranch, TenantBusiness } from "../../services/tenantApi";
 import { getDecodedToken, setToken, getRoleFromToken } from "../../services/auth";
+import { selectTenantPlan } from "../../slices/Settings/settingsSlice";
 
 const businessTypeLabels: Record<string, string> = {
   peluqueria: "Peluqueria",
@@ -41,7 +43,18 @@ const TenantSwitcher = () => {
   const roleId = getRoleFromToken();
   const decoded = getDecodedToken();
   const currentTenantId = decoded?.user?.tenant_id;
+  const tokenTenantName = decoded?.user?.tenant_name;
   const isAdmin = roleId === 1;
+  const tenantPlan = useSelector(selectTenantPlan);
+  const isMaxPlan = tenantPlan === 'enterprise';
+
+  const PLAN_LABELS: Record<string, { label: string; color: string }> = {
+    free: { label: 'Gratis', color: '#878a99' },
+    pro: { label: 'Pro', color: '#438eff' },
+    business: { label: 'Business', color: '#299cdb' },
+    enterprise: { label: 'Enterprise', color: '#f7b84b' },
+  };
+  const planInfo = PLAN_LABELS[tenantPlan] || PLAN_LABELS.free;
 
   const fetchBusinesses = useCallback(async () => {
     if (!isAdmin) return;
@@ -51,10 +64,19 @@ const TenantSwitcher = () => {
       setBusinesses(res.data);
     } catch (err) {
       console.error("Error fetching businesses:", err);
+      // Fallback: if my-businesses fails, at least show current tenant
+      if (currentTenantId) {
+        try {
+          const { data } = await import("../../services/api").then(m => m.api.get(`/tenants/${currentTenantId}`));
+          if (data?.name) {
+            setBusinesses([{ id: currentTenantId, name: data.name, business_type: data.business_type || 'peluqueria' } as TenantBusiness]);
+          }
+        } catch {}
+      }
     } finally {
       setLoading(false);
     }
-  }, [isAdmin]);
+  }, [isAdmin, currentTenantId]);
 
   useEffect(() => {
     fetchBusinesses();
@@ -94,12 +116,17 @@ const TenantSwitcher = () => {
     try {
       const res = await switchTenant(tenantId);
       setToken(res.data.token);
-      // Update sessionStorage authUser with new token so auth guards don't redirect to login
+      // Update sessionStorage authUser with new token AND tenant info
       const rawUser = sessionStorage.getItem("authUser");
       if (rawUser) {
         try {
           const authUser = JSON.parse(rawUser);
           authUser.token = res.data.token;
+          // Also update the user object with the new tenant_id and name
+          if (authUser.user) {
+            authUser.user.tenant_id = tenantId;
+            authUser.user.tenant_name = res.data.tenant?.name || authUser.user.tenant_name;
+          }
           sessionStorage.setItem("authUser", JSON.stringify(authUser));
         } catch {}
       }
@@ -151,25 +178,48 @@ const TenantSwitcher = () => {
             </div>
           ) : (
             businesses.map((biz) => (
-              <button
-                key={biz.id}
-                className={`dropdown-item d-flex align-items-center justify-content-between${biz.id === currentTenantId ? " active" : ""}`}
-                onClick={() => { handleSwitch(biz.id); setIsOpen(false); }}
-                disabled={switching}
-                type="button"
-              >
-                <span>
-                  <i className="ri-store-2-line me-2 align-middle"></i>
-                  {biz.name}
-                </span>
-                <Badge
-                  color={biz.business_type === "barberia" ? "info" : "primary"}
-                  className="ms-2"
-                  pill
+              <div key={biz.id} className="d-flex align-items-center">
+                <button
+                  className={`dropdown-item d-flex align-items-center justify-content-between flex-grow-1${biz.id === currentTenantId ? " active" : ""}`}
+                  onClick={() => { handleSwitch(biz.id); setIsOpen(false); }}
+                  disabled={switching}
+                  type="button"
                 >
-                  {businessTypeLabels[biz.business_type] || biz.business_type}
-                </Badge>
-              </button>
+                  <span>
+                    {biz.is_primary_branch && (
+                      <i className="ri-vip-crown-fill me-1 text-warning align-middle" title="Sede principal"></i>
+                    )}
+                    <i className="ri-store-2-line me-1 align-middle"></i>
+                    {biz.name}
+                  </span>
+                  <Badge
+                    color={biz.business_type === "barberia" ? "info" : "primary"}
+                    className="ms-2"
+                    pill
+                  >
+                    {businessTypeLabels[biz.business_type] || biz.business_type}
+                  </Badge>
+                </button>
+                {isMaxPlan && !biz.is_primary_branch && businesses.length > 1 && (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost-warning px-1"
+                    title="Establecer como sede principal"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      try {
+                        await setPrimaryBranch(biz.id);
+                        await fetchBusinesses();
+                      } catch (err) {
+                        console.error("Error setting primary:", err);
+                      }
+                    }}
+                    style={{ lineHeight: 1 }}
+                  >
+                    <i className="ri-vip-crown-line fs-14"></i>
+                  </button>
+                )}
+              </div>
             ))
           )}
           <div className="dropdown-divider"></div>
@@ -209,7 +259,21 @@ const TenantSwitcher = () => {
               Negocio actual
             </div>
             <div className="text-truncate" style={{ fontWeight: 600, fontSize: "13px", color: "var(--vz-sidebar-menu-item-active-color, #fff)", lineHeight: 1.3 }}>
-              {currentBusiness?.name || "Cargando..."}
+              {currentBusiness?.name || tokenTenantName || "Mi Negocio"}
+            </div>
+            <div style={{ marginTop: "2px" }}>
+              <span style={{
+                fontSize: "10px",
+                fontWeight: 700,
+                padding: "1px 8px",
+                borderRadius: "10px",
+                background: `${planInfo.color}22`,
+                color: planInfo.color,
+                letterSpacing: "0.3px",
+                textTransform: "uppercase",
+              }}>
+                {planInfo.label}
+              </span>
             </div>
           </div>
           <i className="ri-arrow-up-s-line fs-16" style={{ flexShrink: 0, opacity: 0.5 }}></i>
@@ -218,26 +282,28 @@ const TenantSwitcher = () => {
 
       {dropdownMenu}
 
-      <div style={{ padding: "8px 0 0 0" }}>
-        <button
-          type="button"
-          onClick={() => navigate("/settings?tab=6")}
-          className="btn btn-sm w-100 text-start d-flex align-items-center gap-2"
-          style={{
-            background: "linear-gradient(135deg, rgba(139,92,246,0.15), rgba(6,182,212,0.15))",
-            border: "1px solid rgba(139,92,246,0.3)",
-            borderRadius: "6px",
-            padding: "8px 12px",
-            color: "#a78bfa",
-            fontSize: "12px",
-            fontWeight: 600,
-            transition: "all 0.2s",
-          }}
-        >
-          <i className="ri-vip-crown-line fs-16" style={{ flexShrink: 0 }}></i>
-          <span className="sidebar-switcher-text">Upgrade de Plan</span>
-        </button>
-      </div>
+      {!isMaxPlan && (
+        <div style={{ padding: "8px 0 0 0" }}>
+          <button
+            type="button"
+            onClick={() => navigate("/settings?tab=6")}
+            className="btn btn-sm w-100 text-start d-flex align-items-center gap-2"
+            style={{
+              background: "linear-gradient(135deg, rgba(139,92,246,0.15), rgba(6,182,212,0.15))",
+              border: "1px solid rgba(139,92,246,0.3)",
+              borderRadius: "6px",
+              padding: "8px 12px",
+              color: "#a78bfa",
+              fontSize: "12px",
+              fontWeight: 600,
+              transition: "all 0.2s",
+            }}
+          >
+            <i className="ri-vip-crown-line fs-16" style={{ flexShrink: 0 }}></i>
+            <span className="sidebar-switcher-text">Upgrade de Plan</span>
+          </button>
+        </div>
+      )}
 
       <Modal isOpen={modalOpen} toggle={() => !creating && setModalOpen(false)} centered>
         <ModalHeader toggle={() => !creating && setModalOpen(false)}>

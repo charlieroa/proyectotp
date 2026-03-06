@@ -3,6 +3,7 @@ import { Card, CardBody, Col, Container, Row, Label, Input, Button, Badge, Nav, 
 import { GoogleMap, LoadScript, Circle, Marker, InfoWindow } from '@react-google-maps/api';
 import classnames from 'classnames';
 import { api } from '../../services/api';
+import { getIsPrimaryBranch } from '../../services/auth';
 
 const containerStyle = {
     width: '100%',
@@ -94,16 +95,50 @@ const Geolocalizacion: React.FC = () => {
     const [mapCenter, setMapCenter] = useState(defaultCenter);
     const [showDisconnected, setShowDisconnected] = useState<boolean>(true);
     const [loading, setLoading] = useState<boolean>(true);
+    const isPrimary = getIsPrimaryBranch();
+    const [branches, setBranches] = useState<{ id: string; name: string; branch_color: string; geofence?: { center: { lat: number; lng: number }; radius: number } }[]>([]);
+    const [selectedBranch, setSelectedBranch] = useState<string>('');
+    const [branchGeofences, setBranchGeofences] = useState<{ tenant_id: string; name: string; color: string; center: { lat: number; lng: number }; radius: number }[]>([]);
 
     const circleRef = useRef<google.maps.Circle | null>(null);
     const mapRef = useRef<google.maps.Map | null>(null);
     const isUpdatingRef = useRef<boolean>(false);
 
+    // Cargar sucursales si es primary
+    useEffect(() => {
+        if (isPrimary) {
+            loadBranches();
+        }
+    }, [isPrimary]);
+
+    const loadBranches = async () => {
+        try {
+            const { data } = await api.get('/tenants/my-businesses');
+            if (Array.isArray(data)) {
+                setBranches(data);
+                // Load geofences for all branches
+                const geofences: typeof branchGeofences = [];
+                for (const b of data) {
+                    if (b.geofence_center_lat && b.geofence_center_lng) {
+                        geofences.push({
+                            tenant_id: b.id,
+                            name: b.name,
+                            color: b.branch_color || '#3788d8',
+                            center: { lat: b.geofence_center_lat, lng: b.geofence_center_lng },
+                            radius: b.geofence_radius || 200
+                        });
+                    }
+                }
+                setBranchGeofences(geofences);
+            }
+        } catch { /* ignore */ }
+    };
+
     // Cargar estilistas y configuración de geocerca
     useEffect(() => {
         loadStylists();
         loadGeofenceConfig();
-        
+
         // Actualizar cada 30 segundos
         const interval = setInterval(() => {
             loadStylists();
@@ -831,6 +866,23 @@ const Geolocalizacion: React.FC = () => {
                                                     onCenterChanged={onCircleCenterChange}
                                                 />
                                             )}
+
+                                            {/* Geofences de otras sucursales (solo para primary) */}
+                                            {isPrimary && branchGeofences.map((bg) => (
+                                                <Circle
+                                                    key={`branch-circle-${bg.tenant_id}`}
+                                                    center={bg.center}
+                                                    radius={bg.radius}
+                                                    options={{
+                                                        strokeColor: bg.color,
+                                                        strokeOpacity: 0.6,
+                                                        strokeWeight: 2,
+                                                        fillColor: bg.color,
+                                                        fillOpacity: 0.08,
+                                                        clickable: false,
+                                                    }}
+                                                />
+                                            ))}
 
                                             {/* Marcadores SOLO de estilistas conectados (dentro de zona) con ubicación */}
                                             {mapLoaded && stylistsInZone.filter((s): s is Stylist & { lat: number; lng: number } => s.lat !== null && s.lng !== null).map((stylist) => (

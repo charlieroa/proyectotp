@@ -17,8 +17,6 @@ import { useFormik } from "formik";
 
 import DeleteModal from "../../../Components/Common/DeleteModal";
 
-import { toast, ToastContainer } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
 import Loader from "../../../Components/Common/Loader";
 import { createSelector } from 'reselect';
 
@@ -201,7 +199,7 @@ const TicketsData = () => {
         const checkall: any = document.getElementById("checkBoxAll");
         selectedCheckBoxDelete.forEach((element: any) => {
             dispatch(deleteTicket(element.value));
-            setTimeout(() => { toast.clearWaitingQueue(); }, 3000);
+            // toast queue cleared after delete
         });
         setIsMultiDeleteButton(false);
         checkall.checked = false;
@@ -364,7 +362,6 @@ const TicketsData = () => {
                             )
                                 : (<Loader error={error} />)
                             }
-                            <ToastContainer closeButton={false} limit={1} />
                         </CardBody>
                     </Card>
                 </Col>

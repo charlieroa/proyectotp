@@ -225,10 +225,26 @@ exports.createUser = async (req, res) => {
     const { tenantId } = await resolveTenantIdFromPhone(req);
     const tenant_id = tenantId || tenantIdFromBody || req.user?.tenant_id;
 
-    const isStylist = parseInt(role_id, 10) === 3;
-    const isClient  = parseInt(role_id, 10) === 4;
+    const parsedRole = parseInt(role_id, 10);
+    const isStylist = parsedRole === 3;
+    const isClient  = parsedRole === 4;
+    const isStaff   = parsedRole === 2 || parsedRole === 6; // Cajero o Recepcionista
 
-    if (!tenant_id || !role_id || !first_name || !email || !password) {
+    // Auto-generar email y/o password para clientes y staff (cajero/recepcionista)
+    let finalEmail = email;
+    let finalPassword = password;
+    if (isClient || isStaff) {
+      if (!finalEmail) {
+        const prefix = isClient ? 'cliente' : parsedRole === 2 ? 'cajero' : 'recepcion';
+        const uniqueId = phone ? phone.replace(/\D/g, '') : Date.now().toString();
+        finalEmail = `${prefix}_${uniqueId}@temp.tupelukeria.com`;
+      }
+      if (!finalPassword && isClient) {
+        finalPassword = 'cliente123';
+      }
+    }
+
+    if (!tenant_id || !role_id || !first_name || !finalEmail || !finalPassword) {
       return res.status(400).json({ error: 'Faltan campos obligatorios.' });
     }
     if (isStylist && !tenant_id) {
@@ -236,7 +252,7 @@ exports.createUser = async (req, res) => {
     }
 
     const salt = await bcrypt.genSalt(10);
-    const passwordHashed = await bcrypt.hash(password, salt);
+    const passwordHashed = await bcrypt.hash(finalPassword, salt);
 
     let wh = null;
     if (working_hours !== undefined && working_hours !== null) {
@@ -256,7 +272,7 @@ exports.createUser = async (req, res) => {
         role_id: parseInt(role_id, 10),
         first_name,
         last_name: last_name || null,
-        email,
+        email: finalEmail.trim().toLowerCase(),
         password_hash: passwordHashed,
         phone: phone || null,
         payment_type: payment_type || null,
@@ -300,7 +316,7 @@ exports.createUser = async (req, res) => {
 ========================================================= */
 exports.getAllUsersByTenant = async (req, res) => {
   const { tenantId } = req.params;
-  const { role_id } = req.query;
+  const { role_id, role_ids } = req.query;
 
   if (!tenantId) {
     return res.status(400).json({ error: 'El ID del tenant es obligatorio.' });
@@ -308,7 +324,11 @@ exports.getAllUsersByTenant = async (req, res) => {
 
   const where = { tenant_id: tenantId };
 
-  if (role_id) {
+  if (role_ids) {
+    // Soporta "2,3,6" como lista de roles
+    const ids = String(role_ids).split(',').map(n => parseInt(n.trim(), 10)).filter(n => !isNaN(n));
+    if (ids.length > 0) where.role_id = { in: ids };
+  } else if (role_id) {
     where.role_id = parseInt(role_id, 10);
   }
 
@@ -390,7 +410,7 @@ exports.updateUser = async (req, res) => {
     // resto de campos permitidos
     for (const key of allowedUpdates) {
       if (key in updates && key !== 'password' && key !== 'working_hours') {
-        data[key] = updates[key];
+        data[key] = key === 'email' && updates[key] ? String(updates[key]).trim().toLowerCase() : updates[key];
       }
     }
 

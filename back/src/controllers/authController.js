@@ -4,6 +4,8 @@ const prisma = require('../config/prisma');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const slugify = require('slugify');
+const crypto = require('crypto');
+const { sendPasswordResetEmail } = require('../services/emailService');
 
 // -----------------------------
 // Helpers
@@ -26,13 +28,26 @@ function safeParseJSON(maybeJSON) {
 }
 
 /**
- * Retorna true si algún día en working_hours tiene { active: true }.
+ * Retorna true si algún día en working_hours está activo.
+ * Soporta ambos formatos:
+ *   - Objeto: { active: true, start: "09:00", end: "18:00" }
+ *   - String: "09:00-18:00" (activo) o "cerrado"/"closed" (inactivo)
  */
 function hasActiveWorkingHours(working_hours) {
   const hours = safeParseJSON(working_hours);
+  if (!hours || typeof hours !== 'object' || Object.keys(hours).length === 0) return false;
   return Object.values(hours).some((day) => {
-    if (!day || typeof day !== 'object') return false;
-    return day.active === true;
+    if (!day) return false;
+    // Formato string: "09:00-18:00" es activo, "cerrado"/"closed" es inactivo
+    if (typeof day === 'string') {
+      const lower = day.toLowerCase().trim();
+      return lower !== 'cerrado' && lower !== 'closed' && lower.length > 0;
+    }
+    // Formato objeto: { active: true/false }
+    if (typeof day === 'object') {
+      return day.active === true;
+    }
+    return false;
   });
 }
 
@@ -53,6 +68,7 @@ exports.login = async (req, res) => {
   try {
     const user = await prisma.users.findFirst({
       where: { email },
+      orderBy: { role_id: 'asc' },
     });
 
     if (!user) {
@@ -123,11 +139,26 @@ exports.login = async (req, res) => {
     }
     // ----------------------------------------------------------------
 
+    // Obtener nombre del tenant y primary branch info para incluir en JWT
+    let tenantName = null;
+    let isPrimaryBranch = false;
+    if (user.tenant_id) {
+      const tenantForJwt = await prisma.tenants.findUnique({
+        where: { id: user.tenant_id },
+        select: { name: true, is_primary_branch: true, parent_tenant_id: true },
+      });
+      tenantName = tenantForJwt?.name || null;
+      // is_primary if explicitly primary OR if it has no parent (standalone salon)
+      isPrimaryBranch = !!tenantForJwt?.is_primary_branch || !tenantForJwt?.parent_tenant_id;
+    }
+
     const payload = {
       user: {
         id: user.id,
         role_id: user.role_id,
         tenant_id: user.tenant_id,
+        tenant_name: tenantName,
+        is_primary_branch: isPrimaryBranch,
       },
     };
 
@@ -145,6 +176,7 @@ exports.login = async (req, res) => {
           email: user.email,
           role_id: user.role_id,
           tenant_id: user.tenant_id,
+          tenant_name: tenantName,
         };
 
         return res.json({
@@ -188,7 +220,7 @@ exports.switchTenant = async (req, res) => {
     // Verificar que el target pertenece al mismo grupo
     const targetTenant = await prisma.tenants.findUnique({
       where: { id: target_tenant_id },
-      select: { id: true, parent_tenant_id: true, name: true },
+      select: { id: true, parent_tenant_id: true, name: true, is_primary_branch: true },
     });
 
     if (!targetTenant) {
@@ -201,11 +233,14 @@ exports.switchTenant = async (req, res) => {
     }
 
     // Generar nuevo JWT con el tenant destino
+    const isPrimary = !!targetTenant.is_primary_branch || !targetTenant.parent_tenant_id;
     const payload = {
       user: {
         id: userId,
         role_id,
         tenant_id: target_tenant_id,
+        tenant_name: targetTenant.name,
+        is_primary_branch: isPrimary,
       },
     };
 
@@ -261,13 +296,35 @@ exports.registerTenantAndAdmin = async (req, res) => {
           email: adminEmailNorm,
           password_hash,
         },
-        select: { id: true, email: true },
+        select: { id: true, email: true, first_name: true, last_name: true, role_id: true, tenant_id: true },
       });
 
       return admin;
     });
 
-    return res.status(201).json(result);
+    // Auto-login: generate JWT so frontend skips login
+    const payload = {
+      user: {
+        id: result.id,
+        role_id: result.role_id,
+        tenant_id: result.tenant_id,
+      },
+    };
+
+    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '8h' });
+
+    return res.status(201).json({
+      token,
+      user: {
+        id: result.id,
+        first_name: result.first_name,
+        last_name: result.last_name,
+        email: result.email,
+        role_id: result.role_id,
+        tenant_id: result.tenant_id,
+      },
+      setup_complete: false,
+    });
   } catch (error) {
     console.error('Error en el registro de tenant y admin:', error);
 
@@ -277,6 +334,101 @@ exports.registerTenantAndAdmin = async (req, res) => {
         .json({ error: 'Ya existe una peluquería o un usuario con ese nombre/email.' });
     }
 
+    return res.status(500).json({ error: 'Error interno del servidor.' });
+  }
+};
+
+// -----------------------------
+// FORGOT PASSWORD
+// -----------------------------
+exports.forgotPassword = async (req, res) => {
+  const { email } = req.body || {};
+
+  if (!email) {
+    return res.status(400).json({ error: 'El email es requerido.' });
+  }
+
+  const emailNorm = String(email).trim().toLowerCase();
+
+  try {
+    const user = await prisma.users.findFirst({
+      where: { email: emailNorm },
+      select: { id: true, first_name: true, email: true },
+    });
+
+    // Always return success to prevent email enumeration
+    if (!user) {
+      return res.json({ message: 'Si el email existe, recibirás un enlace para restablecer tu contraseña.' });
+    }
+
+    // Generate token
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await prisma.users.update({
+      where: { id: user.id },
+      data: {
+        password_reset_token: token,
+        password_reset_expires: expires,
+      },
+    });
+
+    // Send email (don't let email failure leak info)
+    try {
+      await sendPasswordResetEmail(user.email, token, user.first_name);
+    } catch (emailErr) {
+      console.error('[forgotPassword] Error enviando email:', emailErr.message);
+    }
+
+    return res.json({ message: 'Si el email existe, recibirás un enlace para restablecer tu contraseña.' });
+  } catch (error) {
+    console.error('Error en forgotPassword:', error);
+    return res.status(500).json({ error: 'Error interno del servidor.' });
+  }
+};
+
+// -----------------------------
+// RESET PASSWORD
+// -----------------------------
+exports.resetPassword = async (req, res) => {
+  const { token, password } = req.body || {};
+
+  if (!token || !password) {
+    return res.status(400).json({ error: 'Token y nueva contraseña son requeridos.' });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres.' });
+  }
+
+  try {
+    const user = await prisma.users.findFirst({
+      where: {
+        password_reset_token: token,
+        password_reset_expires: { gte: new Date() },
+      },
+      select: { id: true },
+    });
+
+    if (!user) {
+      return res.status(400).json({ error: 'El enlace es inválido o ha expirado. Solicita uno nuevo.' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const password_hash = await bcrypt.hash(password, salt);
+
+    await prisma.users.update({
+      where: { id: user.id },
+      data: {
+        password_hash,
+        password_reset_token: null,
+        password_reset_expires: null,
+      },
+    });
+
+    return res.json({ message: 'Contraseña actualizada correctamente. Ya puedes iniciar sesión.' });
+  } catch (error) {
+    console.error('Error en resetPassword:', error);
     return res.status(500).json({ error: 'Error interno del servidor.' });
   }
 };

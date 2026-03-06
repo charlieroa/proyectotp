@@ -1072,6 +1072,7 @@ exports.getAvailableStylistsByTime = async (req, res) => {
         id: s.id,
         first_name: s.first_name,
         last_name: s.last_name,
+        is_busy: !!s.is_busy,
         avatar_url: null
       }))
     });
@@ -1337,11 +1338,13 @@ exports.getTenantSlots = async (req, res) => {
       return res.status(200).json({ slots: [], slots_meta: [], message: 'El salón está cerrado en esta fecha.' });
     }
 
+    // Usar intervalo fijo de 30 min para mostrar todas las horas disponibles
+    // (la duración del servicio solo se usa para validar si cabe, no para el step)
     let step;
     if (interval && Number(interval) > 0) {
       step = Number(interval);
     } else {
-      step = await getServiceDurationMinutes(service_id, 60);
+      step = 30; // Intervalo fijo de 30 minutos
     }
 
     const slots = buildSlotsFromRanges(date, tenantRanges, step);
@@ -1406,11 +1409,12 @@ exports.getTenantSlotsPublic = async (req, res) => {
       });
     }
 
+    // Usar intervalo fijo de 30 min para mostrar todas las horas disponibles
     let step;
     if (interval && Number(interval) > 0) {
       step = Number(interval);
     } else {
-      step = await getServiceDurationMinutes(service_id, 60);
+      step = 30; // Intervalo fijo de 30 minutos
     }
 
     const slots = buildSlotsFromRanges(date, tenantRanges, step);
@@ -2557,12 +2561,15 @@ exports.getSuperCalendar = async (req, res) => {
     // Helper: build IN clause with numbered placeholders starting at offset
     const inClause = (ids, offset) => ids.map((_, i) => `$${offset + i}::uuid`).join(', ');
 
-    // 2. Query consolidada de citas
+    // 2. Query consolidada de citas (incluye stylist_id para timeline)
     const n = tenantIds.length;
     const appointments = await prisma.$queryRawUnsafe(
       `SELECT a.id, a.start_time, a.end_time, a.status, a.tenant_id,
+              a.stylist_id, a.service_id, a.client_id,
               s.name AS service_name, s.price,
+              st.first_name AS stylist_first_name, COALESCE(st.last_name, '') AS stylist_last_name,
               CONCAT(st.first_name, ' ', COALESCE(st.last_name, '')) AS stylist_name,
+              cl.first_name AS client_first_name, COALESCE(cl.last_name, '') AS client_last_name,
               CONCAT(cl.first_name, ' ', COALESCE(cl.last_name, '')) AS client_name,
               t.name AS branch_name, t.branch_color
        FROM appointments a
@@ -2576,6 +2583,60 @@ exports.getSuperCalendar = async (req, res) => {
        ORDER BY a.start_time`,
       ...tenantIds, start, end
     );
+
+    // 2b. Query de estilistas con sus sedes asignadas (para timeline view)
+    const stylists = await prisma.$queryRawUnsafe(
+      `SELECT u.id, u.first_name, u.last_name,
+              COALESCE(
+                json_agg(DISTINCT jsonb_build_object(
+                  'id', t.id, 'name', t.name, 'color', COALESCE(t.branch_color, '#3788d8')
+                )) FILTER (WHERE t.id IS NOT NULL),
+                '[]'::json
+              ) AS branches
+       FROM users u
+       LEFT JOIN stylist_branch_assignments sba ON u.id = sba.stylist_id
+       LEFT JOIN tenants t ON sba.branch_tenant_id = t.id
+         AND sba.branch_tenant_id IN (${inClause(tenantIds, 1)})
+       WHERE u.role_id = 3
+         AND u.status = 'active'
+         AND (
+           u.tenant_id IN (${inClause(tenantIds, n + 1)})
+           OR u.id IN (
+             SELECT sba2.stylist_id FROM stylist_branch_assignments sba2
+             WHERE sba2.branch_tenant_id IN (${inClause(tenantIds, 2 * n + 1)})
+           )
+         )
+       GROUP BY u.id`,
+      ...tenantIds, ...tenantIds, ...tenantIds
+    );
+
+    // For stylists without branch assignments, fill in their home tenant info
+    const tenantMap = {};
+    if (parentId) {
+      const allTenants = await prisma.tenants.findMany({
+        where: { OR: [{ id: parentId }, { parent_tenant_id: parentId }] },
+        select: { id: true, name: true, branch_color: true },
+      });
+      allTenants.forEach(t => { tenantMap[t.id] = t; });
+    } else {
+      const t = await prisma.tenants.findUnique({ where: { id: tenant_id }, select: { id: true, name: true, branch_color: true } });
+      if (t) tenantMap[t.id] = t;
+    }
+
+    // Enrich stylists: if they have no branch assignments, use their home tenant
+    const enrichedStylists = await Promise.all(stylists.map(async (s) => {
+      if (!s.branches || s.branches.length === 0 || (s.branches.length === 1 && !s.branches[0].id)) {
+        // Find their home tenant
+        const user = await prisma.users.findUnique({ where: { id: s.id }, select: { tenant_id: true } });
+        if (user && tenantMap[user.tenant_id]) {
+          const t = tenantMap[user.tenant_id];
+          s.branches = [{ id: t.id, name: t.name, color: t.branch_color || '#3788d8' }];
+        } else {
+          s.branches = [];
+        }
+      }
+      return s;
+    }));
 
     // 3. Widgets de resumen
     const salesByBranch = await prisma.$queryRawUnsafe(
@@ -2618,6 +2679,7 @@ exports.getSuperCalendar = async (req, res) => {
 
     return res.status(200).json({
       appointments,
+      stylists: enrichedStylists,
       widgets: {
         sales_by_branch: salesByBranch,
         active_stylists_by_branch: activeStylistsByBranch,

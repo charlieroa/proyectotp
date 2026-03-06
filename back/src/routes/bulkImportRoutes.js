@@ -31,5 +31,7 @@ router.use(authorize([1, 2]));
 router.post('/clients', upload.single('file'), bulkImportController.importClients);
 router.post('/stylists', upload.single('file'), bulkImportController.importStylists);
 router.post('/products', upload.single('file'), bulkImportController.importProducts);
+router.post('/services', upload.single('file'), bulkImportController.importServices);
+router.post('/smart', upload.single('file'), bulkImportController.smartImport);
 
 module.exports = router;

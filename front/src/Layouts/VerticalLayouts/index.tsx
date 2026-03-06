@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useState } from 'react';
 import PropTypes from "prop-types";
 import { Link } from "react-router-dom";
 import withRouter from "../../Components/Common/withRouter";
@@ -10,6 +10,64 @@ import navdata from "../LayoutMenuData";
 import { withTranslation } from "react-i18next";
 import { useSelector } from "react-redux";
 import { createSelector } from 'reselect';
+import { api } from "../../services/api";
+import useWhatsAppSocket from "../../hooks/useWhatsAppSocket";
+import { jwtDecode } from "jwt-decode";
+
+// Badge component for Messages sidebar item
+const MessageBadge: React.FC = () => {
+  const [count, setCount] = useState(0);
+
+  const tenantId = React.useMemo(() => {
+    try {
+      const token = localStorage.getItem("token");
+      if (token) {
+        const payload: any = jwtDecode(token);
+        return payload?.user?.tenant_id || null;
+      }
+    } catch {}
+    return null;
+  }, []);
+
+  useEffect(() => {
+    if (!tenantId) return;
+    api.get("/whatsapp-conversations/active-count")
+      .then(({ data }) => setCount(data.count || 0))
+      .catch(() => {});
+  }, [tenantId]);
+
+  useWhatsAppSocket(tenantId, {
+    onNewHandoff: useCallback(() => {
+      setCount(prev => prev + 1);
+    }, []),
+    onHandoffClosed: useCallback(() => {
+      setCount(prev => Math.max(0, prev - 1));
+    }, []),
+  });
+
+  if (count <= 0) return null;
+  return (
+    <span
+      className="badge ms-auto"
+      style={{
+        background: "#f06548",
+        color: "#fff",
+        fontSize: 10,
+        fontWeight: 700,
+        minWidth: 20,
+        height: 20,
+        lineHeight: "20px",
+        borderRadius: 10,
+        padding: "0 6px",
+        boxShadow: "0 2px 4px rgba(240,101,72,0.3)",
+        animation: "pulse-badge 2s infinite",
+      }}
+    >
+      {count}
+      <style>{`@keyframes pulse-badge { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }`}</style>
+    </span>
+  );
+};
  
 const VerticalLayout = (props : any) => {
     const navData = navdata().props.children;
@@ -204,7 +262,27 @@ const VerticalLayout = (props : any) => {
                                             <ul className="nav nav-sm flex-column test">
                                                 {(item.subItems || []).map((subItem: any, key: any) => (
                                                     <React.Fragment key={key}>
-                                                         {/* (Tu lógica compleja de sub-items anidados va aquí, sin cambios) */}
+                                                        {subItem.disabled ? (
+                                                            <li className="nav-item">
+                                                                <a
+                                                                    href="#!"
+                                                                    onClick={(e) => { e.preventDefault(); subItem.onClick?.(); }}
+                                                                    className="nav-link"
+                                                                    style={{ opacity: 0.6, cursor: 'pointer' }}
+                                                                >
+                                                                    {props.t(subItem.label)}
+                                                                    {subItem.badge && (
+                                                                        <span className={`badge bg-${subItem.badgeColor || 'warning'} ms-auto`}>{subItem.badge}</span>
+                                                                    )}
+                                                                </a>
+                                                            </li>
+                                                        ) : (
+                                                            <li className="nav-item">
+                                                                <Link to={subItem.link} className="nav-link">
+                                                                    {props.t(subItem.label)}
+                                                                </Link>
+                                                            </li>
+                                                        )}
                                                     </React.Fragment>
                                                 ))}
                                             </ul>
@@ -220,6 +298,7 @@ const VerticalLayout = (props : any) => {
                                             className="nav-link menu-link"
                                             to={item.link ? item.link : "/#"}>
                                             <i className={item.icon}></i> <span>{props.t(item.label)}</span>
+                                            {item.id === "messages" && <MessageBadge />}
                                         </Link>
                                     </li>
                                 )

@@ -18,11 +18,12 @@ import {
 import * as Yup from "yup";
 import { useFormik } from "formik";
 import Flatpickr from "react-flatpickr";
-import { toast } from "react-toastify";
+import { sileo } from "sileo";
 import { useDispatch, useSelector } from "react-redux";
 import { unwrapResult } from '@reduxjs/toolkit';
 import Swal from 'sweetalert2';
 import axios from 'axios';
+import Select from 'react-select';
 
 // Thunks
 import {
@@ -31,6 +32,8 @@ import {
   fetchTenantSlots,
   fetchAvailableStylists,
   addNewContact,
+  createNewClient,
+  cancelAppointment as onCancelAppointment,
 } from "../../slices/thunks";
 
 // Tipos
@@ -161,9 +164,17 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
   const [digiturnoQueue, setDigiturnoQueue] = useState<DigiturnoQueueItem[]>([]);
   const [createdClientsMap, setCreatedClientsMap] = useState<Record<string, { first_name: string; last_name?: string }>>({});
   const [closeClientModalOnSave, setCloseClientModalOnSave] = useState<boolean>(true);
+  const [newClientData, setNewClientData] = useState({ first_name: '', last_name: '', phone: '' });
+  const [isCreatingClient, setIsCreatingClient] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
 
   const firstLoadEditRef = useRef<boolean>(false);
   const isEditMode = !!selectedEvent;
+
+  // Determinar si la cita se puede cancelar/reagendar
+  const canCancelOrReschedule = isEditMode && selectedEvent &&
+    ['scheduled', 'rescheduled', 'pending_approval'].includes(selectedEvent.status);
 
   // Cargar cola de digiturno (informativo)
   useEffect(() => {
@@ -233,18 +244,18 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
             stylist_id: values.stylist_id,
             start_time: utcDateTimeString,
           }));
-          toast.success("Cita actualizada");
+          sileo.success({ title: "Cita actualizada" });
         } else {
           const allAppointments = [
             { service_id: values.service_id, stylist_id: values.stylist_id, start_time: utcDateTimeString },
             ...extraRows.filter((r) => r.service_id && r.stylist_id).map((r) => ({ ...r, start_time: utcDateTimeString })),
           ];
           await dispatch(onCreateAppointmentsBatch({ client_id: values.client_id, appointments: allAppointments }));
-          toast.success("Cita(s) agendada(s)");
+          sileo.success({ title: "Cita(s) agendada(s)" });
         }
         onClose();
       } catch (error: any) {
-        toast.error(error?.message || "Error al agendar.");
+        sileo.error({ title: error?.message || "Error al agendar." });
       } finally {
         setSubmitting(false);
       }
@@ -266,8 +277,10 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
           date: startTimeDate,
           start_time: toHHmmLocal(start_time),
         });
-      } else if (defaultDate) {
-        validation.setFieldValue("date", new Date(defaultDate));
+      } else {
+        // Usar defaultDate si existe, si no usar hoy
+        const dateToSet = defaultDate ? new Date(defaultDate) : new Date();
+        validation.setFieldValue("date", dateToSet);
       }
     } else {
       validation.resetForm();
@@ -372,7 +385,7 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
   // DIGITURNO
   const handleSuggestMain = async () => {
     const { service_id, date, start_time } = validation.values;
-    if (!service_id || !date || !start_time) return toast.info("Complete los datos primero.");
+    if (!service_id || !date || !start_time) return sileo.info({ title: "Complete los datos primero." });
     setIsSuggestingMain(true);
     try {
       const dateStr = toYyyyMmDd(date);
@@ -384,11 +397,11 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
 
       if (nextStylist) {
         validation.setFieldValue("stylist_id", String(nextStylist.id));
-        toast.success(`🎯 Asignado: ${nextStylist.first_name}`);
+        sileo.success({ title: `Asignado: ${nextStylist.first_name}` });
       } else {
-        toast.warning("Todos los estilistas están ocupados.");
+        sileo.warning({ title: "Todos los estilistas están ocupados." });
       }
-    } catch (e) { toast.error("Error al consultar digiturno"); }
+    } catch (e) { sileo.error({ title: "Error al consultar digiturno" }); }
     finally { setIsSuggestingMain(false); }
   };
 
@@ -402,22 +415,161 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
     return `Estilista Seleccionado`;
   })();
 
+  // Deduplicar clientes por id y formatear para react-select
+  const clientOptions = useMemo(() => {
+    const map = new Map<string, any>();
+    (clients || []).forEach((c: any) => {
+      const key = String(c.id);
+      if (!map.has(key)) map.set(key, c);
+    });
+    return Array.from(map.values()).map((c: any) => ({
+      value: String(c.id),
+      label: `${c.first_name || ''} ${c.last_name || ''}${c.phone ? ` — ${c.phone}` : ''}`.trim(),
+    }));
+  }, [clients]);
+
+  const selectedClientOption = useMemo(() => {
+    return clientOptions.find(o => o.value === validation.values.client_id) || null;
+  }, [clientOptions, validation.values.client_id]);
+
+  // Cancelar cita
+  const handleCancelAppointment = async () => {
+    if (!selectedEvent?.id) return;
+    setIsCancelling(true);
+    try {
+      await dispatch(onCancelAppointment(selectedEvent.id));
+      setShowCancelModal(false);
+      onClose();
+    } catch (err: any) {
+      // error already shown by thunk
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
+  // Reagendar: cerrar modal de confirmación y poner el form en modo edición
+  const handleReschedule = () => {
+    setShowCancelModal(false);
+    // El form ya está en modo edición, solo limpiar fecha/hora para que elija nuevos
+    validation.setFieldValue("date", new Date());
+    validation.setFieldValue("start_time", "");
+    validation.setFieldValue("stylist_id", "");
+  };
+
+  const handleCreateClient = async () => {
+    const { first_name, last_name, phone } = newClientData;
+    if (!first_name.trim()) {
+      sileo.warning({ title: 'El nombre es obligatorio.' });
+      return;
+    }
+    setIsCreatingClient(true);
+    try {
+      const result = await dispatch(createNewClient({ first_name: first_name.trim(), last_name: last_name.trim(), phone: phone.trim() }));
+      validation.setFieldValue('client_id', String(result.id));
+      setShowClientModal(false);
+      setNewClientData({ first_name: '', last_name: '', phone: '' });
+      sileo.success({ title: 'Cliente creado' });
+    } catch (err: any) {
+      sileo.error({ title: err?.message || 'Error al crear cliente' });
+    } finally {
+      setIsCreatingClient(false);
+    }
+  };
+
   return (
     <Modal isOpen={isOpen} toggle={onClose} centered size="lg">
       <ModalHeader toggle={onClose} className="bg-light">
-        {isEditMode ? "Editar Cita" : "Agendar Cita"}
+        {isEditMode ? "Detalle de Cita" : "Agendar Cita"}
       </ModalHeader>
       <ModalBody>
+        {/* Info card when viewing/editing existing appointment */}
+        {isEditMode && selectedEvent && (
+          <div className="bg-light rounded p-3 mb-3 border">
+            <Row>
+              <Col xs={6}>
+                <div className="mb-2">
+                  <small className="text-muted d-block">Servicio</small>
+                  <strong>{selectedEvent.service_name || 'Sin servicio'}</strong>
+                </div>
+              </Col>
+              <Col xs={6}>
+                <div className="mb-2">
+                  <small className="text-muted d-block">Estado</small>
+                  <span className={`badge ${selectedEvent.status === 'completed' ? 'bg-success' : selectedEvent.status === 'cancelled' ? 'bg-danger' : selectedEvent.status === 'checked_in' ? 'bg-info' : 'bg-primary'}`}>
+                    {selectedEvent.status === 'scheduled' ? 'Agendada' : selectedEvent.status === 'completed' ? 'Completada' : selectedEvent.status === 'cancelled' ? 'Cancelada' : selectedEvent.status === 'checked_in' ? 'En atención' : selectedEvent.status === 'checked_out' ? 'Finalizada' : selectedEvent.status || 'Agendada'}
+                  </span>
+                </div>
+              </Col>
+              <Col xs={6}>
+                <div className="mb-2">
+                  <small className="text-muted d-block">Cliente</small>
+                  <strong><i className="ri-user-line me-1"></i>{selectedEvent.client_first_name || ''} {selectedEvent.client_last_name || ''}</strong>
+                </div>
+              </Col>
+              <Col xs={6}>
+                <div className="mb-2">
+                  <small className="text-muted d-block">Estilista</small>
+                  <strong><i className="ri-scissors-line me-1"></i>{selectedEvent.stylist_first_name || ''} {selectedEvent.stylist_last_name || ''}</strong>
+                </div>
+              </Col>
+              <Col xs={6}>
+                <div>
+                  <small className="text-muted d-block">Hora</small>
+                  <strong><i className="ri-time-line me-1"></i>
+                    {selectedEvent.start_time ? new Date(selectedEvent.start_time).toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit', hour12: true }) : ''}
+                    {selectedEvent.end_time ? ` - ${new Date(selectedEvent.end_time).toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}
+                  </strong>
+                </div>
+              </Col>
+              <Col xs={6}>
+                <div>
+                  <small className="text-muted d-block">Fecha</small>
+                  <strong><i className="ri-calendar-line me-1"></i>
+                    {selectedEvent.start_time ? new Date(selectedEvent.start_time).toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' }) : ''}
+                  </strong>
+                </div>
+              </Col>
+            </Row>
+
+            {/* Botones de acción para cita existente */}
+            {canCancelOrReschedule && (
+              <div className="mt-3 pt-2 border-top">
+                <Button color="danger" outline size="sm" onClick={() => setShowCancelModal(true)}>
+                  <i className="ri-close-circle-line me-1"></i>Cancelar / Reagendar Cita
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
         <Form onSubmit={(e) => { e.preventDefault(); validation.handleSubmit(); }}>
           <Row className="g-3">
             {/* Cliente */}
             <Col xs={12}>
               <FormGroup>
                 <Label>Cliente*</Label>
-                <Input type="select" name="client_id" onChange={validation.handleChange} value={validation.values.client_id} disabled={isEditMode}>
-                  <option value="">Seleccione...</option>
-                  {clients.map((c: any) => <option key={c.id} value={c.id}>{c.first_name} {c.last_name}</option>)}
-                </Input>
+                <div className="d-flex gap-2">
+                  <div className="flex-grow-1">
+                    <Select
+                      options={clientOptions}
+                      value={selectedClientOption}
+                      onChange={(opt: any) => validation.setFieldValue('client_id', opt?.value || '')}
+                      isDisabled={isEditMode}
+                      isClearable
+                      placeholder="Buscar cliente..."
+                      noOptionsMessage={() => 'No se encontraron clientes'}
+                      styles={{
+                        control: (base: any) => ({ ...base, minHeight: 38 }),
+                        menu: (base: any) => ({ ...base, zIndex: 9999 }),
+                      }}
+                    />
+                  </div>
+                  {!isEditMode && (
+                    <Button color="success" outline onClick={() => setShowClientModal(true)} title="Crear nuevo cliente">
+                      <i className="ri-user-add-line"></i>
+                    </Button>
+                  )}
+                </div>
               </FormGroup>
             </Col>
 
@@ -425,10 +577,17 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
             <Col xs={12}>
               <FormGroup>
                 <Label>Servicio*</Label>
-                <Input type="select" name="service_id" onChange={validation.handleChange} value={validation.values.service_id}>
-                  <option value="">Seleccione...</option>
-                  {services.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </Input>
+                {services.length === 0 ? (
+                  <div className="alert alert-warning py-2 mb-0">
+                    <i className="ri-information-line me-1"></i>
+                    No hay servicios configurados para este negocio. Agregue servicios desde la configuración.
+                  </div>
+                ) : (
+                  <Input type="select" name="service_id" onChange={validation.handleChange} value={validation.values.service_id}>
+                    <option value="">Seleccione...</option>
+                    {services.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </Input>
+                )}
               </FormGroup>
             </Col>
 
@@ -489,6 +648,75 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
           </div>
         </Form>
       </ModalBody>
+
+      {/* Modal Cancelar / Reagendar */}
+      <Modal isOpen={showCancelModal} toggle={() => setShowCancelModal(false)} centered size="sm">
+        <ModalHeader toggle={() => setShowCancelModal(false)} className="bg-light">
+          <i className="ri-question-line me-1"></i> ¿Qué deseas hacer con esta cita?
+        </ModalHeader>
+        <ModalBody className="text-center">
+          {selectedEvent && (
+            <div className="mb-3 text-start">
+              <p className="mb-1"><strong>{selectedEvent.service_name}</strong></p>
+              <p className="mb-1 text-muted">
+                <i className="ri-user-line me-1"></i>{selectedEvent.client_first_name} {selectedEvent.client_last_name}
+              </p>
+              <p className="mb-0 text-muted">
+                <i className="ri-time-line me-1"></i>
+                {selectedEvent.start_time ? new Date(selectedEvent.start_time).toLocaleString('es-CO', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true }) : ''}
+              </p>
+            </div>
+          )}
+          <hr />
+          <div className="d-grid gap-2">
+            <Button color="warning" onClick={handleReschedule} className="d-flex align-items-center justify-content-center gap-2">
+              <i className="ri-calendar-event-line"></i> Reagendar Cita
+            </Button>
+            <Button color="danger" onClick={handleCancelAppointment} disabled={isCancelling} className="d-flex align-items-center justify-content-center gap-2">
+              {isCancelling ? <Spinner size="sm" /> : <><i className="ri-close-circle-line"></i> Cancelar Cita</>}
+            </Button>
+          </div>
+        </ModalBody>
+      </Modal>
+
+      {/* Modal Crear Cliente */}
+      <Modal isOpen={showClientModal} toggle={() => setShowClientModal(false)} centered size="sm">
+        <ModalHeader toggle={() => setShowClientModal(false)} className="bg-light">
+          Nuevo Cliente
+        </ModalHeader>
+        <ModalBody>
+          <FormGroup>
+            <Label>Nombre*</Label>
+            <Input
+              value={newClientData.first_name}
+              onChange={(e) => setNewClientData(prev => ({ ...prev, first_name: e.target.value }))}
+              placeholder="Nombre"
+            />
+          </FormGroup>
+          <FormGroup>
+            <Label>Apellido</Label>
+            <Input
+              value={newClientData.last_name}
+              onChange={(e) => setNewClientData(prev => ({ ...prev, last_name: e.target.value }))}
+              placeholder="Apellido"
+            />
+          </FormGroup>
+          <FormGroup>
+            <Label>Teléfono</Label>
+            <Input
+              value={newClientData.phone}
+              onChange={(e) => setNewClientData(prev => ({ ...prev, phone: e.target.value }))}
+              placeholder="Ej: 3001234567"
+            />
+          </FormGroup>
+        </ModalBody>
+        <ModalFooter>
+          <Button color="light" onClick={() => setShowClientModal(false)}>Cancelar</Button>
+          <Button color="success" onClick={handleCreateClient} disabled={isCreatingClient}>
+            {isCreatingClient ? <Spinner size="sm" /> : 'Crear'}
+          </Button>
+        </ModalFooter>
+      </Modal>
     </Modal>
   );
 };

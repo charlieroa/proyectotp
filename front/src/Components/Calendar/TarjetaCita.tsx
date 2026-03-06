@@ -2,6 +2,8 @@
 import React from 'react';
 import { Link } from "react-router-dom";
 import { Card, CardBody, Badge } from "reactstrap";
+import Swal from 'sweetalert2';
+import { getRoleFromToken } from '../../services/auth';
 
 type GrupoCliente = {
   clientId: string | number;
@@ -28,8 +30,57 @@ const TarjetaCita = ({ group }: { group: GrupoCliente }) => {
     hour12: true
   });
 
+  const isRecepcionista = getRoleFromToken() === 6;
+
   // Enviamos client_id por query y el resto por state
   const query = new URLSearchParams({ client_id: String(group.clientId) }).toString();
+
+  const cardContent = (
+    <Card className="mb-2 shadow-sm">
+      <CardBody>
+        <div className="d-flex align-items-center">
+          <div className="flex-shrink-0 me-3">
+            <div className="avatar-xs position-relative">
+              <div className="avatar-title bg-primary-subtle rounded-circle">
+                <i className="mdi mdi-account text-primary"></i>
+              </div>
+              <Badge
+                color="danger"
+                pill
+                className="position-absolute top-0 start-100 translate-middle"
+                title={`${group.count} servicio(s)`}
+              >
+                {group.count}
+              </Badge>
+            </div>
+          </div>
+
+          <div className="flex-grow-1 overflow-hidden">
+            <h5 className="mb-1 fs-14 text-truncate">{nombreCliente}</h5>
+            <p className="text-muted mb-0 text-truncate">
+              {primerServ}{group.count > 1 ? ` + ${group.count - 1} más` : ''} • {hora}
+            </p>
+          </div>
+
+          <div className="flex-shrink-0 ms-2">
+            <i className="ri-arrow-right-s-line fs-20 text-muted"></i>
+          </div>
+        </div>
+      </CardBody>
+    </Card>
+  );
+
+  if (isRecepcionista) {
+    return (
+      <div
+        className="text-reset text-decoration-none"
+        style={{ cursor: 'pointer' }}
+        onClick={() => Swal.fire({ icon: 'info', title: 'Pago en caja', text: 'Este servicio se cobra en la caja principal.' })}
+      >
+        {cardContent}
+      </div>
+    );
+  }
 
   return (
     <Link
@@ -41,39 +92,7 @@ const TarjetaCita = ({ group }: { group: GrupoCliente }) => {
       }}
       className="text-reset text-decoration-none"
     >
-      <Card className="mb-2 shadow-sm">
-        <CardBody>
-          <div className="d-flex align-items-center">
-            <div className="flex-shrink-0 me-3">
-              <div className="avatar-xs position-relative">
-                <div className="avatar-title bg-primary-subtle rounded-circle">
-                  <i className="mdi mdi-account text-primary"></i>
-                </div>
-                {/* Badge con contador */}
-                <Badge
-                  color="danger"
-                  pill
-                  className="position-absolute top-0 start-100 translate-middle"
-                  title={`${group.count} servicio(s)`}
-                >
-                  {group.count}
-                </Badge>
-              </div>
-            </div>
-
-            <div className="flex-grow-1 overflow-hidden">
-              <h5 className="mb-1 fs-14 text-truncate">{nombreCliente}</h5>
-              <p className="text-muted mb-0 text-truncate">
-                {primerServ}{group.count > 1 ? ` + ${group.count - 1} más` : ''} • {hora}
-              </p>
-            </div>
-
-            <div className="flex-shrink-0 ms-2">
-              <i className="ri-arrow-right-s-line fs-20 text-muted"></i>
-            </div>
-          </div>
-        </CardBody>
-      </Card>
+      {cardContent}
     </Link>
   );
 };

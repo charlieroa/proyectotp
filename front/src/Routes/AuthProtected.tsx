@@ -2,9 +2,10 @@ import React, { useEffect } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { setAuthorization } from "../helpers/api_helper";
 import { useDispatch, useSelector } from "react-redux";
-import { toast } from 'react-toastify';
+import { sileo } from 'sileo';
 
 import { useProfile } from "../Components/Hooks/UserHooks";
+import { getRoleFromToken } from "../services/auth";
 
 import { logoutUser } from "../slices/auth/login/thunk";
 import { selectTenantPlan, isPlanAtLeast } from "../slices/Settings/settingsSlice";
@@ -14,7 +15,13 @@ const PLAN_PROTECTED_ROUTES: Record<string, string> = {
   '/inventory': 'pro',
   '/payroll': 'pro',
   '/checkout': 'pro',
-  '/geo': 'enterprise',
+  '/campaigns': 'enterprise',
+};
+
+// Rutas bloqueadas por rol (rol -> rutas que NO puede acceder)
+const ROLE_BLOCKED_ROUTES: Record<number, string[]> = {
+  2: ['/assistant', '/inventory', '/payroll', '/settings'], // Cajero: sin asistente, inventario, nómina, config
+  6: ['/assistant', '/checkout', '/inventory', '/payroll', '/settings'], // Recepcionista: sin asistente, caja, inventario, nómina, config
 };
 
 /**
@@ -58,13 +65,20 @@ const AuthProtected = (props : any) =>{
     );
   }
 
+  // Verificar restricción de rol para la ruta actual (ej: Cajera no puede acceder a /checkout)
+  const userRole = getRoleFromToken();
+  const blockedRoutes = userRole ? ROLE_BLOCKED_ROUTES[userRole] : undefined;
+  if (blockedRoutes && blockedRoutes.some(r => location.pathname === r || location.pathname.startsWith(r + '/'))) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
   // Verificar restricción de plan para la ruta actual
   const requiredPlan = getRequiredPlan(location.pathname);
   if (requiredPlan && !isPlanAtLeast(tenantPlan, requiredPlan)) {
-    toast.info(
-      `Esta sección requiere el plan ${PLAN_NAMES[requiredPlan] || requiredPlan}. Ve a Configuración → Planes para actualizar.`,
-      { toastId: 'plan-upgrade', autoClose: 5000 }
-    );
+    sileo.info({
+      title: "Plan requerido",
+      description: `Esta sección requiere el plan ${PLAN_NAMES[requiredPlan] || requiredPlan}. Ve a Configuración → Planes para actualizar.`,
+    });
     return <Navigate to="/settings?tab=6" replace />;
   }
 

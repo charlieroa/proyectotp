@@ -17,8 +17,7 @@ import {
     getcategoryList as getcategoryListApi,
     addcategoryList as addcategoryListApi
 } from "../../helpers/fakebackend_helper";
-import { toast } from "react-toastify";
-import 'react-toastify/dist/ReactToastify.css';
+import { sileo } from "sileo";
 
 
 export const getApplicationList = createAsyncThunk("jobs/getJobApplicationList", async () => {
@@ -34,10 +33,10 @@ export const addNewJobApplicationList = createAsyncThunk("jobs/addNewJobApplicat
     try {
         const response = addNewJobApplicationListApi(job);
         const data = await response;
-        toast.success("Job Application Added Successfully", { autoClose: 3000 });
+        sileo.success({ title: "Job Application Added Successfully" });
         return data;
     } catch (error) {
-        toast.error("Job Application Added Failed", { autoClose: 3000 });
+        sileo.error({ title: "Job Application Added Failed" });
         return error;
     }
 });
@@ -46,10 +45,10 @@ export const updateJobApplicationList = createAsyncThunk("jobs/updateJobApplicat
     try {
         const response = updateJobApplicationListApi(job);
         const data = await response;
-        toast.success("Job Application Updated Successfully", { autoClose: 3000 });
+        sileo.success({ title: "Job Application Updated Successfully" });
         return data;
     } catch (error) {
-        toast.error("Job Application Updated Failed", { autoClose: 3000 });
+        sileo.error({ title: "Job Application Updated Failed" });
         return error;
     }
 });
@@ -58,10 +57,10 @@ export const deleteJobApplicationList = createAsyncThunk("jobs/deleteJobApplicat
     try {
         const response = deleteJobApplicationListApi(job);
         const data = await response;
-        toast.success("Job Application Deleted Successfully", { autoClose: 3000 });
+        sileo.success({ title: "Job Application Deleted Successfully" });
         return data;
     } catch (error) {
-        toast.error("Job Application Deleted Failed", { autoClose: 3000 });
+        sileo.error({ title: "Job Application Deleted Failed" });
         return error;
     }
 });
@@ -80,10 +79,10 @@ export const addCandidate = createAsyncThunk("jobs/addJobCandidate", async (cand
     try {
         const response = addCandidateApi(candidate);
         const data = await response;
-        toast.success("Candidate Added Successfully", { autoClose: 2000 });
+        sileo.success({ title: "Candidate Added Successfully" });
         return data;
     } catch (error) {
-        toast.error("Candidate Added Failed", { autoClose: 2000 });
+        sileo.error({ title: "Candidate Added Failed" });
         return error;
     }
 });
@@ -92,10 +91,10 @@ export const updateCandidate = createAsyncThunk("jobs/updateJobCandidate", async
     try {
         const response = updateCandidateApi(candidate);
         const data = await response;
-        toast.success("Candidate Updated Successfully", { autoClose: 2000 });
+        sileo.success({ title: "Candidate Updated Successfully" });
         return data;
     } catch (error) {
-        toast.error("Candidate Updated Failed", { autoClose: 2000 });
+        sileo.error({ title: "Candidate Updated Failed" });
         return error;
     }
 });
@@ -103,10 +102,10 @@ export const updateCandidate = createAsyncThunk("jobs/updateJobCandidate", async
 export const deleteCandidate = createAsyncThunk("jobs/deleteJobCandidate", async (id: any) => {
     try {
         const response = deleteCandidateApi(id);
-        toast.success("Candidate Deleted Successfully", { autoClose: 2000 });
+        sileo.success({ title: "Candidate Deleted Successfully" });
         return { id, ...response };
     } catch (error) {
-        toast.error("Candidate Deleted Failed", { autoClose: 2000 });
+        sileo.error({ title: "Candidate Deleted Failed" });
         return error;
     }
 });
@@ -125,10 +124,10 @@ export const addCandidateGrid = createAsyncThunk("jobs/addJobCandidateGrid", asy
     try {
         const response = addCandidateGridApi(candidate);
         const data = await response;
-        toast.success("Candidate Added Successfully", { autoClose: 2000 });
+        sileo.success({ title: "Candidate Added Successfully" });
         return data;
     } catch (error) {
-        toast.error("Candidate Added Failed", { autoClose: 2000 });
+        sileo.error({ title: "Candidate Added Failed" });
         return error;
     }
 });
@@ -148,10 +147,10 @@ export const addcategoryList = createAsyncThunk("jobs/addcategoryList", async (c
     try {
         const response = addcategoryListApi(category);
         const data = await response;
-        toast.success("Category Added Successfully", { autoClose: 3000 });
+        sileo.success({ title: "Category Added Successfully" });
         return data;
     } catch (error) {
-        toast.error("Category Added Failed", { autoClose: 3000 });
+        sileo.error({ title: "Category Added Failed" });
         return error;
     }
 });

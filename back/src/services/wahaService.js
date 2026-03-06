@@ -1,57 +1,59 @@
 const axios = require('axios');
-const QRCode = require('qrcode'); // Para generar la imagen limpia
-const Jimp = require('jimp');     // Para procesar la captura de pantalla
-const jsQR = require('jsqr');     // Para leer el QR dentro de la captura
 
-// --- CONFIGURACIÓN ---
-const WAHA_URL = process.env.WAHA_URL || 'http://212.28.189.253:3002';
-const WAHA_API_KEY = process.env.WAHA_API_KEY || '123';
+// --- CONFIGURACIÓN EVOLUTION API v2 ---
+const EVOLUTION_URL = process.env.EVOLUTION_URL || 'http://localhost:3002';
+const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
 
-// URL DEL WEBHOOK - Todo va a tu backend (ya no se usa n8n)
 const BACKEND_WEBHOOK_URL = process.env.BACKEND_WEBHOOK_URL || "https://api.tupelukeria.com/api/whatsapp/webhook";
 
 const apiClient = axios.create({
-    baseURL: WAHA_URL,
+    baseURL: EVOLUTION_URL,
     headers: {
         'Content-Type': 'application/json',
-        'X-Api-Key': WAHA_API_KEY
+        'apikey': EVOLUTION_API_KEY
     }
 });
 
-const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+/**
+ * Normaliza chatId: Evolution usa solo el número (sin @c.us/@s.whatsapp.net)
+ */
+function stripJidSuffix(chatId) {
+    if (!chatId) return chatId;
+    return chatId.replace(/@(c\.us|s\.whatsapp\.net)$/, '');
+}
 
 /**
- * 1. INICIA SESIÓN
- * Configura webhook hacia tu backend para TODO (estado + mensajes)
+ * 1. INICIA SESIÓN (crea instancia en Evolution API)
  */
 const startSession = async (sessionName) => {
-    const sessionConfig = {
-        name: sessionName,
-        config: {
-            // Webhook único hacia tu backend
-            webhooks: [
-                {
-                    url: BACKEND_WEBHOOK_URL,
-                    events: ["session.status", "message"]  // Ambos eventos
-                }
-            ]
-        }
-    };
-
     try {
-        console.log(`🚀 [WAHA] Iniciando/Verificando sesión: ${sessionName}`);
+        console.log(`🚀 [EVOLUTION] Iniciando instancia: ${sessionName}`);
         console.log(`📡 Configurando webhook hacia: ${BACKEND_WEBHOOK_URL}`);
 
-        const response = await apiClient.post('/api/sessions', sessionConfig);
+        const response = await apiClient.post('/instance/create', {
+            instanceName: sessionName,
+            integration: 'WHATSAPP-BAILEYS',
+            qrcode: true,
+            webhook: {
+                url: BACKEND_WEBHOOK_URL,
+                byEvents: false,
+                base64: true,
+                events: [
+                    'MESSAGES_UPSERT',
+                    'CONNECTION_UPDATE',
+                    'QRCODE_UPDATED'
+                ]
+            }
+        });
         return response.data;
     } catch (error) {
-        // Si ya existe (409/422), intentamos arrancarla
-        if (error.response && (error.response.status === 409 || error.response.status === 422)) {
+        if (error.response && error.response.status === 403) {
+            // Instance already exists - try to connect it
             try {
-                await apiClient.post(`/api/sessions/${sessionName}/start`);
-                return { name: sessionName, status: 'EXISTING_STARTED' };
-            } catch (startError) {
-                console.log(`♻️ La sesión existe pero no arranca. Reintentando en breve...`);
+                await apiClient.get(`/instance/connect/${sessionName}`);
+                return { instanceName: sessionName, status: 'EXISTING_STARTED' };
+            } catch (connectError) {
+                console.log(`♻️ Instancia existe pero no conecta: ${connectError.message}`);
                 return { status: 'LOADING' };
             }
         }
@@ -60,68 +62,69 @@ const startSession = async (sessionName) => {
 };
 
 /**
- * 2. OBTENER QR (ESTRATEGIA HÍBRIDA)
- * Convierte Screenshot -> Texto -> Imagen Limpia Base64
+ * 2. OBTENER QR
+ * Evolution devuelve base64 directo - no necesita jimp/jsqr
  */
 const getQrRawData = async (sessionName) => {
     try {
-        // A. INTENTO RÁPIDO: ¿WAHA nos da el texto directo?
-        try {
-            const response = await apiClient.get(`/api/sessions/${sessionName}`);
-            if (response.data && response.data.qr) {
-                return await QRCode.toDataURL(response.data.qr);
+        const response = await apiClient.get(`/instance/connect/${sessionName}`);
+
+        if (response.data) {
+            // Evolution devuelve { base64: "data:image/png;base64,..." } o { pairingCode: "..." }
+            if (response.data.base64) {
+                return response.data.base64;
             }
-        } catch (e) {
-            // Ignoramos errores aquí, pasamos al plan B
-        }
-
-        // B. INTENTO ROBUSTO: Descargar Screenshot (WEBJS)
-        const screenshot = await apiClient.get(`/api/screenshot?session=${sessionName}`, {
-            responseType: 'arraybuffer'
-        });
-
-        if (screenshot.data) {
-            const image = await Jimp.read(screenshot.data);
-            const qrCodeData = jsQR(
-                image.bitmap.data,
-                image.bitmap.width,
-                image.bitmap.height
-            );
-
-            if (qrCodeData && qrCodeData.data) {
-                console.log("✅ [OCR] ¡QR encontrado en la captura! Regenerando imagen limpia...");
-                return await QRCode.toDataURL(qrCodeData.data);
+            // Algunas versiones lo ponen en code
+            if (response.data.code) {
+                const QRCode = require('qrcode');
+                return await QRCode.toDataURL(response.data.code);
             }
         }
-
         return null;
-
     } catch (error) {
-        if (error.response && error.response.status === 404) return null;
-        if (error.response && error.response.status === 400) return null;
-        console.error(`❌ Error procesando QR Híbrido:`, error.message);
+        if (error.response && (error.response.status === 404 || error.response.status === 400)) return null;
+        console.error(`❌ Error obteniendo QR:`, error.message);
         return null;
     }
 };
 
 /**
  * 3. OBTENER ESTADO
+ * Mapea estados de Evolution → formato compatible con el controller
  */
 const getSessionStatus = async (sessionName) => {
     try {
-        const response = await apiClient.get(`/api/sessions/${sessionName}`);
-        return response.data;
+        const response = await apiClient.get(`/instance/connectionState/${sessionName}`);
+        const state = response.data?.instance?.state || response.data?.state;
+
+        // Mapear estados Evolution → WAHA-compatible
+        const statusMap = {
+            'open': 'WORKING',
+            'connecting': 'SCAN_QR_CODE',
+            'close': 'FAILED',
+            'refused': 'FAILED'
+        };
+
+        return {
+            name: sessionName,
+            status: statusMap[state] || state || 'LOADING'
+        };
     } catch (error) {
         return null;
     }
 };
 
 /**
- * 4. ELIMINAR SESIÓN
+ * 4. ELIMINAR SESIÓN (logout + delete instance)
  */
 const deleteSession = async (sessionName) => {
     try {
-        await apiClient.delete(`/api/sessions/${sessionName}`);
+        // Primero logout para desconectar WhatsApp
+        try {
+            await apiClient.delete(`/instance/logout/${sessionName}`);
+        } catch (e) { /* puede fallar si ya estaba desconectada */ }
+
+        await apiClient.delete(`/instance/delete/${sessionName}`);
         return true;
     } catch (error) {
         return false;
@@ -130,48 +133,32 @@ const deleteSession = async (sessionName) => {
 
 /**
  * 5. ENVIAR MENSAJE DE TEXTO
- * @param {string} sessionName - ID de la sesión (tenant_id)
- * @param {string} chatId - ID del chat (número@c.us)
- * @param {string} text - Mensaje a enviar
  */
 const sendMessage = async (sessionName, chatId, text) => {
     try {
-        console.log(`📤 [WAHA] Enviando mensaje a ${chatId}`);
+        const number = stripJidSuffix(chatId);
+        console.log(`📤 [EVOLUTION] Enviando mensaje a ${number}`);
 
-        const response = await apiClient.post(`/api/sendText`, {
-            session: sessionName,
-            chatId: chatId,
+        const response = await apiClient.post(`/message/sendText/${sessionName}`, {
+            number: number,
             text: text
         });
 
-        console.log(`✅ [WAHA] Mensaje enviado exitosamente`);
+        console.log(`✅ [EVOLUTION] Mensaje enviado exitosamente`);
         return response.data;
     } catch (error) {
-        console.error(`❌ [WAHA] Error enviando mensaje:`, error.message);
+        console.error(`❌ [EVOLUTION] Error enviando mensaje:`, error.message);
         throw error;
     }
 };
 
 /**
- * 6. ENVIAR MENSAJE CON BOTONES (Opcional)
+ * 6. ENVIAR MENSAJE CON BOTONES (fallback a texto en Evolution)
  */
 const sendButtons = async (sessionName, chatId, text, buttons) => {
-    try {
-        const response = await apiClient.post(`/api/sendButtons`, {
-            session: sessionName,
-            chatId: chatId,
-            body: text,
-            buttons: buttons.map((btn, i) => ({
-                id: `btn_${i}`,
-                text: btn
-            }))
-        });
-        return response.data;
-    } catch (error) {
-        // Si no soporta botones, enviar texto normal
-        console.log('⚠️ Botones no soportados, enviando texto simple...');
-        return sendMessage(sessionName, chatId, text);
-    }
+    // Evolution v2 no soporta botones nativos de forma estable, usar texto
+    const buttonText = buttons.map((btn, i) => `${i + 1}. ${btn}`).join('\n');
+    return sendMessage(sessionName, chatId, `${text}\n\n${buttonText}`);
 };
 
 /**
@@ -179,62 +166,105 @@ const sendButtons = async (sessionName, chatId, text, buttons) => {
  */
 const sendVoice = async (sessionName, chatId, audioBase64) => {
     try {
-        console.log(`📤 [WAHA] Enviando nota de voz a ${chatId}`);
+        const number = stripJidSuffix(chatId);
+        console.log(`📤 [EVOLUTION] Enviando nota de voz a ${number}`);
 
-        const response = await apiClient.post(`/api/sendVoice`, {
-            session: sessionName,
-            chatId: chatId,
-            file: {
-                mimetype: 'audio/ogg; codecs=opus',
-                data: audioBase64
-            }
+        const response = await apiClient.post(`/message/sendWhatsAppAudio/${sessionName}`, {
+            number: number,
+            audio: `data:audio/ogg;base64,${audioBase64}`
         });
 
-        console.log(`✅ [WAHA] Nota de voz enviada exitosamente`);
+        console.log(`✅ [EVOLUTION] Nota de voz enviada exitosamente`);
         return response.data;
     } catch (error) {
-        console.error(`❌ [WAHA] Error enviando nota de voz:`, error.message);
+        console.error(`❌ [EVOLUTION] Error enviando nota de voz:`, error.message);
         throw error;
     }
 };
 
 /**
  * 8. ENVIAR IMAGEN
- * @param {string} sessionName - ID de la sesión (tenant_id)
- * @param {string} chatId - ID del chat (número@c.us)
- * @param {string} imageUrl - URL pública de la imagen
- * @param {string} caption - Texto debajo de la imagen
  */
 const sendImage = async (sessionName, chatId, imageUrl, caption = '') => {
     try {
-        console.log(`📤 [WAHA] Enviando imagen a ${chatId}`);
+        const number = stripJidSuffix(chatId);
+        console.log(`📤 [EVOLUTION] Enviando imagen a ${number}`);
 
-        const response = await apiClient.post('/api/sendImage', {
-            session: sessionName,
-            chatId: chatId,
-            file: { mimetype: 'image/jpeg', url: imageUrl },
+        const response = await apiClient.post(`/message/sendMedia/${sessionName}`, {
+            number: number,
+            mediatype: 'image',
+            media: imageUrl,
             caption: caption
         });
 
-        console.log(`✅ [WAHA] Imagen enviada exitosamente`);
+        console.log(`✅ [EVOLUTION] Imagen enviada exitosamente`);
         return response.data;
     } catch (error) {
-        console.error(`❌ [WAHA] Error enviando imagen:`, error.message);
+        console.error(`❌ [EVOLUTION] Error enviando imagen:`, error.message);
         throw error;
     }
 };
 
 /**
- * 9. DESCARGAR ARCHIVO DE MEDIA (para transcribir audios)
+ * 9. OBTENER NÚMERO CONECTADO (para webhook connection.update)
+ */
+const getInstanceOwnerJid = async (sessionName) => {
+    try {
+        const response = await apiClient.get(`/instance/fetchInstances`, {
+            params: { instanceName: sessionName }
+        });
+        const instances = Array.isArray(response.data) ? response.data : [response.data];
+        const inst = instances.find(i => i.instance?.instanceName === sessionName || i.instanceName === sessionName);
+        if (inst) {
+            const ownerJid = inst.instance?.owner || inst.owner;
+            if (ownerJid) return ownerJid.replace(/@s\.whatsapp\.net$/, '');
+        }
+        return null;
+    } catch (error) {
+        console.error(`❌ [EVOLUTION] Error obteniendo owner JID:`, error.message);
+        return null;
+    }
+};
+
+/**
+ * 10. DESCARGAR MEDIA (base64 viene inline con webhookBase64=true, este es fallback)
  */
 const getMediaBuffer = async (sessionName, messageId) => {
     try {
-        const response = await apiClient.get(`/api/${sessionName}/messages/${messageId}/download`, {
-            responseType: 'arraybuffer'
+        const response = await apiClient.post(`/chat/getBase64FromMediaMessage/${sessionName}`, {
+            message: { key: { id: messageId } }
         });
-        return Buffer.from(response.data);
+        if (response.data?.base64) {
+            return Buffer.from(response.data.base64, 'base64');
+        }
+        throw new Error('No base64 data in response');
     } catch (error) {
-        console.error(`❌ [WAHA] Error descargando media:`, error.message);
+        console.error(`❌ [EVOLUTION] Error descargando media:`, error.message);
+        throw error;
+    }
+};
+
+/**
+ * 11. PUBLICAR ESTADO/HISTORIA DE WHATSAPP
+ * @param {string} sessionName
+ * @param {object} opts - { type: 'text'|'image'|'video'|'audio', content, caption?, backgroundColor?, font?, allContacts? }
+ */
+const sendStatus = async (sessionName, opts) => {
+    try {
+        console.log(`📤 [EVOLUTION] Publicando estado (${opts.type}) en ${sessionName}`);
+        const response = await apiClient.post(`/message/sendStatus/${sessionName}`, {
+            type: opts.type || 'text',
+            content: opts.content,
+            caption: opts.caption || '',
+            backgroundColor: opts.backgroundColor || '#000000',
+            font: opts.font || 1,
+            allContacts: opts.allContacts !== false,
+            statusJidList: opts.statusJidList || []
+        });
+        console.log(`✅ [EVOLUTION] Estado publicado exitosamente`);
+        return response.data;
+    } catch (error) {
+        console.error(`❌ [EVOLUTION] Error publicando estado:`, error.message);
         throw error;
     }
 };
@@ -248,5 +278,8 @@ module.exports = {
     sendButtons,
     sendVoice,
     sendImage,
-    getMediaBuffer
+    getMediaBuffer,
+    getInstanceOwnerJid,
+    stripJidSuffix,
+    sendStatus
 };

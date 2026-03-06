@@ -88,6 +88,8 @@ export const loginUser =
         const roleId = data?.user?.role_id;
         if (roleId === 5) {
           navigate("/super-admin"); // Super Admin va a su panel
+        } else if (roleId === 2 || roleId === 6) {
+          navigate("/dashboard"); // Cajeros y recepcionistas siempre al dashboard
         } else if (setup_complete === false) {
           navigate("/assistant"); // Si la configuración no está completa, va al Asistente
         } else {

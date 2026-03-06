@@ -71,7 +71,7 @@ exports.searchService = async (req, res) => {
             let allServices;
             if (stylistClean) {
                 allServices = await db.query(
-                    `SELECT DISTINCT s.id, s.name, s.duration_minutes,
+                    `SELECT DISTINCT s.id, s.name, s.price, s.duration_minutes,
                             u.first_name || ' ' || COALESCE(u.last_name, '') AS stylist_name,
                             u.id AS stylist_id
                      FROM services s
@@ -88,7 +88,7 @@ exports.searchService = async (req, res) => {
                 );
             } else {
                 allServices = await db.query(
-                    `SELECT DISTINCT s.id, s.name, s.duration_minutes
+                    `SELECT DISTINCT s.id, s.name, s.price, s.duration_minutes
                      FROM services s
                      INNER JOIN stylist_services ss ON s.id = ss.service_id
                      INNER JOIN users u ON ss.user_id = u.id
@@ -147,6 +147,7 @@ exports.searchService = async (req, res) => {
                     service: {
                         id: allServices.rows[0].id,
                         name: allServices.rows[0].name,
+                        price: Number(allServices.rows[0].price) || 0,
                         duration_minutes: Number(allServices.rows[0].duration_minutes) || 60
                     },
                     ...stylistInfo,
@@ -155,12 +156,64 @@ exports.searchService = async (req, res) => {
                 });
             }
 
+            // Si NO hay filtro por estilista, agrupar por categorías
+            if (!stylistClean) {
+                const catResult = await db.query(
+                    `SELECT DISTINCT sc.id AS cat_id, sc.name AS cat_name,
+                            s.id, s.name, s.price, s.duration_minutes
+                     FROM services s
+                     INNER JOIN stylist_services ss ON s.id = ss.service_id
+                     INNER JOIN users u ON ss.user_id = u.id
+                     LEFT JOIN service_categories sc ON s.category_id = sc.id
+                     WHERE s.tenant_id = $1::uuid
+                       AND u.tenant_id = $1::uuid
+                       AND u.role_id = 3
+                       AND COALESCE(NULLIF(u.status, ''), 'active') = 'active'
+                     ORDER BY sc.name ASC NULLS LAST, s.name ASC
+                     LIMIT 30`,
+                    [tenantId]
+                );
+                const categories = {};
+                for (const row of catResult.rows) {
+                    const catName = row.cat_name || 'Otros';
+                    if (!categories[catName]) categories[catName] = [];
+                    if (!categories[catName].find(s => s.id === row.id)) {
+                        categories[catName].push({
+                            id: row.id, name: row.name,
+                            price: Number(row.price) || 0,
+                            duration_minutes: Number(row.duration_minutes) || 60
+                        });
+                    }
+                }
+                const catNames = Object.keys(categories);
+                // Si hay más de 1 categoría, mostrar categorías primero
+                if (catNames.length > 1) {
+                    return res.status(200).json({
+                        found: true,
+                        multiple: true,
+                        show_categories: true,
+                        categories: catNames.map(name => ({
+                            name,
+                            service_count: categories[name].length,
+                            services: categories[name]
+                        })),
+                        options: allServices.rows.map(s => ({
+                            id: s.id, name: s.name,
+                            price: Number(s.price) || 0,
+                            duration_minutes: Number(s.duration_minutes) || 60
+                        })),
+                        message: `Tenemos estas categorias de servicios:`
+                    });
+                }
+            }
+
             return res.status(200).json({
                 found: true,
                 multiple: true,
                 options: allServices.rows.map(s => ({
                     id: s.id,
                     name: s.name,
+                    price: Number(s.price) || 0,
                     duration_minutes: Number(s.duration_minutes) || 60
                 })),
                 ...stylistInfo,
@@ -170,13 +223,98 @@ exports.searchService = async (req, res) => {
             });
         }
 
-        // Buscar primero con múltiples variantes del nombre - SOLO servicios con estilistas asignados
+        // 🆕 BUSCAR POR CATEGORÍA primero: si el texto coincide con un nombre de categoría, devolver servicios de esa categoría
+        // Prioridad: 1) match exacto, 2) match parcial — y solo categorías que tengan servicios con estilistas
+        const catMatch = await db.query(
+            `SELECT sc.id, sc.name,
+                    CASE
+                      WHEN LOWER(TRIM(sc.name)) = $2 THEN 1
+                      WHEN LOWER(TRIM(sc.name)) = $3 THEN 2
+                      WHEN LOWER(TRIM(sc.name)) LIKE $4 THEN 3
+                      ELSE 4
+                    END AS priority
+             FROM service_categories sc
+             WHERE sc.tenant_id = $1::uuid
+               AND (
+                 LOWER(TRIM(sc.name)) = $2
+                 OR LOWER(TRIM(sc.name)) = $3
+                 OR LOWER(TRIM(sc.name)) LIKE $4
+                 OR LOWER(TRIM(sc.name)) LIKE $5
+               )
+               AND EXISTS (
+                 SELECT 1 FROM services s
+                 INNER JOIN stylist_services ss ON s.id = ss.service_id
+                 INNER JOIN users u ON ss.user_id = u.id
+                 WHERE s.category_id = sc.id AND s.tenant_id = $1::uuid
+                   AND u.role_id = 3 AND COALESCE(NULLIF(u.status, ''), 'active') = 'active'
+               )
+             ORDER BY priority ASC
+             LIMIT 1`,
+            [tenantId, serviceName, serviceNameNormalized, `${serviceName}%`, `%${serviceNameNormalized}%`]
+        );
+        if (catMatch.rows.length > 0) {
+            const cat = catMatch.rows[0];
+            console.log(`   📂 Coincide con categoría: "${cat.name}" (${cat.id})`);
+            try {
+                const catServices = await db.query(
+                    `SELECT DISTINCT s.id, s.name, s.price, s.duration_minutes
+                     FROM services s
+                     INNER JOIN stylist_services ss ON s.id = ss.service_id
+                     INNER JOIN users u ON ss.user_id = u.id
+                     WHERE s.tenant_id = $1::uuid
+                       AND s.category_id = $2::uuid
+                       AND u.tenant_id = $1::uuid
+                       AND u.role_id = 3
+                       AND COALESCE(NULLIF(u.status, ''), 'active') = 'active'
+                     ORDER BY s.name ASC
+                     LIMIT 20`,
+                    [tenantId, cat.id]
+                );
+                console.log(`   📂 Servicios en categoría "${cat.name}": ${catServices.rows.length} → ${catServices.rows.map(s=>s.name).join(', ')}`);
+                if (catServices.rows.length === 1) {
+                    const svc = catServices.rows[0];
+                    const stylistsRes = await db.query(
+                        `SELECT DISTINCT u.id, u.first_name || ' ' || COALESCE(u.last_name, '') AS name
+                         FROM stylist_services ss
+                         INNER JOIN users u ON ss.user_id = u.id
+                         WHERE ss.service_id = $1::uuid AND u.tenant_id = $2::uuid AND u.role_id = 3
+                           AND COALESCE(NULLIF(u.status, ''), 'active') = 'active'
+                         ORDER BY u.first_name ASC`,
+                        [svc.id, tenantId]
+                    );
+                    return res.status(200).json({
+                        found: true, multiple: false,
+                        from_category: cat.name,
+                        service: { id: svc.id, name: svc.name, price: Number(svc.price) || 0, duration_minutes: Number(svc.duration_minutes) || 60 },
+                        stylists: stylistsRes.rows.map(s => ({ id: s.id, name: s.name.trim() })),
+                        message: `En ${cat.name} tenemos: ${svc.name} ($${Number(svc.price)})`
+                    });
+                }
+                if (catServices.rows.length > 1) {
+                    return res.status(200).json({
+                        found: true, multiple: true,
+                        from_category: cat.name,
+                        options: catServices.rows.map(s => ({
+                            id: s.id, name: s.name,
+                            price: Number(s.price) || 0,
+                            duration_minutes: Number(s.duration_minutes) || 60
+                        })),
+                        message: `En ${cat.name} tenemos estos servicios:`
+                    });
+                }
+            } catch (catErr) {
+                console.error(`   ❌ Error buscando servicios en categoría "${cat.name}":`, catErr.message);
+            }
+        }
+
+        // Buscar por nombre de servicio con múltiples variantes - SOLO servicios con estilistas asignados
         let result = await db.query(
-            `SELECT DISTINCT 
-                s.id, 
-                s.name, 
+            `SELECT DISTINCT
+                s.id,
+                s.name,
+                s.price,
                 s.duration_minutes,
-                CASE 
+                CASE
                   WHEN LOWER(TRIM(s.name)) = $6 THEN 1
                   WHEN LOWER(TRIM(s.name)) = $7 THEN 2
                   WHEN LOWER(TRIM(s.name)) LIKE $8 || '%' THEN 3
@@ -240,7 +378,7 @@ exports.searchService = async (req, res) => {
             }
             
             result = await db.query(
-                `SELECT DISTINCT s.id, s.name, s.duration_minutes
+                `SELECT DISTINCT s.id, s.name, s.price, s.duration_minutes
                  FROM services s
                  INNER JOIN stylist_services ss ON s.id = ss.service_id
                  INNER JOIN users u ON ss.user_id = u.id
@@ -339,6 +477,7 @@ exports.searchService = async (req, res) => {
                     service: {
                         id: exactMatch.id,
                         name: exactMatch.name,
+                        price: Number(exactMatch.price) || 0,
                         duration_minutes: Number(exactMatch.duration_minutes) || 60
                     },
                     stylists,
@@ -372,6 +511,7 @@ exports.searchService = async (req, res) => {
                 options: sortedResults.map(s => ({
                     id: s.id,
                     name: s.name,
+                    price: Number(s.price) || 0,
                     duration_minutes: Number(s.duration_minutes) || 60
                 })),
                 message: `Encontré estos servicios: ${sortedResults.map(s => s.name).join(', ')}. ¿Cuál prefieres?`
@@ -415,6 +555,7 @@ exports.searchService = async (req, res) => {
                 service: {
                     id: serviceData.id,
                     name: serviceData.name,
+                    price: Number(serviceData.price) || 0,
                     duration_minutes: Number(serviceData.duration_minutes) || 60
                 },
                 stylists: [],
@@ -433,8 +574,9 @@ exports.searchService = async (req, res) => {
             found: true,
             service: {
                 id: serviceData.id,
-                name: serviceData.name,
-                duration_minutes: Number(serviceData.duration_minutes) || 60
+                    name: serviceData.name,
+                    price: Number(serviceData.price) || 0,
+                    duration_minutes: Number(serviceData.duration_minutes) || 60
             },
             stylists,
             message: date && time
@@ -521,7 +663,7 @@ exports.checkAvailability = async (req, res) => {
 
         // Obtener info del servicio
         const serviceResult = await db.query(
-            'SELECT id, name, duration_minutes FROM services WHERE id = $1::uuid AND tenant_id = $2::uuid',
+            'SELECT id, name, price, duration_minutes FROM services WHERE id = $1::uuid AND tenant_id = $2::uuid',
             [serviceId, tenantId]
         );
 
@@ -752,7 +894,7 @@ exports.checkAvailability = async (req, res) => {
                 return res.status(200).json({
                     available: isAvailable && isWithinWorkingHours,
                     stylist: { id: finalStylistId, name: stylistNameFull },
-                    service: { id: serviceId, name: serviceName, duration_minutes: duration },
+                    service: { id: serviceId, name: serviceName, price: Number(service.price) || 0, duration_minutes: duration },
                     date,
                     time: time.slice(0, 5),
                     slots: isAvailable ? [time.slice(0, 5)] : availableSlots.slice(0, 10),
@@ -783,7 +925,7 @@ exports.checkAvailability = async (req, res) => {
                 return res.status(200).json({
                     available: true,
                     stylist: { id: finalStylistId, name: stylistNameFull },
-                    service: { id: serviceId, name: serviceName, duration_minutes: duration },
+                    service: { id: serviceId, name: serviceName, price: Number(service.price) || 0, duration_minutes: duration },
                     date,
                     slots: availableSlots,
                     slots_12h: availableSlots12h,
@@ -796,7 +938,7 @@ exports.checkAvailability = async (req, res) => {
             return res.status(200).json({
                 available: true,
                 stylist: { id: finalStylistId, name: stylistNameFull },
-                service: { id: serviceId, name: serviceName, duration_minutes: duration },
+                service: { id: serviceId, name: serviceName, price: Number(service.price) || 0, duration_minutes: duration },
                 date,
                 franjas: franjasResumen,
                 total_available: availableSlots.length,
@@ -868,7 +1010,7 @@ exports.checkAvailability = async (req, res) => {
 
         return res.status(200).json({
             available: true,
-            service: { id: serviceId, name: serviceName },
+            service: { id: serviceId, name: serviceName, price: Number(service.price) || 0 },
             date,
             time: time || null,
             stylists: stylistsWithSlots,
@@ -1000,7 +1142,7 @@ exports.bookAppointment = async (req, res) => {
         console.log(`   📅 Fecha/Hora: ${date} ${time}`);
 
         const serviceResult = await db.query(
-            'SELECT id, name, duration_minutes FROM services WHERE id = $1::uuid AND tenant_id = $2::uuid',
+            'SELECT id, name, price, duration_minutes FROM services WHERE id = $1::uuid AND tenant_id = $2::uuid',
             [serviceId, tenantId]
         );
 
@@ -1155,6 +1297,7 @@ exports.bookAppointment = async (req, res) => {
                 date: formatInTimeZone(startTime, TIME_ZONE, 'yyyy-MM-dd'),
                 time: formatInTimeZone(startTime, TIME_ZONE, 'HH:mm'),
                 time_12h: time12h, // 🆕 Formato 12h
+                price: Number(service.price) || 0,
                 duration_minutes: duration
             },
             message: `¡Listo! Tu cita de ${service.name} con ${stylistNameFull} quedó agendada para el ${formatInTimeZone(startTime, TIME_ZONE, "EEEE d 'de' MMMM", { locale: require('date-fns/locale/es') })} a las ${time12h}.`

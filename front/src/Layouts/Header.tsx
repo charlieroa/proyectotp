@@ -20,9 +20,11 @@ import LightDark from '../Components/Common/LightDark';
 import { changeSidebarVisibility } from '../slices/thunks';
 import { useSelector, useDispatch } from "react-redux";
 import { createSelector } from 'reselect';
+import { getRoleFromToken } from '../services/auth';
 
-const Header = ({ onChangeLayoutMode, layoutModeType, headerClass }: any) => {
+const Header = ({ onChangeLayoutMode, layoutModeType, headerClass, startTour }: any) => {
     const dispatch: any = useDispatch();
+    const userRole = getRoleFromToken();
 
     const selectDashboardData = createSelector(
         (state: any) => state.Layout,
@@ -144,6 +146,18 @@ const Header = ({ onChangeLayoutMode, layoutModeType, headerClass }: any) => {
                                 layoutMode={layoutModeType}
                                 onChangeLayoutMode={onChangeLayoutMode}
                             />
+
+                            {/* Tour button — admin only */}
+                            {userRole === 1 && startTour && (
+                                <button
+                                    type="button"
+                                    className="btn btn-icon btn-topbar btn-ghost-secondary rounded-circle"
+                                    onClick={startTour}
+                                    title="Mostrar Tour"
+                                >
+                                    <i className="ri-question-line fs-22"></i>
+                                </button>
+                            )}
 
                             {/* NotificationDropdown for real-time appointment notifications */}
                             <NotificationDropdown />

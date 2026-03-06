@@ -1,6 +1,5 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
-import { toast } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
+import { sileo } from 'sileo';
 
 // =================== Dependencias ===================
 
@@ -51,11 +50,11 @@ export const addNewContact = createAsyncThunk("crm/addNewContact", async (contac
   try {
     const dataToCreate = { ...contact, role_id: 4, tenant_id: tenantId };
     const response = await api.post(API_ENDPOINT_USERS, dataToCreate);
-    toast.success("Contacto añadido con éxito", { autoClose: 3000 });
+    sileo.success({ title: "Contacto añadido con éxito" });
     return response.data;
   } catch (error: any) {
     const errorMessage = error.response?.data?.error || 'Error desconocido al crear contacto';
-    toast.error(errorMessage, { autoClose: 3000 });
+    sileo.error({ title: errorMessage });
     return rejectWithValue({ error: errorMessage });
   }
 });
@@ -66,11 +65,11 @@ export const updateContact = createAsyncThunk("crm/updateContact", async (contac
     // El ID ya viene en el objeto contact que manda el componente
     const { id, ...clientData } = contact; 
     const response = await api.put(`${API_ENDPOINT_USERS}/${id}`, clientData);
-    toast.success("Contacto actualizado con éxito", { autoClose: 3000 });
+    sileo.success({ title: "Contacto actualizado con éxito" });
     return response.data;
   } catch (error: any) {
     const errorMessage = error.response?.data?.error || 'Error desconocido al actualizar contacto';
-    toast.error(errorMessage, { autoClose: 3000 });
+    sileo.error({ title: errorMessage });
     return rejectWithValue({ error: errorMessage });
   }
 });
@@ -79,11 +78,11 @@ export const updateContact = createAsyncThunk("crm/updateContact", async (contac
 export const deleteContact = createAsyncThunk("crm/deleteContact", async (contactId: any, { rejectWithValue }) => {
   try {
     await api.delete(`${API_ENDPOINT_USERS}/${contactId}`);
-    toast.success("Contacto eliminado con éxito", { autoClose: 3000 });
+    sileo.success({ title: "Contacto eliminado con éxito" });
     return contactId; // Devolvemos el ID para el reducer
   } catch (error: any) {
     const errorMessage = error.response?.data?.error || 'Error desconocido al eliminar contacto';
-    toast.error(errorMessage, { autoClose: 3000 });
+    sileo.error({ title: errorMessage });
     return rejectWithValue({ error: errorMessage });
   }
 });
@@ -105,10 +104,10 @@ export const getCompanies = createAsyncThunk("crm/getCompanies", async (_, { rej
 export const addNewCompanies = createAsyncThunk("crm/addNewCompanies", async (company: any, { rejectWithValue }) => {
   try {
     const response = await addNewCompaniesApi(company);
-    toast.success("Compañía añadida con éxito", { autoClose: 3000 });
+    sileo.success({ title: "Compañía añadida con éxito" });
     return response;
   } catch (error) {
-    toast.error("Error al añadir compañía", { autoClose: 3000 });
+    sileo.error({ title: "Error al añadir compañía" });
     return rejectWithValue(error);
   }
 });
@@ -116,10 +115,10 @@ export const addNewCompanies = createAsyncThunk("crm/addNewCompanies", async (co
 export const updateCompanies = createAsyncThunk("crm/updateCompanies", async (company: any, { rejectWithValue }) => {
   try {
     const response = await updateCompaniesApi(company);
-    toast.success("Compañía actualizada con éxito", { autoClose: 3000 });
+    sileo.success({ title: "Compañía actualizada con éxito" });
     return response;
   } catch (error) {
-    toast.error("Error al actualizar compañía", { autoClose: 3000 });
+    sileo.error({ title: "Error al actualizar compañía" });
     return rejectWithValue(error);
   }
 });
@@ -127,10 +126,10 @@ export const updateCompanies = createAsyncThunk("crm/updateCompanies", async (co
 export const deleteCompanies = createAsyncThunk("crm/deleteCompanies", async (companyId: any, { rejectWithValue }) => {
   try {
     const response = await deleteCompaniesApi(companyId);
-    toast.success("Compañía eliminada con éxito", { autoClose: 3000 });
+    sileo.success({ title: "Compañía eliminada con éxito" });
     return companyId;
   } catch (error) {
-    toast.error("Error al eliminar compañía", { autoClose: 3000 });
+    sileo.error({ title: "Error al eliminar compañía" });
     return rejectWithValue(error);
   }
 });
@@ -148,10 +147,10 @@ export const getLeads = createAsyncThunk("crm/getLeads", async (_, { rejectWithV
 export const addNewLead = createAsyncThunk("crm/addNewLead", async (lead: any, { rejectWithValue }) => {
   try {
     const response = await addNewLeadApi(lead);
-    toast.success("Lead añadido con éxito", { autoClose: 3000 });
+    sileo.success({ title: "Lead añadido con éxito" });
     return response;
   } catch (error) {
-    toast.error("Error al añadir Lead", { autoClose: 3000 });
+    sileo.error({ title: "Error al añadir Lead" });
     return rejectWithValue(error);
   }
 });
@@ -159,10 +158,10 @@ export const addNewLead = createAsyncThunk("crm/addNewLead", async (lead: any, {
 export const updateLead = createAsyncThunk("crm/updateLead", async (lead: any, { rejectWithValue }) => {
   try {
     const response = await updateLeadApi(lead);
-    toast.success("Lead actualizado con éxito", { autoClose: 3000 });
+    sileo.success({ title: "Lead actualizado con éxito" });
     return response;
   } catch (error) {
-    toast.error("Error al actualizar Lead", { autoClose: 3000 });
+    sileo.error({ title: "Error al actualizar Lead" });
     return rejectWithValue(error);
   }
 });
@@ -170,10 +169,10 @@ export const updateLead = createAsyncThunk("crm/updateLead", async (lead: any, {
 export const deleteLead = createAsyncThunk("crm/deleteLead", async (leadId: any, { rejectWithValue }) => {
   try {
     await deleteLeadApi(leadId);
-    toast.success("Lead eliminado con éxito", { autoClose: 3000 });
+    sileo.success({ title: "Lead eliminado con éxito" });
     return leadId;
   } catch (error) {
-    toast.error("Error al eliminar Lead", { autoClose: 3000 });
+    sileo.error({ title: "Error al eliminar Lead" });
     return rejectWithValue(error);
   }
 });

@@ -4,7 +4,7 @@ import { Dropdown, DropdownItem, DropdownMenu, DropdownToggle, Spinner } from 'r
 
 // Importamos nuestros helpers de autenticación
 import { getDecodedToken, logout } from '../../services/auth';
-import api from '../../services/api';
+import api, { getUploadsBaseUrl } from '../../services/api';
 
 // Imagen de fallback
 import avatar1 from "../../assets/images/users/avatar-1.jpg";
@@ -46,9 +46,9 @@ const ProfileDropdown = () => {
                     ]);
 
                     if (tenantRes.data?.logo_url) {
-                        const baseUrl = api.defaults.baseURL || '';
+                        const uploadsBase = getUploadsBaseUrl();
                         const logo = tenantRes.data.logo_url;
-                        setTenantLogo(logo.startsWith('http') ? logo : `${baseUrl}${logo}`);
+                        setTenantLogo(logo.startsWith('http') ? logo : `${uploadsBase}${logo}`);
                     }
 
                     setCashSession(cashRes.data);
@@ -70,12 +70,19 @@ const ProfileDropdown = () => {
             console.log("Evento 'cashSessionChanged' detectado. Recargando datos...");
             fetchProfileData();
         };
-        
+
+        // Escucha cambios de perfil/logo
+        const handleProfileUpdated = () => {
+            fetchProfileData();
+        };
+
         window.addEventListener('cashSessionChanged', handleCashSessionChange);
+        window.addEventListener('profileUpdated', handleProfileUpdated);
 
         // Limpia el listener cuando el componente se desmonta
         return () => {
             window.removeEventListener('cashSessionChanged', handleCashSessionChange);
+            window.removeEventListener('profileUpdated', handleProfileUpdated);
         };
     }, []);
 

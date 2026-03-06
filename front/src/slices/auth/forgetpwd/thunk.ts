@@ -1,42 +1,12 @@
-import { userForgetPasswordSuccess, userForgetPasswordError } from "./reducer"
+import { userForgetPasswordSuccess, userForgetPasswordError } from "./reducer";
+import { api } from "../../../services/api";
 
-//Include Both Helper File with needed methods
-import { getFirebaseBackend } from "../../../helpers/firebase_helper";
-
-import {
-  postFakeForgetPwd,
-  postJwtForgetPwd,
-} from "../../../helpers/fakebackend_helper";
-
-const fireBaseBackend : any = getFirebaseBackend();
-
-export const userForgetPassword = (user : any, history : any) => async (dispatch : any) => {
+export const userForgetPassword = (user: any, history: any) => async (dispatch: any) => {
   try {
-      let response;
-      if (process.env.REACT_APP_DEFAULTAUTH === "firebase") {
-
-          response = fireBaseBackend.forgetPassword(
-              user.email
-          )
-
-      } else if (process.env.REACT_APP_DEFAULTAUTH === "jwt") {
-          response = postJwtForgetPwd(
-              user.email
-          )
-      } else {
-          response = postFakeForgetPwd(
-              user.email
-          )
-      }
-
-      const data = await response;
-
-      if (data) {
-          dispatch(userForgetPasswordSuccess(
-              "Reset link are sended to your mailbox, check there first"
-          ))
-      }
-  } catch (forgetError) {
-      dispatch(userForgetPasswordError(forgetError))
+    const { data } = await api.post('/auth/forgot-password', { email: user.email });
+    dispatch(userForgetPasswordSuccess(data.message || "Se ha enviado un enlace a tu correo."));
+  } catch (error: any) {
+    const msg = error?.response?.data?.error || "Error al procesar la solicitud.";
+    dispatch(userForgetPasswordError(msg));
   }
-}
+};

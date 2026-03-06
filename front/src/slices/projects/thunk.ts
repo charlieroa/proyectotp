@@ -1,6 +1,5 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
-import { toast } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
+import { sileo } from 'sileo';
 
 //Include Both Helper File with needed methods
 import {
@@ -23,10 +22,10 @@ export const addProjectList = createAsyncThunk("projects/addProjectList", async 
     try {
         const response = addProjectListApi(project);
         const data = await response;
-        toast.success("project-list Added Successfully", { autoClose: 3000 });
+        sileo.success({ title: "project-list Added Successfully" });
         return data;
     } catch (error) {
-        toast.error("project-list Added Failed", { autoClose: 3000 });
+        sileo.error({ title: "project-list Added Failed" });
         return error;
     }
 });
@@ -35,10 +34,10 @@ export const updateProjectList = createAsyncThunk("projects/updateProjectList", 
     try {
         const response = updateProjectListApi(project);
         const data = await response;
-        toast.success("project-list Updated Successfully", { autoClose: 3000 });
+        sileo.success({ title: "project-list Updated Successfully" });
         return data;
     } catch (error) {
-        toast.error("project-list Updated Failed", { autoClose: 3000 });
+        sileo.error({ title: "project-list Updated Failed" });
         return error;
     }
 });
@@ -47,10 +46,10 @@ export const deleteProjectList = createAsyncThunk("projects/deleteProjectList", 
     try {
         const response = deleteProjectListApi(data);
         const newdata = await response;
-        toast.success("project-list Delete Successfully", { autoClose: 3000 });
+        sileo.success({ title: "project-list Delete Successfully" });
         return newdata;
     } catch (error) {
-        toast.error("project-list Delete Failed", { autoClose: 3000 });
+        sileo.error({ title: "project-list Delete Failed" });
         return error;
     }
 });

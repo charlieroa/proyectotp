@@ -6,6 +6,8 @@ const db = require('../config/db');
 const { formatInTimeZone, zonedTimeToUtc } = require('date-fns-tz');
 const { getGlobalOpenAIKey } = require('../services/openaiKeyService');
 const { trackUsage } = require('../services/tokenTracker');
+const { getTenantPlan, isPlanAtLeast } = require('../middleware/planMiddleware');
+const { calculateStylistPayrollBreakdown } = require('./payrollController');
 
 const TIME_ZONE = 'America/Bogota';
 
@@ -107,6 +109,13 @@ FORMATO DE RESPUESTAS PARA VOZ (MUY IMPORTANTE):
   * Para productos: "jefe, el producto más vendido es [nombre] con X unidades"
 - Esto es ESPECIALMENTE importante para que las respuestas por voz (TTS) sean claras y naturales.
 - Para ventas usa frases como: "Jefe, hoy llevas 300 mil pesos, mire: 100 mil en efectivo, 150 mil en tarjetas y 50 mil en canjes"
+
+CAMPAÑAS DE EMAIL:
+- El jefe puede enviar campañas de email a clientes inactivos.
+- Cuando pida enviar una campaña, usa enviar_campana_inactivos. SIEMPRE envía prueba primero (enviar_prueba=true).
+- Sugiere un periodo si no lo dice: "Jefe, ¿de cuántos días quiere buscar inactivos? Le sugiero 30 días."
+- Plantillas disponibles: te_extranamos, descuento, nuevo_servicio.
+- Flujo: 1) Buscar inactivos → 2) Enviar prueba al admin → 3) Si confirma, enviar a todos (enviar_prueba=false).
 
 ESTILO:
 - Español colombiano profesional pero cercano y respetuoso. Siempre dices "jefe".
@@ -407,6 +416,7 @@ const ADMIN_TOOLS = [
                 properties: {
                     nombre: { type: "string", description: "Nombre del salón" },
                     direccion: { type: "string", description: "Dirección del salón" },
+                    ciudad: { type: "string", description: "Ciudad donde se encuentra el salón" },
                     telefono: { type: "string", description: "Teléfono del salón" },
                     email: { type: "string", description: "Email del salón" },
                     sitio_web: { type: "string", description: "Sitio web del salón" }
@@ -455,6 +465,58 @@ const ADMIN_TOOLS = [
                     estilista: { type: "string", description: "Nombre del estilista" }
                 },
                 required: ["estilista"]
+            }
+        }
+    },
+    // 24. generar_nomina
+    {
+        type: "function",
+        function: {
+            name: "generar_nomina",
+            description: "Genera y guarda la nómina de un estilista para un período específico. Calcula comisiones, deduce anticipos, cuotas de préstamos y compras de staff. Retorna el desglose completo.",
+            parameters: {
+                type: "object",
+                properties: {
+                    estilista: { type: "string", description: "Nombre del estilista" },
+                    fecha_inicio: { type: "string", description: "Fecha inicio en formato YYYY-MM-DD (ej: 2026-02-01)" },
+                    fecha_fin: { type: "string", description: "Fecha fin en formato YYYY-MM-DD (ej: 2026-02-28)" }
+                },
+                required: ["estilista", "fecha_inicio", "fecha_fin"]
+            }
+        }
+    },
+    // 25. ver_preview_nomina
+    {
+        type: "function",
+        function: {
+            name: "ver_preview_nomina",
+            description: "Muestra una vista previa de la nómina de un estilista SIN guardarla. Útil para revisar antes de generar.",
+            parameters: {
+                type: "object",
+                properties: {
+                    estilista: { type: "string", description: "Nombre del estilista (o 'todos' para ver todos)" },
+                    fecha_inicio: { type: "string", description: "Fecha inicio YYYY-MM-DD" },
+                    fecha_fin: { type: "string", description: "Fecha fin YYYY-MM-DD" }
+                },
+                required: ["fecha_inicio", "fecha_fin"]
+            }
+        }
+    },
+    // 26. enviar_campana_inactivos
+    {
+        type: "function",
+        function: {
+            name: "enviar_campana_inactivos",
+            description: "Crea y envía una campaña de email a clientes inactivos. Primero envía una prueba al email del admin.",
+            parameters: {
+                type: "object",
+                properties: {
+                    dias_inactividad: { type: "integer", description: "Días sin visitar (default 30)" },
+                    plantilla: { type: "string", enum: ["te_extranamos", "descuento", "nuevo_servicio"], description: "Tipo de plantilla: te_extranamos, descuento, nuevo_servicio" },
+                    asunto: { type: "string", description: "Asunto del email (opcional, se auto-genera)" },
+                    enviar_prueba: { type: "boolean", description: "Si true (default), solo envía prueba al admin. Si false, envía a todos." }
+                },
+                required: ["dias_inactividad"]
             }
         }
     }
@@ -1017,6 +1079,7 @@ async function executeFunction(fnName, args, tenantId) {
 
                 if (args.nombre) { updates.push(`name = $${paramIdx++}`); values.push(args.nombre); }
                 if (args.direccion) { updates.push(`address = $${paramIdx++}`); values.push(args.direccion); }
+                if (args.ciudad) { updates.push(`city = $${paramIdx++}`); values.push(args.ciudad); }
                 if (args.telefono) { updates.push(`phone = $${paramIdx++}`); values.push(args.telefono); }
                 if (args.email) { updates.push(`email = $${paramIdx++}`); values.push(args.email); }
                 if (args.sitio_web) { updates.push(`website = $${paramIdx++}`); values.push(args.sitio_web); }
@@ -1044,7 +1107,7 @@ async function executeFunction(fnName, args, tenantId) {
         // 21. ver_configuracion_salon
         case 'ver_configuracion_salon': {
             const { rows } = await db.query(`
-                SELECT name, address, phone, email, website, working_hours,
+                SELECT name, address, city, phone, email, website, working_hours,
                        geofence_center_lat, geofence_center_lng, geofence_radius
                 FROM tenants WHERE id = $1::uuid
             `, [tenantId]);
@@ -1070,6 +1133,7 @@ async function executeFunction(fnName, args, tenantId) {
             return {
                 nombre: t.name,
                 direccion: t.address || 'No configurada',
+                ciudad: t.city || 'No configurada',
                 telefono: t.phone || 'No configurado',
                 email: t.email || 'No configurado',
                 sitio_web: t.website || 'No configurado',
@@ -1209,6 +1273,262 @@ async function executeFunction(fnName, args, tenantId) {
             }
         }
 
+        // 24. generar_nomina
+        case 'generar_nomina': {
+            try {
+                const stRows = await prisma.$queryRawUnsafe(`
+                    SELECT id, first_name, last_name, payment_type, base_salary, commission_rate
+                    FROM users
+                    WHERE tenant_id = $1::uuid AND role_id = 3
+                      AND COALESCE(NULLIF(status,''),'active') = 'active'
+                      AND (LOWER(first_name) LIKE $2 OR LOWER(last_name) LIKE $2
+                           OR LOWER(CONCAT(first_name, ' ', last_name)) LIKE $2)
+                    LIMIT 1
+                `, tenantId, `%${args.estilista.toLowerCase()}%`);
+
+                if (!stRows.length) {
+                    return { error: `No encontré un estilista llamado "${args.estilista}".` };
+                }
+
+                const stylist = stRows[0];
+                const stylistName = `${stylist.first_name} ${stylist.last_name || ''}`.trim();
+                const startDate = new Date(args.fecha_inicio);
+                const endDate = new Date(args.fecha_fin);
+                endDate.setHours(23, 59, 59, 999);
+
+                if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+                    return { error: 'Las fechas deben estar en formato YYYY-MM-DD.' };
+                }
+
+                const breakdown = await calculateStylistPayrollBreakdown(tenantId, stylist, startDate, endDate);
+
+                // Save payroll record
+                const totalCommissions = (breakdown.details?.services || []).reduce((s, srv) => s + (srv.net_commission || 0), 0)
+                    + (breakdown.details?.products || []).reduce((s, p) => s + Number(p.commission_value || 0), 0);
+
+                await prisma.payrolls.create({
+                    data: {
+                        tenant_id: tenantId,
+                        stylist_id: stylist.id,
+                        start_date: startDate,
+                        end_date: endDate,
+                        base_salary: stylist.payment_type === 'salary' ? Number(stylist.base_salary || 0) : 0,
+                        commissions: totalCommissions,
+                        total_paid: breakdown.net_paid || 0,
+                        commission_rate_snapshot: Number(stylist.commission_rate || 0),
+                    }
+                });
+
+                return {
+                    exito: true,
+                    estilista: stylistName,
+                    periodo: `${args.fecha_inicio} a ${args.fecha_fin}`,
+                    salario_base: stylist.payment_type === 'salary' ? Number(stylist.base_salary || 0) : 0,
+                    comisiones_servicios: (breakdown.details?.services || []).reduce((s, srv) => s + (srv.net_commission || 0), 0),
+                    comisiones_productos: (breakdown.details?.products || []).reduce((s, p) => s + Number(p.commission_value || 0), 0),
+                    propinas: breakdown.stylist_tips || 0,
+                    egresos_total: (breakdown.details?.expenses || []).reduce((s, e) => s + Math.abs(Number(e.amount || 0)), 0),
+                    neto_a_pagar: breakdown.net_paid || 0,
+                    servicios_realizados: (breakdown.details?.services || []).length,
+                    mensaje: `Nómina de ${stylistName} generada y guardada. Período: ${args.fecha_inicio} a ${args.fecha_fin}. Neto a pagar: $${(breakdown.net_paid || 0).toLocaleString('es-CO')}`
+                };
+            } catch (err) {
+                return { error: `Error generando nómina: ${err.message}` };
+            }
+        }
+
+        // 25. ver_preview_nomina
+        case 'ver_preview_nomina': {
+            try {
+                const startDate = new Date(args.fecha_inicio);
+                const endDate = new Date(args.fecha_fin);
+                endDate.setHours(23, 59, 59, 999);
+
+                if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+                    return { error: 'Las fechas deben estar en formato YYYY-MM-DD.' };
+                }
+
+                let stylists;
+                if (!args.estilista || args.estilista.toLowerCase() === 'todos') {
+                    stylists = await prisma.$queryRawUnsafe(`
+                        SELECT id, first_name, last_name, payment_type, base_salary, commission_rate
+                        FROM users
+                        WHERE tenant_id = $1::uuid AND role_id = 3
+                          AND COALESCE(NULLIF(status,''),'active') = 'active'
+                        ORDER BY first_name
+                    `, tenantId);
+                } else {
+                    stylists = await prisma.$queryRawUnsafe(`
+                        SELECT id, first_name, last_name, payment_type, base_salary, commission_rate
+                        FROM users
+                        WHERE tenant_id = $1::uuid AND role_id = 3
+                          AND COALESCE(NULLIF(status,''),'active') = 'active'
+                          AND (LOWER(first_name) LIKE $2 OR LOWER(last_name) LIKE $2
+                               OR LOWER(CONCAT(first_name, ' ', last_name)) LIKE $2)
+                    `, tenantId, `%${args.estilista.toLowerCase()}%`);
+                }
+
+                if (!stylists.length) {
+                    return { error: `No encontré estilistas${args.estilista && args.estilista !== 'todos' ? ` con nombre "${args.estilista}"` : ''}.` };
+                }
+
+                const previews = [];
+                for (const st of stylists) {
+                    const breakdown = await calculateStylistPayrollBreakdown(tenantId, st, startDate, endDate);
+                    previews.push({
+                        estilista: `${st.first_name} ${st.last_name || ''}`.trim(),
+                        servicios_realizados: (breakdown.details?.services || []).length,
+                        comisiones: (breakdown.details?.services || []).reduce((s, srv) => s + (srv.net_commission || 0), 0)
+                            + (breakdown.details?.products || []).reduce((s, p) => s + Number(p.commission_value || 0), 0),
+                        propinas: breakdown.stylist_tips || 0,
+                        egresos: (breakdown.details?.expenses || []).reduce((s, e) => s + Math.abs(Number(e.amount || 0)), 0),
+                        neto_a_pagar: breakdown.net_paid || 0,
+                    });
+                }
+
+                return {
+                    periodo: `${args.fecha_inicio} a ${args.fecha_fin}`,
+                    nota: 'Esta es una VISTA PREVIA. La nómina NO ha sido guardada. Para guardarla, usa "generar nómina".',
+                    estilistas: previews,
+                    total_general: previews.reduce((s, p) => s + p.neto_a_pagar, 0),
+                };
+            } catch (err) {
+                return { error: `Error en preview de nómina: ${err.message}` };
+            }
+        }
+
+        // 26. enviar_campana_inactivos
+        case 'enviar_campana_inactivos': {
+            try {
+                const { getInactiveClients } = require('./campaignController');
+                const { sendCampaignEmail } = require('../services/emailService');
+                const { startCampaignQueue } = require('../services/campaignQueueService');
+
+                const days = args.dias_inactividad || 30;
+                const sendTest = args.enviar_prueba !== false; // default true
+                const plantilla = args.plantilla || 'te_extranamos';
+
+                const clients = await getInactiveClients(tenantId, days);
+                if (clients.length === 0) {
+                    return { mensaje: `No encontré clientes inactivos en los últimos ${days} días.` };
+                }
+
+                // Get admin info
+                const admin = await prisma.users.findFirst({
+                    where: { tenant_id: tenantId, role_id: { in: [1, 2] } },
+                    select: { id: true, email: true, first_name: true },
+                });
+
+                // Template HTML
+                const TEMPLATES = {
+                    te_extranamos: {
+                        subject: '¡Te extrañamos! Vuelve a visitarnos',
+                        html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;"><h1 style="color:#438eff;text-align:center;">Tupelukeria</h1><h2>¡Te extrañamos! 💇‍♀️</h2><p>Hola {{nombre}},</p><p>Hace tiempo que no te vemos por nuestro salón y queremos que sepas que <strong>te esperamos con los brazos abiertos</strong>.</p><p>Agenda tu próxima cita y déjanos consentirte.</p><p><strong>Tu equipo de Tupelukeria</strong></p></div>`,
+                    },
+                    descuento: {
+                        subject: '¡Descuento especial solo para ti!',
+                        html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;"><h1 style="color:#438eff;text-align:center;">Tupelukeria</h1><div style="text-align:center;background:linear-gradient(135deg,#438eff,#6366f1);border-radius:12px;padding:30px;margin-bottom:20px;"><h2 style="color:white;">🎉 ¡Descuento Especial!</h2><p style="color:rgba(255,255,255,0.9);font-size:18px;">Obtén un <strong style="font-size:24px;">15% OFF</strong> en tu próximo servicio</p></div><p>Hola {{nombre}},</p><p>Porque valoramos tu lealtad, tenemos un descuento exclusivo esperándote.</p><p><strong>Tu equipo de Tupelukeria</strong></p></div>`,
+                    },
+                    nuevo_servicio: {
+                        subject: '¡Conoce nuestro nuevo servicio!',
+                        html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;"><h1 style="color:#438eff;text-align:center;">Tupelukeria</h1><h2>✨ ¡Nuevo Servicio Disponible!</h2><p>Hola {{nombre}},</p><p>Estamos emocionados de anunciar que hemos incorporado un <strong>nuevo servicio</strong> a nuestro catálogo. Sé de los primeros en probarlo.</p><p><strong>Tu equipo de Tupelukeria</strong></p></div>`,
+                    },
+                };
+                const tpl = TEMPLATES[plantilla] || TEMPLATES.te_extranamos;
+                const subject = args.asunto || tpl.subject;
+
+                if (sendTest) {
+                    // Create campaign as draft + send test to admin
+                    const campaign = await prisma.campaigns.create({
+                        data: {
+                            tenant_id: tenantId,
+                            name: `Campaña inactivos (${days} días) - ${new Date().toLocaleDateString('es-CO')}`,
+                            subject,
+                            html_content: tpl.html,
+                            target_criteria: { inactive_days: days },
+                            total_recipients: clients.length,
+                            created_by_user_id: admin?.id,
+                        },
+                    });
+
+                    // Create recipients
+                    if (clients.length > 0) {
+                        await prisma.campaign_recipients.createMany({
+                            data: clients.map(c => ({
+                                campaign_id: campaign.id,
+                                user_id: c.id,
+                                email: c.email,
+                                recipient_name: [c.first_name, c.last_name].filter(Boolean).join(' '),
+                            })),
+                        });
+                    }
+
+                    // Send test email to admin
+                    if (admin?.email) {
+                        await sendCampaignEmail({
+                            to: admin.email,
+                            subject: `[PRUEBA] ${subject}`,
+                            html: tpl.html,
+                            recipientName: admin.first_name || 'Admin',
+                        });
+                    }
+
+                    return {
+                        mensaje: `Encontré ${clients.length} clientes inactivos en los últimos ${days} días. Envié una prueba a ${admin?.email || 'tu email'}. La campaña quedó guardada como borrador. ¿Quiere que la envíe a todos?`,
+                        clientes_inactivos: clients.length,
+                        campaign_id: campaign.id,
+                        prueba_enviada: true,
+                    };
+                } else {
+                    // Find existing draft campaign or create and send
+                    let campaign = await prisma.campaigns.findFirst({
+                        where: { tenant_id: tenantId, status: 'draft' },
+                        orderBy: { created_at: 'desc' },
+                    });
+
+                    if (!campaign) {
+                        campaign = await prisma.campaigns.create({
+                            data: {
+                                tenant_id: tenantId,
+                                name: `Campaña inactivos (${days} días) - ${new Date().toLocaleDateString('es-CO')}`,
+                                subject,
+                                html_content: tpl.html,
+                                target_criteria: { inactive_days: days },
+                                total_recipients: clients.length,
+                                created_by_user_id: admin?.id,
+                            },
+                        });
+                        if (clients.length > 0) {
+                            await prisma.campaign_recipients.createMany({
+                                data: clients.map(c => ({
+                                    campaign_id: campaign.id,
+                                    user_id: c.id,
+                                    email: c.email,
+                                    recipient_name: [c.first_name, c.last_name].filter(Boolean).join(' '),
+                                })),
+                            });
+                        }
+                    }
+
+                    // Start sending
+                    await prisma.campaigns.update({
+                        where: { id: campaign.id },
+                        data: { status: 'sending', updated_at: new Date() },
+                    });
+                    startCampaignQueue(campaign.id, null);
+
+                    return {
+                        mensaje: `¡Listo! Inicié el envío de la campaña a ${campaign.total_recipients} clientes inactivos. Puede ver el progreso en el panel de CRM → Campañas.`,
+                        clientes: campaign.total_recipients,
+                        campaign_id: campaign.id,
+                        enviando: true,
+                    };
+                }
+            } catch (err) {
+                return { error: `Error en campaña de inactivos: ${err.message}` };
+            }
+        }
+
         default:
             return { error: `Función desconocida: ${fnName}` };
     }
@@ -1294,12 +1614,26 @@ ESTADO ACTUAL DEL SETUP:
 
 ${nextStep}
 
+IMPORTAR DESDE EXCEL:
+- Si el jefe pregunta por importar Excel, datos masivos o cargar archivos, dile: "Jefe, para importar un Excel usa el botón de clip/adjuntos (📎) que está al lado del campo de texto. Acepto cualquier formato y detecto automáticamente si son clientes, estilistas, servicios o productos."
+- NO digas que no puedes importar Excel. El sistema SÍ lo soporta via el botón de adjuntos.
+
+PLANES Y PRECIOS:
+- Si el jefe pregunta por planes, precios o funciones:
+  * Gratis ($0): Configurar salon, importar datos, calendario basico.
+  * Pro ($29.900/mes): + Asistente IA de agendamiento (crear/ver citas), geolocalizacion, digiturno, nomina, inventario, crear recepcionistas.
+  * Business ($49.900/mes): + Asistente IA completo (ventas, rendimiento, productos) + Bot WhatsApp con IA.
+  * Enterprise ($99.900/mes): + Multiples sucursales + Estilistas compartidos entre sedes.
+- El asistente de agendamiento (crear citas, ver agenda) se desbloquea en el plan Pro ($29.900/mes).
+- El asistente completo (ventas, rendimiento, productos, nomina) se desbloquea en el plan Business ($49.900/mes).
+- Enlace: "Ve a Configuración → Planes" o [Configuración → Planes](/settings).
+
 REGLAS IMPORTANTES:
 - Guía al jefe paso a paso. NO lo abrumes con todo a la vez.
 - Si te saluda o es el primer mensaje, dale la bienvenida y muestra el progreso, luego guíalo al siguiente paso.
 - Cuando el jefe dé los datos, EJECUTA la función inmediatamente. No pidas confirmación más de una vez.
 - Si el jefe quiere saltar pasos o preguntar otra cosa, responde pero recuérdale amablemente qué falta por configurar.
-- Cuando TODOS los pasos estén completados, celebra y dile: "¡Tu salón está listo! 🎊 Tu plan actual es GRATIS. Si necesitas más funciones como inventario, nómina o WhatsApp bot, ve a Configuración → Planes."
+- Cuando TODOS los pasos estén completados, celebra y dile: "¡Tu salón está listo! 🎊 Tu plan actual es GRATIS. Para el asistente de agendamiento necesitas el plan Pro ($29.900/mes). Para el asistente completo necesitas el plan Business ($49.900/mes). Ve a Configuración → Planes."
 
 EJECUCIÓN DE FUNCIONES:
 - Cuando el jefe confirme un cambio (dice "sí", "dale", "hazlo"), EJECUTA la función INMEDIATAMENTE.
@@ -1322,18 +1656,49 @@ exports.chat = async (req, res) => {
             return res.status(400).json({ error: 'El mensaje no puede estar vacío.' });
         }
 
+        // Check tenant setup status for onboarding
+        const setupStatus = await checkTenantSetup(tenantId);
+
+        // Plan check: restrict AI by plan level
+        const tenantPlan = await getTenantPlan(tenantId);
+
+        // Free plan + setup complete → block entirely
+        if (tenantPlan === 'free' && setupStatus.isComplete) {
+            return res.json({
+                response: `Jefe, en el plan **Gratis** solo puedo ayudarte a configurar tu salon (servicios, estilistas, horarios e importar datos).
+
+Para que te ayude con **agendamiento** (crear citas, ver agenda, consultar horarios), necesitas el plan **Pro** ($29.900/mes).
+
+Para el **asistente completo** (ventas, rendimiento, productos, nomina y mas), necesitas el plan **Business** ($49.900/mes).
+
+👉 Ve a [Configuracion → Planes](/settings) para subir de plan.`,
+                functionExecuted: null,
+            });
+        }
+
         const apiKey = await getGlobalOpenAIKey();
         if (!apiKey) {
             return res.status(500).json({ error: 'No hay API key de OpenAI configurada.' });
         }
 
-        // Check tenant setup status for onboarding
-        const setupStatus = await checkTenantSetup(tenantId);
+        // Pro plan: only scheduling tools. Business+: all tools.
+        const SCHEDULING_TOOL_NAMES = [
+            'ver_citas_hoy', 'ver_agenda_fecha', 'crear_cita',
+            'listar_servicios', 'listar_estilistas', 'ver_horario_estilista',
+        ];
+        const isProOnly = tenantPlan === 'pro' && setupStatus.isComplete;
+        const toolsForPlan = isProOnly
+            ? ADMIN_TOOLS.filter(t => SCHEDULING_TOOL_NAMES.includes(t.function.name))
+            : ADMIN_TOOLS;
+
+        const proSystemNote = isProOnly
+            ? `\n\nIMPORTANTE: Este salon tiene plan Pro. SOLO puedes ayudar con agendamiento: ver citas, crear citas, consultar servicios, estilistas y horarios. Si el jefe pregunta por ventas, productos, rendimiento, nomina u otra funcion avanzada, responde amablemente que esas funciones estan disponibles desde el plan Business ($49.900/mes) y sugiere ir a Configuracion → Planes.`
+            : '';
 
         // Construir mensajes
         const now = formatInTimeZone(new Date(), TIME_ZONE, 'yyyy-MM-dd hh:mm a');
         const systemPrompt = setupStatus.isComplete
-            ? `${ADMIN_SYSTEM_PROMPT}\n\nFecha/hora actual: ${now}`
+            ? `${ADMIN_SYSTEM_PROMPT}${proSystemNote}\n\nFecha/hora actual: ${now}`
             : `${buildOnboardingPrompt(setupStatus)}\n\nFecha/hora actual: ${now}`;
 
         const messages = [
@@ -1349,7 +1714,7 @@ exports.chat = async (req, res) => {
             body: JSON.stringify({
                 model: 'gpt-4o-mini',
                 messages,
-                tools: ADMIN_TOOLS,
+                tools: toolsForPlan,
                 tool_choice: 'auto',
                 temperature: 0.5,
                 max_tokens: 800

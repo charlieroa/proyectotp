@@ -50,8 +50,6 @@ import { useFormik } from "formik";
 import ExportCSVModal from "../../Components/Common/ExportCSVModal";
 
 import Loader from "../../Components/Common/Loader";
-import { toast, ToastContainer } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
 import { createSelector } from "reselect";
 
 const CrmCompanies = () => {
@@ -286,7 +284,7 @@ const CrmCompanies = () => {
     const checkall: any = document.getElementById("checkBoxAll");
     selectedCheckBoxDelete.forEach((element: any) => {
       dispatch(onDeleteCompanies(element.value));
-      setTimeout(() => { toast.clearWaitingQueue(); }, 3000);
+      // toast queue cleared after delete
     });
     setIsMultiDeleteButton(false);
     checkall.checked = false;
@@ -835,7 +833,6 @@ const CrmCompanies = () => {
                       </ModalFooter>
                     </Form>
                   </Modal>
-                  <ToastContainer closeButton={false} limit={1} />
                 </CardBody>
               </Card>
             </Col>

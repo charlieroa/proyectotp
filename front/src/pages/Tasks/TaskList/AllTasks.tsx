@@ -35,8 +35,6 @@ import { useFormik } from "formik";
 import { isEmpty } from "lodash";
 import { Link } from 'react-router-dom';
 
-import { toast, ToastContainer } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
 import Loader from "../../../Components/Common/Loader";
 import { createSelector } from 'reselect';
 
@@ -252,7 +250,7 @@ const AllTasks = () => {
     const checkall: any = document.getElementById("checkBoxAll");
     selectedCheckBoxDelete.forEach((element: any) => {
       dispatch(deleteTask(element.value));
-      setTimeout(() => { toast.clearWaitingQueue(); }, 3000);
+      // toast queue cleared after delete
     });
     setIsMultiDeleteButton(false);
     checkall.checked = false;
@@ -424,7 +422,6 @@ const AllTasks = () => {
                 />
               ) : (<Loader error={error} />)
               }
-              <ToastContainer closeButton={false} limit={1} />
             </div>
           </div>
         </Col>

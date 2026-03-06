@@ -33,9 +33,6 @@ const PLAN_NAMES: Record<string, string> = {
 
 const LayoutMenuData = () => {
     const history = useNavigate();
-    const [isDashboard, setIsDashboard] = useState<boolean>(false);
-    const [isEstilistas, setIsEstilistas] = useState<boolean>(false);
-    const [isInventario, setIsInventario] = useState<boolean>(false);
     const [iscurrentState, setIscurrentState] = useState("Dashboard");
 
     const userRole = getRoleFromToken();
@@ -46,36 +43,53 @@ const LayoutMenuData = () => {
 
     useEffect(() => {
         document.body.classList.remove("twocolumn-panel");
-        if (iscurrentState !== "Dashboard") { setIsDashboard(false); }
-        if (iscurrentState !== "Estilistas") { setIsEstilistas(false); }
-        if (iscurrentState !== "Inventario") { setIsInventario(false); }
-    }, [history, iscurrentState, isDashboard, isEstilistas, isInventario]);
+    }, [iscurrentState]);
 
+    // Helper to apply plan lock to an item
+    const applyPlanLock = (item: any) => {
+        const minPlan = item.minPlan || 'free';
+        if (!isPlanAtLeast(tenantPlan, minPlan)) {
+            return {
+                ...item,
+                disabled: true,
+                badge: PLAN_NAMES[minPlan] || minPlan,
+                badgeColor: 'warning',
+                onClick: () => {
+                    Swal.fire({
+                        title: `Disponible en plan ${PLAN_NAMES[minPlan] || minPlan}`,
+                        text: `Esta función requiere el plan ${PLAN_NAMES[minPlan] || minPlan} o superior. Ve a Configuración → Planes para actualizar.`,
+                        icon: 'info',
+                        confirmButtonText: 'Ver planes',
+                        showCancelButton: true,
+                        cancelButtonText: 'Cerrar',
+                        confirmButtonColor: '#438eff'
+                    }).then((result) => {
+                        if (result.isConfirmed) {
+                            history('/settings?tab=6');
+                        }
+                    });
+                }
+            };
+        }
+        return item;
+    };
 
-    const menuItems: any[] = [
-        { label: "Menú Principal", isHeader: true },
-        { id: "ai-assistant", label: "Asistente IA", icon: "ri-sparkling-line", link: "/assistant", roles: [1, 2, 3], minPlan: "free" },
-        { id: "dashboard", label: "Dashboard", icon: "ri-dashboard-2-line", link: "/dashboard", roles: [1, 2, 3], minPlan: "free" },
-        { id: "stylists", label: "Crm", icon: "ri-user-heart-line", link: "/stylists", roles: [1, 3], minPlan: "free" },
-        { id: "inventory", label: "Inventario", icon: "ri-archive-line", link: "/inventory", roles: [1], minPlan: "pro" },
-        { id: "payroll", label: "Nómina", icon: "ri-money-dollar-circle-line", link: "/payroll", roles: [1], minPlan: "pro" },
-        { id: "settings", label: "Configuración", icon: "ri-settings-3-line", link: "/settings", roles: [1], minPlan: "free" },
-     {
-        id: "show-tour",
-        label: "Mostrar Tour",
-        icon: "ri-question-line",
-        link: "#!",
-        roles: [1],
-        isAction: true,
-        minPlan: "free"
-    },
-    // Super Admin (role 5)
-    { label: "Super Admin", isHeader: true, roles: [5] },
-    { id: "super-admin", label: "Panel Super Admin", icon: "ri-shield-star-line", link: "/super-admin", roles: [5] },
-    ];
+    // Step 1: Build static menu structure (filtered by role + plan + setup) — memoized
+    const filteredMenuItems = useMemo(() => {
+        const menuItems: any[] = [
+            { label: "Menú Principal", isHeader: true },
+            { id: "dashboard", label: "Dashboard", icon: "ri-dashboard-2-line", link: "/dashboard", roles: [1, 2, 3, 6], minPlan: "free" },
+            { id: "fichero", label: "Fichero", icon: "ri-list-ordered", link: "/fichero", roles: [1, 2], minPlan: "pro" },
+            { id: "crm", label: "CRM", icon: "ri-user-heart-line", link: "/crm", roles: [1, 3], minPlan: "free" },
+            { id: "messages", label: "Mensajes", icon: "ri-message-3-line", link: "/messages", roles: [1, 2, 6], minPlan: "business" },
+            { id: "inventory", label: "Inventario", icon: "ri-archive-line", link: "/inventory", roles: [1], minPlan: "pro" },
+            { id: "payroll", label: "Nómina", icon: "ri-money-dollar-circle-line", link: "/payroll", roles: [1], minPlan: "pro" },
+            { id: "settings", label: "Configuración", icon: "ri-settings-3-line", link: "/settings", roles: [1], minPlan: "free" },
+            // Super Admin (role 5)
+            { label: "Super Admin", isHeader: true, roles: [5] },
+            { id: "super-admin", label: "Panel Super Admin", icon: "ri-shield-star-line", link: "/super-admin", roles: [5] },
+        ];
 
-    // Filtramos y modificamos el menú
-    const finalMenuItems = useMemo(() => {
         if (!userRole) return [];
 
         const roleFiltered = menuItems.filter(item => {
@@ -83,25 +97,31 @@ const LayoutMenuData = () => {
             return item.roles.includes(userRole);
         });
 
-        // Super admin (role 5) no tiene restricciones de plan ni setup
-        if (userRole === 5) {
-            return roleFiltered;
-        }
+        // Super admin (role 5) no tiene restricciones
+        if (userRole === 5) return roleFiltered;
+
+        // Cajero (role 2), estilista (role 3) y cajera (role 6) no tienen restricción de setup, solo de plan
+        const skipSetupCheck = userRole === 2 || userRole === 3 || userRole === 6;
 
         return roleFiltered.map(item => {
-            // Headers y super admin items pasan sin cambio
             if (item.isHeader || !item.id) return item;
+            if (item.id === 'settings') return item;
 
-            // Settings y Asistente siempre accesibles
-            if (item.id === 'settings' || item.id === 'ai-assistant') return item;
+            let processedItem = { ...item };
 
-            // Verificar restricción de plan (tiene prioridad visual sobre setup)
-            const minPlan = item.minPlan || 'free';
+            // Process subItems for plan locks
+            if (processedItem.subItems) {
+                processedItem.subItems = processedItem.subItems.map((sub: any) => applyPlanLock(sub));
+            }
+
+            // Verificar restricción de plan para el item padre
+            const minPlan = processedItem.minPlan || 'free';
             if (!isPlanAtLeast(tenantPlan, minPlan)) {
                 return {
-                    ...item,
+                    ...processedItem,
                     icon: 'ri-lock-line',
                     disabled: true,
+                    subItems: undefined,
                     badge: PLAN_NAMES[minPlan] || minPlan,
                     badgeColor: 'warning',
                     onClick: () => {
@@ -122,12 +142,13 @@ const LayoutMenuData = () => {
                 };
             }
 
-            // Si setup no está completo, bloquear items que no sean settings
-            if (!isSetupComplete) {
+            // Si setup no está completo, bloquear (solo para admin, rol 1)
+            if (!skipSetupCheck && !isSetupComplete) {
                 return {
-                    ...item,
+                    ...processedItem,
                     icon: 'ri-lock-line',
                     disabled: true,
+                    subItems: undefined,
                     onClick: () => {
                         Swal.fire({
                             title: 'Configuración Incompleta',
@@ -140,11 +161,11 @@ const LayoutMenuData = () => {
                 };
             }
 
-            return item;
+            return processedItem;
         });
     }, [userRole, isSetupComplete, tenantPlan]);
 
-    return <React.Fragment>{finalMenuItems}</React.Fragment>;
+    return <React.Fragment>{filteredMenuItems}</React.Fragment>;
 };
 
 export default LayoutMenuData;

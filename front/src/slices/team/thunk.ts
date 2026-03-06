@@ -1,6 +1,5 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
-import { toast } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
+import { sileo } from 'sileo';
 
 //Include Both Helper File with needed methods
 import {
@@ -22,10 +21,10 @@ export const getTeamData = createAsyncThunk("team/getTeamData", async () => {
 export const addTeamData = createAsyncThunk("team/addTeamData", async (team : any) => {
     try {
         const response = addTeamDataApi(team);
-        toast.success("Team Data Added Successfully", { autoClose: 3000 });
+        sileo.success({ title: "Datos de equipo agregados" });
         return response;
     } catch (error) {
-        toast.error("Team Data Added Failed", { autoClose: 3000 });
+        sileo.error({ title: "Error al agregar datos de equipo" });
         return error;
     }
 });
@@ -33,10 +32,10 @@ export const addTeamData = createAsyncThunk("team/addTeamData", async (team : an
 export const updateTeamData = createAsyncThunk("team/updateTeamData", async (project : any) => {
     try {
         const response = updateTeamDataApi(project);
-        toast.success("Team Data Updated Successfully", { autoClose: 3000 });
+        sileo.success({ title: "Datos de equipo actualizados" });
         return response;
     } catch (error) {
-        toast.error("Team Data Updated Failed", { autoClose: 3000 });
+        sileo.error({ title: "Error al actualizar datos de equipo" });
         return error;
     }
 });
@@ -44,10 +43,10 @@ export const updateTeamData = createAsyncThunk("team/updateTeamData", async (pro
 export const deleteTeamData = createAsyncThunk("team/deleteTeamData", async (project : any) => {
     try {
         const response = deleteTeamDataApi(project);
-        toast.success("Team Data Delete Successfully", { autoClose: 3000 });
+        sileo.success({ title: "Datos de equipo eliminados" });
         return response;
     } catch (error) {
-        toast.error("Team Data Delete Failed", { autoClose: 3000 });
+        sileo.error({ title: "Error al eliminar datos de equipo" });
         return error;
     }
 });

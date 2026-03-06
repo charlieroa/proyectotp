@@ -34,6 +34,11 @@ const aiChatRoutes = require('./routes/aiChatRoutes'); // ✅ Chat con IA (OpenA
 const aiAdminChatRoutes = require('./routes/aiAdminChatRoutes'); // ✅ Chat IA Admin (18 funciones)
 const superAdminRoutes = require('./routes/superAdminRoutes'); // ✅ Super Admin
 const bulkImportRoutes = require('./routes/bulkImportRoutes'); // ✅ Bulk import Excel
+const campaignRoutes = require('./routes/campaignRoutes'); // ✅ Campañas CRM
+const whatsappConversationRoutes = require('./routes/whatsappConversationRoutes'); // ✅ WhatsApp Handoff
+const ficheroRoutes = require('./routes/ficheroRoutes'); // ✅ Fichero digital (cola de turnos)
+const stripeRoutes = require('./routes/stripeRoutes'); // ✅ Stripe Checkout
+const { handleWebhook } = require('./controllers/stripeController'); // ✅ Stripe Webhook
 const { uploadTenantLogo, uploadTenantBrochure, deleteTenantBrochure } = require('./controllers/tenantController');
 
 // Inicialización de la aplicación Express
@@ -77,6 +82,11 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+
+/* =======================================
+   💳 STRIPE WEBHOOK (raw body, ANTES de express.json)
+======================================= */
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), handleWebhook);
 
 /* =======================================
    🚀 MIDDLEWARES ESENCIALES
@@ -140,6 +150,10 @@ app.use('/api/ai-chat', aiChatRoutes); // ✅ Chat con IA (OpenAI + Orquestador)
 app.use('/api/ai-admin-chat', aiAdminChatRoutes); // ✅ Chat IA Admin (18 funciones)
 app.use('/api/super-admin', superAdminRoutes); // ✅ Super Admin panel
 app.use('/api/bulk-import', bulkImportRoutes); // ✅ Bulk import Excel
+app.use('/api/campaigns', campaignRoutes); // ✅ Campañas CRM
+app.use('/api/whatsapp-conversations', whatsappConversationRoutes); // ✅ WhatsApp Handoff
+app.use('/api/fichero', ficheroRoutes); // ✅ Fichero digital (cola de turnos)
+app.use('/api/stripe', stripeRoutes); // ✅ Stripe Checkout (rutas protegidas)
 app.post('/api/tenants/:tenantId/logo', upload.single('logo'), uploadTenantLogo);
 app.post('/api/tenants/:tenantId/brochure', brochureUpload.single('brochure'), uploadTenantBrochure);
 app.delete('/api/tenants/:tenantId/brochure', deleteTenantBrochure);
@@ -175,10 +189,28 @@ app.use((err, req, res, next) => {
 const server = http.createServer(app);
 
 // Inicializa Socket.IO usando los mismos orígenes permitidos
-initSocket(server, allowedOrigins);
+const io = initSocket(server, allowedOrigins);
+
+// Pass IO to campaign controller for real-time updates
+const { setIO: setCampaignIO } = require('./controllers/campaignController');
+setCampaignIO(io);
 
 const { startReminderScheduler } = require('./services/appointmentReminder');
 startReminderScheduler();
+
+// Preload handoff cache from DB
+const prismaClient = require('./config/prisma');
+const { setHandoff: setHandoffCache } = require('./services/handoffCache');
+prismaClient.whatsapp_conversations.findMany({ where: { status: 'handoff' }, select: { tenant_id: true, chat_id: true } })
+  .then(rows => {
+    rows.forEach(r => setHandoffCache(r.tenant_id, r.chat_id));
+    if (rows.length > 0) console.log(`🤝 [HANDOFF] Precargadas ${rows.length} conversaciones en handoff`);
+  })
+  .catch(err => console.error('❌ [HANDOFF] Error precargando cache:', err.message));
+
+// Preload Stripe prices
+const { ensureStripePrices } = require('./config/stripePrices');
+ensureStripePrices().catch(err => console.error('❌ [Stripe] Error cargando precios:', err.message));
 
 server.listen(PORT, () => {
   console.log(`🚀 API + WebSockets escuchando en el puerto ${PORT}`);

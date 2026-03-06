@@ -1,6 +1,5 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
-import { toast } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
+import { sileo } from 'sileo';
 
 //Include Both Helper File with needed methods
 import {
@@ -24,10 +23,10 @@ export const getMailDetails = createAsyncThunk("mailbox/getMailDetails", async (
 export const unreadMail = createAsyncThunk("mailbox/unreadMail", async (mail: any) => {
   try {
     const response = unreadMailApi(mail);
-    // toast.success("Mail Added Favorite Successfully", { autoClose: 3000 });
+    // sileo.success({ title: "Mail Added Favorite Successfully" });
     return response;
   } catch (error) {
-    // toast.error("Mail Added Favorite Failed", { autoClose: 3000 });
+    // sileo.error({ title: "Mail Added Favorite Failed" });
     return error;
   }
 });
@@ -35,10 +34,10 @@ export const unreadMail = createAsyncThunk("mailbox/unreadMail", async (mail: an
 export const staredMail = createAsyncThunk("mailbox/staredMail", async (mail: any) => {
   try {
     const response = staredMailApi(mail);
-    // toast.success("Mail Added Favorite Successfully", { autoClose: 3000 });
+    // sileo.success({ title: "Mail Added Favorite Successfully" });
     return response;
   } catch (error) {
-    // toast.error("Mail Added Favorite Failed", { autoClose: 3000 });
+    // sileo.error({ title: "Mail Added Favorite Failed" });
     return error;
   }
 });
@@ -46,10 +45,10 @@ export const staredMail = createAsyncThunk("mailbox/staredMail", async (mail: an
 export const trashMail = createAsyncThunk("mailbox/trashMail", async (mail: any) => {
   try {
     const response = trashMailApi(mail);
-    toast.success("Mail Moved Trash Successfully", { autoClose: 3000 });
+    sileo.success({ title: "Mail Moved Trash Successfully" });
     return response;
   } catch (error) {
-    toast.error("Mail Moved Trash Failed", { autoClose: 3000 });
+    sileo.error({ title: "Mail Moved Trash Failed" });
     return error;
   }
 });
@@ -57,10 +56,10 @@ export const trashMail = createAsyncThunk("mailbox/trashMail", async (mail: any)
 export const deleteMail = createAsyncThunk("mailbox/deleteMail", async (mail: any) => {
   try {
     const response = deleteMailApi(mail);
-    toast.success("Mail Delete Successfully", { autoClose: 3000 });
+    sileo.success({ title: "Mail Delete Successfully" });
     return response;
   } catch (error) {
-    toast.error("Mail Delete Failed", { autoClose: 3000 });
+    sileo.error({ title: "Mail Delete Failed" });
     return error;
   }
 });

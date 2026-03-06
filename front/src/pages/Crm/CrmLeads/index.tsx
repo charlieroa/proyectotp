@@ -48,8 +48,6 @@ import * as Yup from "yup";
 import { useFormik } from "formik";
 
 import Loader from "../../../Components/Common/Loader";
-import { toast, ToastContainer } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
 import { createSelector } from "reselect";
 
 const CrmLeads = () => {
@@ -290,7 +288,7 @@ const CrmLeads = () => {
     const checkall: any = document.getElementById("checkBoxAll");
     selectedCheckBoxDelete.forEach((element: any) => {
       dispatch(onDeleteLead(element.value));
-      setTimeout(() => { toast.clearWaitingQueue(); }, 3000);
+      // toast queue cleared after delete
     });
     setIsMultiDeleteButton(false);
     checkall.checked = false;
@@ -802,7 +800,6 @@ const CrmLeads = () => {
                       </ModalFooter>
                     </Form>
                   </Modal>
-                  <ToastContainer closeButton={false} limit={1} />
                 </CardBody>
               </Card>
             </Col>

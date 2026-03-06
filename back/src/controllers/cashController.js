@@ -2,6 +2,7 @@
 // File: src/controllers/cashController.js
 // =============================================
 const prisma = require('../config/prisma');
+const { canAccessTenant } = require('./ficheroController');
 
 // =============================================
 // ===          FUNCIONES DE SESIONES          ===
@@ -259,5 +260,88 @@ exports.getCashMovements = async (req, res) => {
     } catch (error) {
         console.error('Error al obtener movimientos de caja:', error);
         res.status(500).json({ error: 'Error interno del servidor.' });
+    }
+};
+
+// GET /api/cash/all-branches - Summary of cash sessions across all branches (primary only)
+exports.getAllBranchesCash = async (req, res) => {
+    const { tenant_id } = req.user;
+
+    try {
+        // Verify this tenant has manage_all_branches_cash enabled
+        const tenant = await prisma.tenants.findUnique({
+            where: { id: tenant_id },
+            select: { manage_all_branches_cash: true, is_primary_branch: true, parent_tenant_id: true }
+        });
+
+        if (!tenant?.manage_all_branches_cash) {
+            return res.status(403).json({ error: 'No tienes habilitada la gestion de caja multi-sucursal.' });
+        }
+
+        // Get all related branches (children of same parent, or children of this tenant)
+        const parentId = tenant.parent_tenant_id || tenant_id;
+        const branches = await prisma.tenants.findMany({
+            where: {
+                OR: [
+                    { id: parentId },
+                    { parent_tenant_id: parentId }
+                ]
+            },
+            select: { id: true, name: true, branch_color: true }
+        });
+
+        const branchIds = branches.map(b => b.id);
+
+        // Get current open sessions for all branches
+        const sessions = await prisma.$queryRawUnsafe(
+            `SELECT s.id, s.tenant_id, s.status, s.opened_at, s.initial_amount,
+                    u.first_name || ' ' || u.last_name as opener_name,
+                    COALESCE(
+                        (SELECT SUM(amount) FROM cash_movements WHERE cash_session_id = s.id AND type = 'income' AND payment_method = 'cash'), 0
+                    ) as cash_incomes,
+                    COALESCE(
+                        (SELECT SUM(amount) FROM cash_movements WHERE cash_session_id = s.id AND type IN ('expense', 'payroll_advance') AND payment_method = 'cash'), 0
+                    ) as cash_expenses,
+                    (SELECT COUNT(DISTINCT invoice_id) FROM cash_movements WHERE cash_session_id = s.id AND invoice_id IS NOT NULL)::int as invoice_count
+             FROM cash_sessions s
+             JOIN users u ON s.opened_by_user_id = u.id
+             WHERE s.tenant_id = ANY($1::uuid[]) AND s.status = 'OPEN'`,
+            branchIds
+        );
+
+        const result = branches.map(branch => {
+            const session = sessions.find(s => s.tenant_id === branch.id);
+            if (!session) {
+                return {
+                    tenant_id: branch.id,
+                    branch_name: branch.name,
+                    branch_color: branch.branch_color,
+                    status: 'CLOSED',
+                    session: null
+                };
+            }
+
+            const expectedCash = Number(session.initial_amount) + Number(session.cash_incomes) + Number(session.cash_expenses);
+
+            return {
+                tenant_id: branch.id,
+                branch_name: branch.name,
+                branch_color: branch.branch_color,
+                status: 'OPEN',
+                session: {
+                    id: session.id,
+                    opened_at: session.opened_at,
+                    opener_name: session.opener_name,
+                    initial_amount: Number(session.initial_amount),
+                    expected_cash_amount: expectedCash,
+                    invoice_count: session.invoice_count
+                }
+            };
+        });
+
+        return res.status(200).json(result);
+    } catch (error) {
+        console.error('Error getting all branches cash:', error);
+        return res.status(500).json({ error: 'Error interno del servidor.' });
     }
 };

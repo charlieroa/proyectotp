@@ -33,7 +33,6 @@ import { createSelector } from "reselect";
 import { useSelector, useDispatch } from "react-redux";
 import { getMailDetails, unreadMail, staredMail, labelMail, trashMail, deleteMail } from '../../slices/thunks';
 
-import { ToastContainer, toast } from 'react-toastify';
 
 const EmailToolbar = () => {
 
@@ -271,7 +270,6 @@ const EmailToolbar = () => {
             
         });
         
-        setTimeout(() => { toast.clearWaitingQueue(); }, 3000);
         checkall.checked = false;
         ele.style.display = 'none';
 
@@ -519,7 +517,6 @@ const EmailToolbar = () => {
 
     return (
         <React.Fragment>
-            <ToastContainer closeButton={false} limit={1} />
             <DeleteModal
                 show={deleteModal}
                 onDeleteClick={() => {

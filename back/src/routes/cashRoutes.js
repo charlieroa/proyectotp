@@ -11,6 +11,9 @@ const { authorize } = require('../middleware/permissionsMiddleware');
 // Aplicamos autenticación a todas las rutas de este archivo
 router.use(authMiddleware);
 
+// --- Ruta multi-sucursal (ANTES de las rutas con params) ---
+router.get('/all-branches', authorize([]), cashController.getAllBranchesCash);
+
 // --- Rutas para GESTIÓN DE SESIONES de Caja ---
 router.post('/open', authorize([2]), cashController.openCashSession);
 router.post('/close', authorize([2]), cashController.closeCashSession);

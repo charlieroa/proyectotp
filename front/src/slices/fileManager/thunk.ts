@@ -1,6 +1,5 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
-import { toast } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
+import { sileo } from 'sileo';
 
 //Include Both Helper File with needed methods
 import {
@@ -27,10 +26,10 @@ export const getFolders = createAsyncThunk("fileManager/getFolders", async () =>
 export const addNewFolder = createAsyncThunk("fileManager/addNewFolder", async (folder : any) => {
   try {
     const response = addNewFolderApi(folder);
-    toast.success("Folder Added Successfully", { autoClose: 3000 });
+    sileo.success({ title: "Carpeta agregada correctamente" });
     return response;
   } catch (error) {
-    toast.error("Folder Added Failed", { autoClose: 3000 });
+    sileo.error({ title: "Error al agregar carpeta" });
     return error;
   }
 });
@@ -38,10 +37,10 @@ export const addNewFolder = createAsyncThunk("fileManager/addNewFolder", async (
 export const updateFolder = createAsyncThunk("fileManager/updateFolder", async (folder : any) => {
   try {
     const response = updateFolderApi(folder);
-    toast.success("Folder Updated Successfully", { autoClose: 3000 });
+    sileo.success({ title: "Carpeta actualizada correctamente" });
     return response;
   } catch (error) {
-    toast.error("Folder Updated Failed", { autoClose: 3000 });
+    sileo.error({ title: "Error al actualizar carpeta" });
     return error;
   }
 });
@@ -49,10 +48,10 @@ export const updateFolder = createAsyncThunk("fileManager/updateFolder", async (
 export const deleteFolder = createAsyncThunk("fileManager/deleteFolder", async (folder : any) => {
   try {
     const response = deleteFolderApi(folder);
-    toast.success("Order Deleted Successfully", { autoClose: 3000 });
+    sileo.success({ title: "Eliminado correctamente" });
     return response;
   } catch (error) {
-    toast.error("Order Deleted Failed", { autoClose: 3000 });
+    sileo.error({ title: "Error al eliminar" });
     return error;
   }
 });
@@ -69,10 +68,10 @@ export const getFiles = createAsyncThunk("fileManager/getFiles", async () => {
 export const addNewFile = createAsyncThunk("fileManager/addNewFile", async (file : any) => {
   try {
     const response = addNewFileApi(file);
-    toast.success("File Added Successfully", { autoClose: 3000 });
+    sileo.success({ title: "Archivo agregado correctamente" });
     return response;
   } catch (error) {
-    toast.error("File Added Failed", { autoClose: 3000 });
+    sileo.error({ title: "Error al agregar archivo" });
     return error;
   }
 });
@@ -80,10 +79,10 @@ export const addNewFile = createAsyncThunk("fileManager/addNewFile", async (file
 export const updateFile = createAsyncThunk("fileManager/updateFile", async (file : any) => {
   try {
     const response = updateFileApi(file);
-    toast.success("File Updated Successfully", { autoClose: 3000 });
+    sileo.success({ title: "Archivo actualizado correctamente" });
     return response;
   } catch (error) {
-    toast.error("File Updated Failed", { autoClose: 3000 });
+    sileo.error({ title: "Error al actualizar archivo" });
     return error;
   }
 });
@@ -91,10 +90,10 @@ export const updateFile = createAsyncThunk("fileManager/updateFile", async (file
 export const deleteFile = createAsyncThunk("fileManager/deleteFile", async (file : any) => {
   try {
     const response = deleteFileApi(file);
-    toast.success("File Delete Successfully", { autoClose: 3000 });
+    sileo.success({ title: "Archivo eliminado correctamente" });
     return response;
   } catch (error) {
-    toast.error("File Delete Failed", { autoClose: 3000 });
+    sileo.error({ title: "Error al eliminar archivo" });
     return error;
   }
 });

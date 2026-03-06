@@ -4,7 +4,6 @@ import SimpleBar from 'simplebar-react';
 import Flatpickr from "react-flatpickr";
 import moment from "moment";
 import Dragula from 'react-dragula';
-import { ToastContainer } from 'react-toastify';
 import { Link } from 'react-router-dom';
 import taskImg from "../../assets/images/task.png";
 import DeleteModal from '../../Components/Common/DeleteModal';
@@ -384,7 +383,6 @@ const ToDoList = () => {
 
     return (
         <React.Fragment>
-            <ToastContainer closeButton={false} />
             <DeleteModal
                 show={deleteModal}
                 onDeleteClick={() => handleDeleteTodo()}

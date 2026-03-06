@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Card, CardBody, Col, Container, DropdownItem, DropdownMenu, DropdownToggle, FormFeedback, Input, Modal, ModalBody, ModalHeader, Row, UncontrolledDropdown } from 'reactstrap';
 // import SimpleBar from 'simplebar-react';
-import { ToastContainer } from 'react-toastify';
 import SimpleDonutCharts from './FileManagerCharts';
 import DeleteModal from '../../Components/Common/DeleteModal';
 //redux
@@ -315,7 +314,6 @@ const FileManager = () => {
 
     return (
         <React.Fragment>
-            <ToastContainer closeButton={false} />
             <DeleteModal
                 show={deleteModal}
                 onDeleteClick={() => handleDeleteFolder()}

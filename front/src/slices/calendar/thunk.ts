@@ -1,6 +1,6 @@
 // src/slices/calendar/thunk.ts
 import { jwtDecode } from "jwt-decode";
-import { toast } from "react-toastify";
+import { sileo } from "sileo";
 import { api } from "../../services/api";
 import { getToken } from "../../services/auth";
 import {
@@ -159,7 +159,7 @@ export const fetchTenantSlots = (date: string, serviceId: string) => async (disp
     return Promise.resolve(slots);
   } catch (error: any) {
     dispatch(fetchSlotsFail(error?.message || "Error al buscar horarios"));
-    toast.error("No se pudieron cargar los horarios disponibles.");
+    sileo.error({ title: "No se pudieron cargar los horarios disponibles." });
     return Promise.reject(error);
   }
 };
@@ -174,7 +174,7 @@ export const fetchAvailableStylists = (date: string, time: string, serviceId: st
     return data?.available || data?.availableStylists || [];
   } catch (error: any) {
     console.error("Error al obtener estilistas disponibles:", error);
-    toast.error("No se pudieron cargar los estilistas para esta hora.");
+    sileo.error({ title: "No se pudieron cargar los estilistas para esta hora." });
     return Promise.reject(error);
   }
 };
@@ -205,7 +205,7 @@ export const getStylistsForService = (serviceId: string) => async () => {
     return Array.isArray(stylists) ? stylists : [];
   } catch (error: any) {
     console.error("Error al obtener estilistas por servicio:", error);
-    toast.error("No se pudieron cargar los estilistas para este servicio.");
+    sileo.error({ title: "No se pudieron cargar los estilistas para este servicio." });
     return Promise.reject(error);
   }
 };
@@ -249,14 +249,27 @@ export const updateAppointment = (appointment: any) => async (dispatch: any) => 
       extendedProps: { ...updated },
     };
     dispatch(updateAppointmentSuccess(formattedUpdatedEvent));
-    toast.success("¡Cita actualizada con éxito!");
+    sileo.success({ title: "¡Cita actualizada con éxito!" });
     return formattedUpdatedEvent;
   } catch (error: any) {
     const errorMessage =
       error?.response?.data?.message || error?.response?.data?.error || "No se pudo actualizar la cita.";
     dispatch(updateAppointmentFail(errorMessage));
-    toast.error(errorMessage);
+    sileo.error({ title: errorMessage });
     return Promise.reject(errorMessage);
+  }
+};
+
+export const cancelAppointment = (appointmentId: string) => async (dispatch: any) => {
+  try {
+    await api.patch(`/appointments/${appointmentId}/status`, { status: 'cancelled' });
+    await dispatch(getCalendarData());
+    sileo.success({ title: "Cita cancelada" });
+    return Promise.resolve();
+  } catch (error: any) {
+    const msg = error?.response?.data?.error || "No se pudo cancelar la cita.";
+    sileo.error({ title: msg });
+    return Promise.reject(msg);
   }
 };
 
@@ -272,7 +285,7 @@ export const createAppointmentsBatch = (payload: {
     await api.post(`/appointments/batch`, payload);
     await dispatch(getCalendarData());
     dispatch(createAppointmentSuccess());
-    toast.success("¡Citas agendadas con éxito!");
+    sileo.success({ title: "¡Citas agendadas con éxito!" });
     return Promise.resolve();
   } catch (error: any) {
     const errorMessage =
@@ -281,7 +294,7 @@ export const createAppointmentsBatch = (payload: {
       error?.message ||
       "No se pudo crear el lote de citas.";
     dispatch(createAppointmentFail(errorMessage));
-    toast.error(errorMessage);
+    sileo.error({ title: errorMessage });
     return Promise.reject(errorMessage);
   }
 };

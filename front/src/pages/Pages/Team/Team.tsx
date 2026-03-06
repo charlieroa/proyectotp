@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { Button, Card, CardBody, Col, Container, Dropdown, DropdownItem, DropdownMenu, DropdownToggle, Form, Input, Label, Modal, ModalBody, Offcanvas, OffcanvasBody, Row, UncontrolledDropdown, FormFeedback } from 'reactstrap';
 import BreadCrumb from '../../../Components/Common/BreadCrumb';
 import DeleteModal from "../../../Components/Common/DeleteModal";
-import { ToastContainer } from 'react-toastify';
 
 //User Images
 import avatar2 from '../../../assets/images/users/avatar-2.jpg';
@@ -265,7 +264,6 @@ const Team = () => {
 
     return (
         <React.Fragment>
-            <ToastContainer closeButton={false} />
             <DeleteModal
                 show={deleteModal}
                 onDeleteClick={() => handleDeleteTeamData()}

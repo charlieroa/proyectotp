@@ -14,4 +14,8 @@ router.post('/register-tenant', authController.registerTenantAndAdmin);
 // Cambiar de negocio activo (multi-negocio)
 router.post('/switch-tenant', requireAuth, authController.switchTenant);
 
+// Password recovery (public, no auth)
+router.post('/forgot-password', authController.forgotPassword);
+router.post('/reset-password', authController.resetPassword);
+
 module.exports = router;

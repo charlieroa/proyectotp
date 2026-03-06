@@ -4,7 +4,6 @@ import { Link } from "react-router-dom";
 import { Card, CardBody, Col, Container, Form, FormFeedback, Input, Label, Modal, ModalBody, ModalHeader, Row } from "reactstrap";
 import BreadCrumb from "../../../../Components/Common/BreadCrumb";
 import Pagination from "../../../../Components/Common/Pagination";
-import { ToastContainer } from "react-toastify";
 import { useDispatch, useSelector } from "react-redux";
 import { createSelector } from "reselect";
 import { jobCandidates } from "../../../../common/data/appsJobs";
@@ -489,7 +488,6 @@ const CandidateGrid = () => {
               </div>
             </Form>
           </Modal>
-          <ToastContainer closeButton={false} limit={1} />
 
         </Container>
       </div>

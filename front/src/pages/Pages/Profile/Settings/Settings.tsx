@@ -20,7 +20,7 @@ import { setSetupProgress } from '../../../../slices/Settings/settingsSlice';
 
 import progileBg from '../../../../assets/images/profile-bg.jpg';
 import avatar1 from '../../../../assets/images/users/avatar-1.jpg';
-import { api } from "../../../../services/api";
+import { api, getUploadsBaseUrl } from "../../../../services/api";
 import { getToken } from "../../../../services/auth";
 
 // Vistas hijas y componentes comunes
@@ -35,6 +35,7 @@ type Tenant = {
   id: string;
   name?: string | null;
   address?: string | null;
+  city?: string | null;
   phone?: string | null;
   email?: string | null;
   website?: string | null;
@@ -46,11 +47,17 @@ type Tenant = {
   loans_to_staff_enabled?: boolean;
   allow_past_appointments?: boolean;
   shared_stylists_enabled?: boolean;
+  cross_branch_schedule_block?: boolean;
+  manage_all_branches_cash?: boolean;
+  is_primary_branch?: boolean;
   tip_salon_percent?: number | null;
   branch_color?: string | null;
   parent_tenant_id?: string | null;
   working_hours?: Record<string, string | null> | null;
   plan?: string | null;
+  subscription_status?: string | null;
+  current_period_end?: string | null;
+  has_stripe_subscription?: boolean;
   created_at?: string;
   updated_at?: string;
 };
@@ -360,6 +367,7 @@ const Settings: React.FC = () => {
   const [name, setName] = useState<string>("");
   const [phone, setPhone] = useState<string>("");
   const [address, setAddress] = useState<string>("");
+  const [city, setCity] = useState<string>("");
   const [email, setEmail] = useState<string>("");
   const [website, setWebsite] = useState<string>("");
   const [ivaRate, setIvaRate] = useState<string>("");
@@ -374,9 +382,12 @@ const Settings: React.FC = () => {
   const [loansToStaff, setLoansToStaff] = useState<boolean>(false);
   const [allowPastAppointments, setAllowPastAppointments] = useState<boolean>(false);
   const [sharedStylistsEnabled, setSharedStylistsEnabled] = useState<boolean>(false);
+  const [crossBranchScheduleBlock, setCrossBranchScheduleBlock] = useState<boolean>(true);
+  const [manageAllBranchesCash, setManageAllBranchesCash] = useState<boolean>(false);
   const [tipSalonPercent, setTipSalonPercent] = useState<string>("10");
   const [branchColor, setBranchColor] = useState<string>("#3788d8");
   const [hasBranches, setHasBranches] = useState<boolean>(false);
+  const [isPrimaryBranch, setIsPrimaryBranch] = useState<boolean>(true);
   const [catLoading, setCatLoading] = useState(false);
   const [svcLoading, setSvcLoading] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -418,6 +429,7 @@ const Settings: React.FC = () => {
     setName(tenantData.name ?? "");
     setPhone(tenantData.phone ?? "");
     setAddress(tenantData.address ?? "");
+    setCity(tenantData.city ?? "");
     setEmail(tenantData.email ?? "");
     setWebsite(tenantData.website ?? "");
     setIvaRate(tenantData.iva_rate == null ? "" : String(tenantData.iva_rate));
@@ -428,13 +440,16 @@ const Settings: React.FC = () => {
     setLoansToStaff(tenantData.loans_to_staff_enabled ?? false);
     setAllowPastAppointments(tenantData.allow_past_appointments ?? false);
     setSharedStylistsEnabled(tenantData.shared_stylists_enabled ?? false);
+    setCrossBranchScheduleBlock(tenantData.cross_branch_schedule_block !== false);
+    setManageAllBranchesCash(tenantData.manage_all_branches_cash ?? false);
     setTipSalonPercent(tenantData.tip_salon_percent != null ? String(tenantData.tip_salon_percent) : "10");
     setBranchColor(tenantData.branch_color ?? "#3788d8");
     setHasBranches(!!tenantData.parent_tenant_id);
-    const baseUrl = api.defaults.baseURL || '';
+    setIsPrimaryBranch(tenantData.is_primary_branch !== false);
+    const uploadsBase = getUploadsBaseUrl();
     let finalDisplayUrl = "";
     if (tenantData.logo_url) {
-      finalDisplayUrl = tenantData.logo_url.startsWith('http') ? tenantData.logo_url : `${baseUrl}${tenantData.logo_url}`;
+      finalDisplayUrl = tenantData.logo_url.startsWith('http') ? tenantData.logo_url : `${uploadsBase}${tenantData.logo_url}`;
     }
     setLogoUrl(finalDisplayUrl);
   };
@@ -468,6 +483,46 @@ const Settings: React.FC = () => {
     load();
   }, []);
 
+  // Handle Stripe return (success/cancel)
+  useEffect(() => {
+    const stripeResult = searchParams.get('stripe');
+    if (!stripeResult) return;
+
+    // Remove ?stripe= from URL without reload
+    const newParams = new URLSearchParams(searchParams);
+    newParams.delete('stripe');
+    setSearchParams(newParams, { replace: true });
+
+    if (stripeResult === 'success') {
+      // Reload tenant data to get updated plan
+      const reload = async () => {
+        try {
+          const tid = decodeTenantId();
+          if (tid) {
+            const { data } = await api.get(`/tenants/${tid}`);
+            updateStateFromTenant(data);
+          }
+        } catch { /* ignore */ }
+      };
+      reload();
+      Swal.fire({
+        icon: 'success',
+        title: 'Pago exitoso!',
+        text: 'Tu plan ha sido actualizado. Gracias por tu suscripcion.',
+        timer: 3000,
+        showConfirmButton: false,
+      });
+    } else if (stripeResult === 'cancel') {
+      Swal.fire({
+        icon: 'info',
+        title: 'Pago cancelado',
+        text: 'No se realizo ningun cargo. Tu plan actual se mantiene.',
+        timer: 3000,
+        showConfirmButton: false,
+      });
+    }
+  }, []);
+
   const saveAll = async () => {
     setSaving(true); setError(null);
     try {
@@ -484,9 +539,9 @@ const Settings: React.FC = () => {
       let logoUrlForPayload = tenant?.logo_url || null;
 
       if (logoUrlForPayload && logoUrlForPayload.startsWith('http')) {
-        const baseUrl = api.defaults.baseURL;
-        if (baseUrl && logoUrlForPayload.startsWith(baseUrl)) {
-          logoUrlForPayload = logoUrlForPayload.replace(baseUrl, '');
+        const uploadsBase = getUploadsBaseUrl();
+        if (uploadsBase && logoUrlForPayload.startsWith(uploadsBase)) {
+          logoUrlForPayload = logoUrlForPayload.replace(uploadsBase, '');
         }
       }
 
@@ -514,6 +569,7 @@ const Settings: React.FC = () => {
         name: name.trim() || null,
         phone: phone.trim() || null,
         address: address.trim() || null,
+        city: city.trim() || null,
         email: email.trim() || null,
         website: website.trim() || null,
         working_hours: buildWorkingHoursPayload(perDay),
@@ -525,6 +581,8 @@ const Settings: React.FC = () => {
         loans_to_staff_enabled: loansToStaff,
         allow_past_appointments: allowPastAppointments,
         shared_stylists_enabled: sharedStylistsEnabled,
+        cross_branch_schedule_block: crossBranchScheduleBlock,
+        manage_all_branches_cash: manageAllBranchesCash,
         tip_salon_percent: ensureNumber(tipSalonPercent),
         branch_color: branchColor,
       } as any;
@@ -533,6 +591,7 @@ const Settings: React.FC = () => {
       const { data: freshTenantData } = await api.get(`/tenants/${tenantId}`);
       updateStateFromTenant(freshTenantData);
       Swal.fire({ icon: 'success', title: '!Guardado!', text: 'Los cambios se guardaron correctamente.', timer: 2000, showConfirmButton: false });
+      window.dispatchEvent(new Event('profileUpdated'));
     } catch (e: any) {
       Swal.fire({ icon: 'error', title: 'Error al Guardar', text: e?.response?.data?.message || e?.message || "No se pudieron guardar los cambios." });
     } finally {
@@ -543,18 +602,28 @@ const Settings: React.FC = () => {
   const handleSaveInfo = async (e?: React.FormEvent) => { e?.preventDefault(); await saveAll(); };
   const handleSaveHours = async (e?: React.FormEvent) => { e?.preventDefault(); await saveAll(); };
 
-  // Manual plan change
+  // Plan change via Stripe Checkout (paid plans) or direct API (free)
   const changePlan = async (newPlan: string) => {
     const tid = tenant?.id || decodeTenantId();
     if (!tid) return;
     try {
       setSaving(true);
-      await api.put(`/tenants/${tid}`, { plan: newPlan });
-      const { data: fresh } = await api.get(`/tenants/${tid}`);
-      updateStateFromTenant(fresh);
-      Swal.fire({ icon: 'success', title: '!Plan actualizado!', text: `Tu plan ahora es ${(PLAN_CONFIG[newPlan] || PLAN_CONFIG.free).label}.`, timer: 2000, showConfirmButton: false });
+      if (newPlan === 'free') {
+        // Downgrade a free: cancelar suscripcion Stripe
+        await api.post('/stripe/cancel-subscription');
+        const { data: fresh } = await api.get(`/tenants/${tid}`);
+        updateStateFromTenant(fresh);
+        Swal.fire({ icon: 'success', title: 'Plan actualizado', text: 'Tu plan ahora es Gratis. La suscripcion fue cancelada.', timer: 2500, showConfirmButton: false });
+      } else {
+        // Upgrade a plan pago: redirigir a Stripe Checkout
+        const { data } = await api.post('/stripe/create-checkout-session', { plan: newPlan });
+        if (data.url) {
+          window.location.href = data.url;
+          return; // No resetear saving, estamos navegando fuera
+        }
+      }
     } catch (e: any) {
-      Swal.fire({ icon: 'error', title: 'Error', text: e?.response?.data?.message || 'No se pudo cambiar el plan.' });
+      Swal.fire({ icon: 'error', title: 'Error', text: e?.response?.data?.error || 'No se pudo cambiar el plan.' });
     } finally {
       setSaving(false);
     }
@@ -762,15 +831,17 @@ const Settings: React.FC = () => {
                 {/* Logo card */}
                 <Card className="overflow-hidden position-relative" style={{ zIndex: 1 }}>
                   <CardBody className="text-center">
-                    <div className="position-relative d-inline-block cursor-pointer mb-3" onClick={openLogoPicker} title="Cambiar logo">
+                    <div className={`position-relative d-inline-block mb-3${isPrimaryBranch ? ' cursor-pointer' : ''}`} onClick={isPrimaryBranch ? openLogoPicker : undefined} title={isPrimaryBranch ? "Cambiar logo" : "Solo la sede principal puede cambiar el logo"}>
                       <img src={logoUrl || avatar1} className="rounded-circle border border-4 border-white shadow object-fit-cover" style={{ width: '96px', height: '96px' }} alt="logo" />
-                      <span className="position-absolute bottom-0 end-0 d-flex align-items-center justify-content-center rounded-circle bg-primary text-white border border-2 border-white shadow" style={{ width: '32px', height: '32px' }}>
-                        <i className="ri-image-edit-line fs-12"></i>
-                      </span>
-                      <input ref={logoInputRef} type="file" accept="image/*" className="d-none" onChange={onLogoInputChange} />
+                      {isPrimaryBranch && (
+                        <span className="position-absolute bottom-0 end-0 d-flex align-items-center justify-content-center rounded-circle bg-primary text-white border border-2 border-white shadow" style={{ width: '32px', height: '32px' }}>
+                          <i className="ri-image-edit-line fs-12"></i>
+                        </span>
+                      )}
+                      {isPrimaryBranch && <input ref={logoInputRef} type="file" accept="image/*" className="d-none" onChange={onLogoInputChange} />}
                     </div>
                     <div className="fs-12 text-muted mb-2">
-                      {uploadingLogo ? "Subiendo logo..." : (logoFile ? "Logo listo para guardar" : "Haz clic en el logo para cambiarlo")}
+                      {!isPrimaryBranch ? "Solo la sede principal puede cambiar el logo" : uploadingLogo ? "Subiendo logo..." : (logoFile ? "Logo listo para guardar" : "Haz clic en el logo para cambiarlo")}
                     </div>
                     <h5 className="fs-16 fw-semibold mb-1">{name || "Mi peluqueria"}</h5>
                   </CardBody>
@@ -798,11 +869,12 @@ const Settings: React.FC = () => {
                           </div>
                           <Button
                             type="button"
-                            color="soft-primary"
+                            color={planKey === "enterprise" ? "soft-success" : "soft-primary"}
                             className="w-100 d-inline-flex align-items-center justify-content-center gap-2"
                             onClick={() => tabChange("6")}
                           >
-                            <i className="ri-vip-crown-line"></i> Upgrade de Plan
+                            <i className={planKey === "enterprise" ? "ri-check-double-line" : "ri-vip-crown-line"}></i>
+                            {planKey === "enterprise" ? "Plan Completo" : "Upgrade de Plan"}
                           </Button>
                         </>
                       );
@@ -876,16 +948,16 @@ const Settings: React.FC = () => {
 
             {/* Main content */}
             <Col xl={9}>
-              <Card className="overflow-hidden">
+              <Card>
                 {/* Title + Tabs header */}
-                <CardHeader className="p-0">
+                <CardHeader className="p-0 border-0">
                   <div className="d-flex align-items-center px-4 pt-3 pb-2">
                     <h4 className="fw-semibold mb-0">
                       <i className="ri-settings-3-line me-2 text-primary"></i>
                       Configuración
                     </h4>
                   </div>
-                  <Nav tabs className="nav-tabs-custom px-4">
+                  <Nav tabs className="nav-tabs-custom px-4 mb-0">
                     <NavItem>
                       <NavLink
                         className={classnames({ active: activeTab === "1" })}
@@ -969,16 +1041,19 @@ const Settings: React.FC = () => {
                   {activeTab === "1" && (
                     <DatosTenant
                       section="datos"
-                      name={name} phone={phone} address={address} email={email} website={website} ivaRate={ivaRate} adminFee={adminFee}
-                      setName={setName} setPhone={setPhone} setAddress={setAddress} setEmail={setEmail} setWebsite={setWebsite} setIvaRate={setIvaRate} setAdminFee={setAdminFee}
+                      name={name} phone={phone} address={address} city={city} email={email} website={website} ivaRate={ivaRate} adminFee={adminFee}
+                      setName={setName} setPhone={setPhone} setAddress={setAddress} setCity={setCity} setEmail={setEmail} setWebsite={setWebsite} setIvaRate={setIvaRate} setAdminFee={setAdminFee}
                       productsForStaff={productsForStaff} setProductsForStaff={setProductsForStaff}
                       adminFeeEnabled={adminFeeEnabled} setAdminFeeEnabled={setAdminFeeEnabled}
                       loansToStaff={loansToStaff} setLoansToStaff={setLoansToStaff}
                       allowPastAppointments={allowPastAppointments} setAllowPastAppointments={setAllowPastAppointments}
                       sharedStylistsEnabled={sharedStylistsEnabled} setSharedStylistsEnabled={setSharedStylistsEnabled}
+                      crossBranchScheduleBlock={crossBranchScheduleBlock} setCrossBranchScheduleBlock={setCrossBranchScheduleBlock}
+                      manageAllBranchesCash={manageAllBranchesCash} setManageAllBranchesCash={setManageAllBranchesCash}
                       tipSalonPercent={tipSalonPercent} setTipSalonPercent={setTipSalonPercent}
                       branchColor={branchColor} setBranchColor={setBranchColor}
                       hasBranches={hasBranches}
+                      isPrimaryBranch={isPrimaryBranch}
                       perDay={perDay} toggleDay={() => { }} changeHour={() => { }} applyMondayToAll={() => { }}
                       plan={currentPlan}
                       saving={saving} onSubmit={handleSaveInfo} onCancel={() => updateStateFromTenant(tenant)}
@@ -988,16 +1063,19 @@ const Settings: React.FC = () => {
                   {activeTab === "2" && (
                     <DatosTenant
                       section="horario"
-                      name={name} phone={phone} address={address} email={email} website={website} ivaRate={ivaRate} adminFee={adminFee}
-                      setName={() => { }} setPhone={() => { }} setAddress={() => { }} setEmail={() => { }} setWebsite={() => { }} setIvaRate={() => { }} setAdminFee={() => { }}
+                      name={name} phone={phone} address={address} city={city} email={email} website={website} ivaRate={ivaRate} adminFee={adminFee}
+                      setName={() => { }} setPhone={() => { }} setAddress={() => { }} setCity={() => { }} setEmail={() => { }} setWebsite={() => { }} setIvaRate={() => { }} setAdminFee={() => { }}
                       productsForStaff={productsForStaff} setProductsForStaff={setProductsForStaff}
                       adminFeeEnabled={adminFeeEnabled} setAdminFeeEnabled={setAdminFeeEnabled}
                       loansToStaff={loansToStaff} setLoansToStaff={setLoansToStaff}
                       allowPastAppointments={allowPastAppointments} setAllowPastAppointments={setAllowPastAppointments}
                       sharedStylistsEnabled={sharedStylistsEnabled} setSharedStylistsEnabled={setSharedStylistsEnabled}
+                      crossBranchScheduleBlock={crossBranchScheduleBlock} setCrossBranchScheduleBlock={setCrossBranchScheduleBlock}
+                      manageAllBranchesCash={manageAllBranchesCash} setManageAllBranchesCash={setManageAllBranchesCash}
                       tipSalonPercent={tipSalonPercent} setTipSalonPercent={setTipSalonPercent}
                       branchColor={branchColor} setBranchColor={setBranchColor}
                       hasBranches={hasBranches}
+                      isPrimaryBranch={isPrimaryBranch}
                       perDay={perDay} toggleDay={toggleDay} changeHour={changeHour} applyMondayToAll={applyMondayToAll}
                       saving={saving} onSubmit={handleSaveHours} onCancel={() => updateStateFromTenant(tenant)}
                     />
@@ -1186,33 +1264,32 @@ const Settings: React.FC = () => {
                               { text: "Calendario y agenda basica", included: true },
                               { text: "Enlace de reservas web", included: true },
                               { text: "1 Perfil de Staff (Admin)", included: true },
-                              { text: "Servicios y personal", included: false },
+                              { text: "Asistente IA de agendamiento", included: false },
+                              { text: "Geolocalizacion y Digiturno", included: false },
                               { text: "Modulos avanzados", included: false },
-                              { text: "Asistente IA WhatsApp", included: false },
-                              { text: "Multiples sucursales", included: false },
+                              { text: "Asistente IA completo + WhatsApp", included: false },
                             ],
                           },
                           {
                             key: "pro", name: "Pro", price: "$29.900", period: "COP / mes",
                             icon: "ri-rocket-line", color: "primary", features: [
                               { text: "Todo lo del plan Gratis", included: true },
+                              { text: "Asistente IA de agendamiento", included: true },
+                              { text: "Geolocalizacion y Digiturno", included: true },
                               { text: "Servicios y catalogo completo", included: true },
-                              { text: "Staff ilimitado y comisiones", included: true },
+                              { text: "Staff ilimitado + recepcionistas", included: true },
                               { text: "Modulos: nomina, inventario, prestamos", included: true },
-                              { text: "QR para clientes", included: true },
-                              { text: "Campanas de recuperacion", included: true },
-                              { text: "Asistente IA WhatsApp", included: false },
-                              { text: "Multiples sucursales", included: false },
+                              { text: "Asistente IA completo + WhatsApp", included: false },
                             ],
                           },
                           {
                             key: "business", name: "Business", price: "$49.900", period: "COP / mes",
                             icon: "ri-building-2-line", color: "info", highlighted: true, features: [
                               { text: "Todo lo del plan Pro", included: true },
-                              { text: "Asistente IA por WhatsApp", included: true },
+                              { text: "Asistente IA completo (ventas, reportes)", included: true },
+                              { text: "Bot de WhatsApp con IA", included: true },
+                              { text: "Boton flotante con asistente completo", included: true },
                               { text: "Sitio web profesional incluido", included: true },
-                              { text: "Panel administrador avanzado", included: true },
-                              { text: "Reportes y analitica", included: true },
                               { text: "Multiples sucursales", included: false },
                             ],
                           },
@@ -1236,6 +1313,18 @@ const Settings: React.FC = () => {
                                 Planes Tupelukeria
                               </h5>
                               <p className="text-muted">Elige el plan que mejor se adapte a tu negocio. Todos los modulos se desbloquean al activar el plan correspondiente.</p>
+                              {tenant?.has_stripe_subscription && tenant?.subscription_status && (
+                                <div className="mt-2">
+                                  <Badge color={tenant.subscription_status === 'active' ? 'success' : tenant.subscription_status === 'past_due' ? 'warning' : 'secondary'} className="me-2">
+                                    {tenant.subscription_status === 'active' ? 'Suscripcion activa' : tenant.subscription_status === 'past_due' ? 'Pago pendiente' : 'Cancelada'}
+                                  </Badge>
+                                  {tenant.current_period_end && tenant.subscription_status === 'active' && (
+                                    <small className="text-muted">
+                                      Proxima facturacion: {new Date(tenant.current_period_end).toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })}
+                                    </small>
+                                  )}
+                                </div>
+                              )}
                             </div>
                             <Row className="g-3">
                               {plans.map((plan) => {
@@ -1292,11 +1381,13 @@ const Settings: React.FC = () => {
                                               onClick={() => {
                                                 Swal.fire({
                                                   title: `Cambiar a ${plan.name}?`,
-                                                  html: `<p>Vas a cambiar al plan <strong>${plan.name}</strong>. Perderas acceso a funcionalidades de tu plan actual.</p>`,
+                                                  html: plan.key === 'free' && tenant?.has_stripe_subscription
+                                                    ? `<p>Tu suscripcion actual sera <strong>cancelada</strong> y perderas acceso a las funcionalidades de tu plan.</p>`
+                                                    : `<p>Vas a cambiar al plan <strong>${plan.name}</strong>. Perderas acceso a funcionalidades de tu plan actual.</p>`,
                                                   icon: "warning",
                                                   showCancelButton: true,
-                                                  confirmButtonText: "Si, cambiar",
-                                                  cancelButtonText: "Cancelar",
+                                                  confirmButtonText: plan.key === 'free' ? "Cancelar suscripcion" : "Si, cambiar",
+                                                  cancelButtonText: "Volver",
                                                   confirmButtonColor: "#f06548",
                                                 }).then((result) => {
                                                   if (result.isConfirmed) changePlan(plan.key);
@@ -1313,10 +1404,10 @@ const Settings: React.FC = () => {
                                               onClick={() => {
                                                 Swal.fire({
                                                   title: `Activar plan ${plan.name}`,
-                                                  html: `<p>Deseas activar el plan <strong>${plan.name} (${plan.price}/mes)</strong>?</p><p class="text-muted small">Se desbloquearan todos los modulos incluidos en este plan.</p>`,
+                                                  html: `<p>Deseas activar el plan <strong>${plan.name} (${plan.price}/mes)</strong>?</p><p class="text-muted small">Seras redirigido a la pagina de pago seguro para completar tu suscripcion.</p>`,
                                                   icon: "question",
                                                   showCancelButton: true,
-                                                  confirmButtonText: `Activar ${plan.name}`,
+                                                  confirmButtonText: `Ir a pagar`,
                                                   cancelButtonText: "Cancelar",
                                                   confirmButtonColor: "#0ab39c",
                                                 }).then((result) => {

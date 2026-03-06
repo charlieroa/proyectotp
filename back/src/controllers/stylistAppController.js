@@ -521,6 +521,17 @@ exports.updateLocationWithTracking = async (req, res) => {
                 } catch (logError) {
                     console.warn('Warning: Tabla geofence_logs no existe. Crear con: CREATE TABLE geofence_logs (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), stylist_id UUID NOT NULL, tenant_id UUID NOT NULL, event_type VARCHAR(10) NOT NULL, lat DECIMAL(10,8), lng DECIMAL(11,8), created_at TIMESTAMP DEFAULT NOW());');
                 }
+
+                // Sync fichero queue: activate/deactivate stylist based on geofence
+                try {
+                    await tx.stylist_queues.updateMany({
+                        where: { stylist_id: stylistId, tenant_id: tenant_id },
+                        data: { is_active: nowInside, updated_at: new Date() }
+                    });
+                } catch (queueError) {
+                    // Silently ignore if stylist_queues table doesn't exist yet
+                    console.warn('Warning: Could not update fichero queue:', queueError.message);
+                }
             }
 
             return { wasInside, nowInside };

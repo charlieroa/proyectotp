@@ -47,7 +47,7 @@ import {
   deleteContact,
 } from "../../slices/crm/thunk";
 
-const CrmContacts = () => {
+const CrmContacts = ({ embedded }: { embedded?: boolean }) => {
   const dispatch: any = useDispatch();
 
   const selectCrmState = createSelector(
@@ -231,11 +231,9 @@ const CrmContacts = () => {
 
   document.title = "Clientes | CRM";
 
-  return (
+  const content = (
     <React.Fragment>
-      <div className="page-content">
-        <Container fluid>
-          <BreadCrumb title="Clientes" pageTitle="CRM" />
+          {!embedded && <BreadCrumb title="Clientes" pageTitle="CRM" />}
 
           {/* Header con búsqueda y acciones */}
           <Card>
@@ -580,8 +578,6 @@ const CrmContacts = () => {
               )}
             </Row>
           )}
-        </Container>
-      </div>
 
       {/* Offcanvas para detalles del cliente */}
       <Offcanvas
@@ -755,6 +751,16 @@ const CrmContacts = () => {
         </Form>
       </Modal>
     </React.Fragment>
+  );
+
+  if (embedded) return content;
+
+  return (
+    <div className="page-content">
+      <Container fluid>
+        {content}
+      </Container>
+    </div>
   );
 };
 

@@ -11,8 +11,9 @@ const { trackUsage } = require('../services/tokenTracker');
 const { executeFunction: executeAdminFunction, ADMIN_TOOLS, ADMIN_SYSTEM_PROMPT } = require('./aiAdminChatController');
 const bcrypt = require('bcryptjs');
 const { isPlanAtLeast, getTenantPlan } = require('../middleware/planMiddleware');
+const { isInHandoff, setHandoff } = require('../services/handoffCache');
 
-console.log('🚀 [DEBUG] whatsappController.js cargado v15 (Fixes: ORM, cache, security)');
+console.log('🚀 [DEBUG] whatsappController.js cargado v17 (Evolution API v2 migration)');
 
 const TIME_ZONE = 'America/Bogota';
 
@@ -302,14 +303,118 @@ function extractDateTimeFromMessage(message) {
 }
 
 /* =================================================================== */
-/* ==============   WEBHOOK (LISTEN TO WAHA)   ======================= */
+/* ==============   NORMALIZACIÓN EVOLUTION API → FORMATO INTERNO  ==== */
+/* =================================================================== */
+
+function normalizeEvolutionEvent(raw) {
+    // Si ya tiene el formato interno (event + session), devolver tal cual
+    if (raw.event && raw.session) return raw;
+
+    const evolutionEvent = raw.event;
+    const instanceName = raw.instance;
+    const data = raw.data || {};
+
+    // CONNECTION_UPDATE → session.status
+    if (evolutionEvent === 'connection.update' || evolutionEvent === 'CONNECTION_UPDATE') {
+        const state = data.state || data.status;
+        let mappedStatus = 'unknown';
+        if (state === 'open') mappedStatus = 'authenticated';
+        else if (state === 'close' || state === 'refused') mappedStatus = 'failed';
+        else if (state === 'connecting') mappedStatus = 'scan_qr_code';
+
+        return {
+            event: 'session.status',
+            session: instanceName,
+            payload: { status: mappedStatus }
+        };
+    }
+
+    // MESSAGES_UPSERT → message
+    if (evolutionEvent === 'messages.upsert' || evolutionEvent === 'MESSAGES_UPSERT') {
+        // Evolution puede enviar array o objeto
+        const messages = Array.isArray(data) ? data : (data.messages || [data]);
+        const msg = messages[0];
+        if (!msg) return { event: evolutionEvent, session: instanceName, payload: {} };
+
+        const key = msg.key || {};
+        const fromMe = key.fromMe || false;
+        const remoteJid = key.remoteJid || '';
+        // Normalizar JID: @s.whatsapp.net → @c.us para compatibilidad con caches y DB
+        const chatId = remoteJid.replace(/@s\.whatsapp\.net$/, '@c.us');
+
+        // Extraer texto del mensaje
+        const msgContent = msg.message || {};
+        let body = msgContent.conversation
+            || msgContent.extendedTextMessage?.text
+            || msgContent.buttonsResponseMessage?.selectedDisplayText
+            || msgContent.listResponseMessage?.title
+            || '';
+
+        // Determinar tipo de mensaje
+        let type = 'chat';
+        let audioBase64 = null;
+        if (msgContent.audioMessage) {
+            type = msgContent.audioMessage.ptt ? 'ptt' : 'audio';
+            // Con webhookBase64=true, el audio viene en base64
+            audioBase64 = msg.base64 || msgContent.audioMessage?.base64 || null;
+        } else if (msgContent.imageMessage) {
+            type = 'image';
+        } else if (msgContent.videoMessage) {
+            type = 'video';
+        } else if (msgContent.documentMessage) {
+            type = 'document';
+        } else if (msgContent.stickerMessage) {
+            type = 'sticker';
+        }
+
+        return {
+            event: 'message',
+            session: instanceName,
+            payload: {
+                id: key.id,
+                from: chatId,
+                fromMe: fromMe,
+                body: body,
+                type: type,
+                pushName: msg.pushName || '',
+                notifyName: msg.pushName || '',
+                audioBase64: audioBase64,
+                _data: msg
+            }
+        };
+    }
+
+    // QRCODE_UPDATED - ignorar (el frontend pollean getStatus que llama a getQrRawData)
+    if (evolutionEvent === 'qrcode.updated' || evolutionEvent === 'QRCODE_UPDATED') {
+        return { event: 'qrcode.updated', session: instanceName, payload: data };
+    }
+
+    // Evento desconocido: pasar tal cual
+    return {
+        event: evolutionEvent || raw.event,
+        session: instanceName || raw.session,
+        payload: data || raw.payload
+    };
+}
+
+/* =================================================================== */
+/* ==============   WEBHOOK (EVOLUTION API)   ========================= */
 /* =================================================================== */
 
 exports.handleWahaWebhook = async (req, res) => {
     try {
-        const event = req.body;
+        const rawEvent = req.body;
+
+        // ═══════════════════════════════════════════════════════════════
+        // ══════  NORMALIZACIÓN: Evolution API → formato interno  ══════
+        // ═══════════════════════════════════════════════════════════════
+        const event = normalizeEvolutionEvent(rawEvent);
         const eventType = event.event;
         const tenantId = event.session;
+
+        if (!tenantId) {
+            return res.status(200).send('OK');
+        }
 
         console.log(`\n📥 [WEBHOOK] Evento recibido: ${eventType} | Sesión: ${tenantId}`);
 
@@ -317,10 +422,16 @@ exports.handleWahaWebhook = async (req, res) => {
         if (eventType === 'session.status' && event.payload?.status === 'authenticated') {
             console.log('🔔 [WEBHOOK] ¡Conexión Exitosa Detectada!');
 
-            const me = event.me || event.payload.me;
-            if (tenantId && me) {
-                const rawNumber = me.id;
-                const cleanNumber = rawNumber.split('@')[0];
+            // Evolution no envía el número en connection.update, lo obtenemos via API
+            let cleanNumber = null;
+            const me = event.me || event.payload?.me;
+            if (me) {
+                cleanNumber = (me.id || me).split('@')[0];
+            } else {
+                cleanNumber = await wahaService.getInstanceOwnerJid(tenantId);
+            }
+
+            if (tenantId && cleanNumber) {
                 const displayNumber = '+' + cleanNumber.replace(/(\d{2})(\d{3})(\d{3})(\d{4})/, '$1 $2 $3 $4');
 
                 await prisma.$queryRawUnsafe(
@@ -332,7 +443,7 @@ exports.handleWahaWebhook = async (req, res) => {
 
                 await prisma.$queryRawUnsafe(
                     `UPDATE tenant_numbers
-                     SET provider = 'waha', phone_number_id = $1, display_phone_number = $2, updated_at = NOW()
+                     SET provider = 'evolution', phone_number_id = $1, display_phone_number = $2, updated_at = NOW()
                      WHERE tenant_id = $3::uuid`,
                     cleanNumber, displayNumber, tenantId
                 );
@@ -367,37 +478,23 @@ exports.handleWahaWebhook = async (req, res) => {
                     if (apiKey) {
                         const axios = require('axios');
                         let audioBuffer = null;
-                        const WAHA_URL = process.env.WAHA_URL || 'http://212.28.189.253:3002';
-                        const WAHA_API_KEY = process.env.WAHA_API_KEY || '';
 
-                        if (payload.media?.url) {
-                            try {
-                                let mediaUrl = payload.media.url;
-                                if (mediaUrl.includes('localhost:3000')) mediaUrl = mediaUrl.replace('http://localhost:3000', WAHA_URL);
-                                if (mediaUrl.includes('0.0.0.0:3000')) mediaUrl = mediaUrl.replace('http://0.0.0.0:3000', WAHA_URL);
-                                const audioResponse = await axios.get(mediaUrl, {
-                                    responseType: 'arraybuffer',
-                                    headers: { 'X-Api-Key': WAHA_API_KEY },
-                                    timeout: 10000
-                                });
-                                audioBuffer = Buffer.from(audioResponse.data);
-                            } catch (urlError) {
-                                console.log(`   ⚠️ URL directa falló: ${urlError.message}`);
-                            }
+                        // Evolution: audio base64 viene inline en payload (webhook con base64=true)
+                        if (payload.audioBase64) {
+                            audioBuffer = Buffer.from(payload.audioBase64, 'base64');
+                            console.log(`   ✅ Audio obtenido inline (base64, ${audioBuffer.length} bytes)`);
                         }
+
+                        // Fallback: descargar via Evolution API
                         if (!audioBuffer && payload.id) {
                             try {
-                                const downloadUrl = `${WAHA_URL}/api/${tenantId}/messages/${payload.id}/download`;
-                                const audioResponse = await axios.get(downloadUrl, {
-                                    responseType: 'arraybuffer',
-                                    headers: { 'X-Api-Key': WAHA_API_KEY },
-                                    timeout: 10000
-                                });
-                                audioBuffer = Buffer.from(audioResponse.data);
-                            } catch (wahaError) {
-                                console.log(`   ⚠️ WAHA API falló: ${wahaError.message}`);
+                                audioBuffer = await wahaService.getMediaBuffer(tenantId, payload.id);
+                                console.log(`   ✅ Audio descargado via API (${audioBuffer.length} bytes)`);
+                            } catch (dlError) {
+                                console.log(`   ⚠️ Evolution API download falló: ${dlError.message}`);
                             }
                         }
+
                         if (!audioBuffer) {
                             await wahaService.sendMessage(tenantId, chatId, '🎤 No pude acceder a tu nota de voz. ¿Puedes escribirme?');
                             return res.status(200).send('OK');
@@ -737,6 +834,109 @@ exports.handleWahaWebhook = async (req, res) => {
                 // 4. Si nada de lo anterior → continúa al flujo normal de cliente
             }
             // ═══════════════════ FIN INTERCEPTOR ADMIN ═══════════════════
+
+            // ═══════════════════ CHECK BLOCKED ═══════════════════
+            {
+                const blockedConv = await prisma.whatsapp_conversations.findUnique({
+                    where: { tenant_id_chat_id: { tenant_id: tenantId, chat_id: chatId } },
+                    select: { blocked: true },
+                });
+                if (blockedConv?.blocked === true) {
+                    console.log(`🚫 [BLOCKED] Mensaje ignorado de cliente bloqueado ${chatId}`);
+                    return res.status(200).send('OK');
+                }
+            }
+
+            // ═══════════════════ INTERCEPTOR HANDOFF (humano) ═══════════════════
+            {
+                const msgTrimmed = (userMessage || '').trim();
+                const handoffTrigger = /\b(hablar\s+con\s+(un\s+|una\s+|el\s+|la\s+)?(alguien|persona|humano|asesor(a)?|recepcionista|agente)|quiero\s+(un\s+|una?\s+)?(humano|asesor(a)?|persona|agente)|necesito\s+(\w+\s+){0,3}(asesor(a)?|humano|persona|agente)|necesito\s+que\s+alguien\s+me\s+ayude|necesito\s+ayuda|ayuda\s+de\s+(un\s+|una?\s+)?(asesor|humano|persona|agente)|agente\s+real|atencion\s+humana|asistencia\s+humana|persona\s+real|comunic(ar|a)me\s+con\s+(un\s+|una\s+)?(asesor|persona|humano|agente)|paso\s+con\s+(un\s+|una\s+)?(asesor|humano|persona)|atender\s+me\s+(un\s+|una\s+)?(humano|persona|asesor))\b/i;
+
+                // 1. Si ya está en handoff → guardar mensaje en DB + socket, NO procesar con IA
+                if (isInHandoff(tenantId, chatId)) {
+                    console.log(`🤝 [HANDOFF] Mensaje de cliente en handoff ${chatId}, reenviando a agente`);
+                    try {
+                        const conv = await prisma.whatsapp_conversations.findUnique({
+                            where: { tenant_id_chat_id: { tenant_id: tenantId, chat_id: chatId } }
+                        });
+                        if (conv) {
+                            await prisma.whatsapp_messages.create({
+                                data: {
+                                    conversation_id: conv.id,
+                                    sender_type: 'client',
+                                    sender_name: payload.notifyName || payload.pushName || phoneNumber,
+                                    content: msgTrimmed || '[media]',
+                                    message_type: 'text',
+                                }
+                            });
+                            const io = getIO();
+                            io.to(`tenant:${tenantId}`).emit('whatsapp:new-message', {
+                                conversationId: conv.id,
+                                message: {
+                                    sender_type: 'client',
+                                    sender_name: payload.notifyName || payload.pushName || phoneNumber,
+                                    content: msgTrimmed || '[media]',
+                                    created_at: new Date().toISOString(),
+                                }
+                            });
+                        }
+                    } catch (err) {
+                        console.error('❌ [HANDOFF] Error guardando mensaje handoff:', err.message);
+                    }
+                    return res.status(200).send('OK');
+                }
+
+                // 2. Detectar trigger de handoff
+                if (handoffTrigger.test(msgTrimmed)) {
+                    console.log(`🤝 [HANDOFF] Trigger detectado de ${chatId}: "${msgTrimmed}"`);
+                    try {
+                        const displayName = payload.notifyName || payload.pushName || payload.contact?.name || '';
+                        const conv = await prisma.whatsapp_conversations.upsert({
+                            where: { tenant_id_chat_id: { tenant_id: tenantId, chat_id: chatId } },
+                            create: {
+                                tenant_id: tenantId,
+                                chat_id: chatId,
+                                client_name: displayName || phoneNumber,
+                                client_phone: phoneNumber,
+                                status: 'handoff',
+                            },
+                            update: {
+                                status: 'handoff',
+                                client_name: displayName || phoneNumber,
+                                client_phone: phoneNumber,
+                                updated_at: new Date(),
+                            }
+                        });
+                        // Save the trigger message
+                        await prisma.whatsapp_messages.create({
+                            data: {
+                                conversation_id: conv.id,
+                                sender_type: 'client',
+                                sender_name: displayName || phoneNumber,
+                                content: msgTrimmed,
+                                message_type: 'text',
+                            }
+                        });
+                        setHandoff(tenantId, chatId);
+
+                        const io = getIO();
+                        io.to(`tenant:${tenantId}`).emit('whatsapp:new-handoff', {
+                            conversationId: conv.id,
+                            clientName: conv.client_name,
+                            clientPhone: conv.client_phone,
+                        });
+
+                        await wahaService.sendMessage(tenantId, chatId,
+                            '🤝 Te conecto con un asesor. En un momento te atiende una persona real.\n\nMientras tanto, puedes escribir tu consulta y la verá el asesor.'
+                        );
+                    } catch (err) {
+                        console.error('❌ [HANDOFF] Error creando handoff:', err.message);
+                        await wahaService.sendMessage(tenantId, chatId, 'Lo siento, no pude conectarte con un asesor en este momento. Intenta de nuevo más tarde.');
+                    }
+                    return res.status(200).send('OK');
+                }
+            }
+            // ═══════════════════ FIN INTERCEPTOR HANDOFF ═══════════════════
 
             // 🔍 MEJORADO: Buscar display name en múltiples lugares del payload
             const notifyNameRaw = payload.notifyName || payload._data?.notifyName || payload.author?.notifyName || payload.contact?.notifyName;
@@ -1235,6 +1435,47 @@ if (shouldAutoCheck) {
                     console.log(`   ✅ Respuesta enviada`);
                 }
 
+                // Guardar conversación y mensajes en DB para historial
+                try {
+                    const conv = await prisma.whatsapp_conversations.upsert({
+                        where: { tenant_id_chat_id: { tenant_id: tenantId, chat_id: chatId } },
+                        create: {
+                            tenant_id: tenantId,
+                            chat_id: chatId,
+                            client_name: senderName || phoneNumber,
+                            client_phone: phoneNumber,
+                            client_user_id: clientId || null,
+                            status: 'bot',
+                        },
+                        update: {
+                            client_name: senderName && senderName !== 'Cliente' ? senderName : undefined,
+                            client_phone: phoneNumber,
+                            client_user_id: clientId || undefined,
+                            updated_at: new Date(),
+                        },
+                    });
+                    await prisma.whatsapp_messages.createMany({
+                        data: [
+                            {
+                                conversation_id: conv.id,
+                                sender_type: 'client',
+                                sender_name: senderName || phoneNumber,
+                                content: userMessage || '[media]',
+                                message_type: 'text',
+                            },
+                            {
+                                conversation_id: conv.id,
+                                sender_type: 'bot',
+                                sender_name: 'Bot',
+                                content: messageToSend,
+                                message_type: 'text',
+                            },
+                        ],
+                    });
+                } catch (dbErr) {
+                    console.error('⚠️ [WA-DB] Error guardando historial:', dbErr.message);
+                }
+
             } catch (aiError) {
                 console.error('❌ Error IA:', aiError.message);
                 await wahaService.sendMessage(tenantId, chatId, '😅 Tuve un problema. ¿Puedes intentar de nuevo?');
@@ -1277,108 +1518,144 @@ async function processWithAI(apiKey, tenantId, clientId, userMessage, conversati
         contextInfo += `\n\n📅 CITAS PRÓXIMAS DEL CLIENTE (${upcomingAppointments.length}):\n${citasLines}\n\n⚠️ REGLA SOBRE CITAS EXISTENTES: SOLO menciona estas citas si el usuario SALUDA sin pedir nada específico (ej: "Hola", "Buenos días") o si PREGUNTA por sus citas. Si el usuario pide una NUEVA cita, servicio, o cualquier otra cosa, atiende su solicitud directamente SIN mencionar las citas existentes. Si pide ver sus citas → usa ver_mis_agendas. Si pide cancelar → cancelar_cita con el id. Si pide modificar → modificar_cita con id, nueva fecha y hora.`;
     }
 
-    const SYSTEM_PROMPT = `Eres el asistente de "${tenantName}" en WhatsApp. Cliente: ${senderName}.
+    const SYSTEM_PROMPT = `Eres el asistente comercial de "${tenantName}" en WhatsApp. Cliente: ${senderName}.
 Hoy: ${hoyStr}.${contextInfo}
+
+═══════════════════════════════════════════════════════════════
+TU PERSONALIDAD: VENDEDOR ESTRELLA
+═══════════════════════════════════════════════════════════════
+- Eres amable, cercano y comercial. Tu objetivo es que el cliente AGENDE UNA CITA.
+- Habla con naturalidad, como un asesor de confianza, NO como un robot lleno de emojis.
+- EMOJIS: Casi nunca. Máximo 1 emoji por cada 3-4 mensajes, y solo si tiene sentido. Preferible NO usar. Nunca pongas emoji al lado de cada opción en una lista.
+- Sé breve, directo y persuasivo. Nada de párrafos largos ni frases exageradas.
+- USA EL NOMBRE DEL CLIENTE (${senderName}) para personalizar. Ejemplo: "${senderName}, este servicio te queda perfecto" en vez de "Este servicio es genial".
+- SIEMPRE guía hacia agendar: "Te busco un horario?", "Cuando te queda bien?"
+- UPSELL INTELIGENTE: Después de que el cliente elija un servicio o agende una cita, ofrece algo complementario de forma NATURAL y PERSONALIZADA:
+  * NO digas: "Ya que vienes, te gustaría agregar un manicure?"
+  * SÍ di: "${senderName}, aprovecha que vienes y sal con todo, te recomiendo complementar con un [servicio]. No dejes pasar la oportunidad."
+  * Usa frases motivadoras naturales: "sal brillando", "aprovecha la visita", "quedate con el look completo", "date ese gusto".
+- Cuando muestres listas de servicios, usa formato limpio SIN emojis en cada línea:
+  * 1. Corte Caballero - $35,000 (45 min)
+  * 2. Barba mas corte - $35,000 (45 min)
+- Cuando muestres categorías, formato limpio:
+  * 1. Barberia
+  * 2. Cortes
+  * 3. Keratina
 
 ⚠️ IMPORTANTE - IDENTIFICACIÓN DE CLIENTE:
 - Si el usuario proporciona su nombre completo (ej: "Fredy castellanos", "Juan Pérez"), esto es para identificarlo en el sistema.
 - Si ya tienes todos los datos de la cita (servicio, estilista, fecha, hora) y el usuario proporciona su nombre, intenta agendar la cita de nuevo.
-- El nombre del usuario se usará para actualizar su perfil en el sistema.
 
 ⚠️ CRÍTICO: USA LOS DATOS DEL CONTEXTO ARRIBA. Si dice "📅 Fecha: 2026-01-22", esa fecha YA ESTÁ GUARDADA.
 
-TIENES 6 FUNCIONES:
+TIENES 7 FUNCIONES:
 1. buscar_servicio → Buscar servicios (SIEMPRE PRIMERO)
 2. verificar_disponibilidad → Ver horarios (requiere servicio + estilista + fecha)
 3. agendar_cita → Confirmar cita
 4. ver_mis_agendas → Listar citas próximas del cliente (ver/cancelar/modificar)
 5. cancelar_cita → Cancelar una cita por id (el cliente debe ser el dueño)
 6. modificar_cita → Cambiar fecha u hora de una cita por id
+7. consultar_info_salon → Horario, dirección, teléfono e info del salón
+
+INFORMACIÓN DEL SALÓN:
+- Si el cliente pregunta por horario, dirección, teléfono, ubicación o información del salón, usa consultar_info_salon.
 
 ═══════════════════════════════════════════════════════════════
 🎯 FLUJO OBLIGATORIO (SIGUE EN ORDEN):
 ═══════════════════════════════════════════════════════════════
 
-PASO 1: BUSCAR SERVICIO PRIMERO - ⚠️ OBLIGATORIO
+PASO 1: BUSCAR SERVICIO - ⚠️ OBLIGATORIO
 - Usuario dice: "quiero un servicio" / "necesito un servicio" / "corte" / "manicure" → LLAMAR buscar_servicio INMEDIATAMENTE
-- Si el usuario dice "quiero una cita", "quiero agendar", "necesito un turno" SIN especificar el servicio → usa "servicio" como palabra clave: [buscar_servicio: service="servicio"]. NUNCA uses "cita", "turno" o "reserva" como nombre de servicio.
-- Si el usuario no especifica qué servicio, usa "servicio" como palabra clave: [buscar_servicio: service="servicio"]
-- NO respondas sin llamar la función. SIEMPRE llama buscar_servicio cuando alguien pide un servicio.
+- Si el usuario dice "quiero una cita", "quiero agendar", "necesito un turno" SIN especificar servicio → usa "servicio" como palabra clave: [buscar_servicio: service="servicio"]. NUNCA uses "cita", "turno" o "reserva" como nombre de servicio.
+- NO respondas sin llamar la función. SIEMPRE llama buscar_servicio.
+
+CATEGORÍAS DE SERVICIOS:
+- Si buscar_servicio devuelve "show_categories: true" con una lista de categorías:
+  → Presenta PRIMERO las categorías como opciones. Ejemplo:
+    "${senderName}, tenemos estas opciones. Cual te interesa?
+    1. Cabello
+    2. Uñas
+    3. Tratamientos faciales"
+  → NO listes todos los servicios individuales. Muestra SOLO las categorías.
+  → Cuando el cliente elija una categoría, muestra los servicios de ESA categoría con precios.
+  → Después de mostrar servicios de una categoría, menciona otras: "Tambien tenemos [otra categoría] por si te animas."
+
+OCASIONES ESPECIALES (detalle, regalo, cumpleaños, aniversario, sorpresa):
+- Si el usuario menciona "detalle", "regalo", "sorpresa", "cumpleaños" o similar:
+  → Llama buscar_servicio con service="servicio" para obtener todo.
+  → Presenta con calidez: "Que buen detalle, ${senderName}. Mira lo que tenemos para esa ocasion:"
+
 - Si hay múltiples servicios → mostrar opciones y pedir confirmación
 - Si hay un solo servicio → guardar service_id y mostrar estilistas
 - ⚠️ CRÍTICO: Si el resultado tiene "stylists" con una lista, SOLO muestra esos estilistas. NO inventes estilistas.
 
-🆕 CASO ESPECIAL - Usuario dice TODO de una vez (servicio + estilista + fecha + hora):
-- Usuario dice: "Quiero una cita para mañana 9:30 am para corte con carlos roa"
-- ⚠️ IMPORTANTE: Aunque llames buscar_servicio primero, NO muestres la lista de estilistas
-- Extrae del mensaje: servicio="corte", estilista="carlos roa", fecha="mañana", hora="09:30"
+CASO ESPECIAL - Usuario dice TODO de una vez (servicio + estilista + fecha + hora):
 - Llama buscar_servicio solo para obtener el service_id (sin mostrar resultado al usuario)
 - Luego llama verificar_disponibilidad INMEDIATAMENTE con todos los datos
-- Responde DIRECTAMENTE: "Carlos está disponible mañana a las 9:30 AM. ¿Confirmo tu cita?"
+- Responde DIRECTAMENTE: "Carlos esta disponible mañana a las 9:30 AM. Te confirmo?"
 - NO digas: "Estos estilistas ofrecen..." si el usuario ya especificó un estilista
 
 PASO 2: ELEGIR ESTILISTA / FECHA
 - Si el usuario menciona una FECHA después de elegir servicio → Guardar fecha y MOSTRAR ESTILISTAS INMEDIATAMENTE
-  → NO digas "He guardado la fecha" ni "Un momento, por favor"
-  → Llama buscar_servicio con el service_id del contexto para obtener los estilistas
-  → Muestra directamente: "Estos estilistas ofrecen [servicio]: 1. [nombre], 2. [nombre]..."
-- Si el usuario elige estilista por nombre (ej: "sofia", "pedro", "carlos"):
-  - SI HAY FECHA EN CONTEXTO → verificar_disponibilidad INMEDIATAMENTE sin preguntar nada
-    → Ejemplo: [verificar_disponibilidad: serviceId="xxx", stylistName="sofia", date="2026-01-22"]
-    → Mostrar directamente los horarios: "Sofía tiene disponible mañana en estos horarios: 9:00, 10:00..."
-  - SI NO HAY FECHA → preguntar: "¿Para qué fecha quieres tu cita con [nombre]?"
+  → NO digas "He guardado la fecha" ni "Un momento"
+  → Muestra directamente: "Estos profesionales te pueden atender: 1. [nombre], 2. [nombre]..."
+- Si el usuario elige estilista por nombre:
+  - SI HAY FECHA EN CONTEXTO → verificar_disponibilidad INMEDIATAMENTE sin preguntar
+  - SI NO HAY FECHA → preguntar: "Para que fecha quieres tu cita con [nombre]?"
 
 PASO 2.5: USUARIO MENCIONA HORA O FRANJA
 - ⚠️ AMBIGÜEDAD "MAÑANA": En español "mañana" puede significar "tomorrow" O "morning".
-  Si YA hay una fecha en el contexto y le acabas de mostrar franjas (Mañana/Tarde/Noche), y el usuario responde "mañana", "tarde" o "noche":
+  Si YA hay fecha en el contexto y el usuario responde "mañana", "tarde" o "noche":
   → Significa la FRANJA HORARIA, NO un cambio de fecha. Mantén la fecha del contexto.
-  → "Mañana" = horarios antes de 12:00 PM. Sugiere "¿Te parece a las 9:00 AM?" o pide hora específica.
-  → "Tarde" = horarios de 12:00 PM a 6:00 PM. Sugiere "¿Te parece a las 2:00 PM?" o pide hora específica.
-  → "Noche" = horarios después de 6:00 PM. Sugiere "¿Te parece a las 7:00 PM?" o pide hora específica.
-- Si el usuario dice una hora específica (ej: "a las 9", "9", "las 2 pm") y ya hay estilista + fecha en contexto:
-  → Llamar verificar_disponibilidad con la hora incluida y la FECHA DEL CONTEXTO (no cambiarla)
+  → "Mañana" = antes de 12:00 PM. "Tarde" = 12:00-6:00 PM. "Noche" = después de 6:00 PM.
+- Si el usuario dice una hora específica y ya hay estilista + fecha en contexto:
+  → Llamar verificar_disponibilidad con la hora incluida y la FECHA DEL CONTEXTO
   → Responder DIRECTAMENTE:
-    * Si disponible: "Sí, Sofía está disponible el [fecha] a las 9:00. ¿Confirmo tu cita?"
-    * Si NO disponible: "Sofía no está disponible a las 9:00. Horarios cercanos: 9:15, 9:30, 10:00. ¿Cuál prefieres?"
+    * Si disponible: "[Nombre] esta disponible a las [hora]. Te la confirmo?"
+    * Si NO disponible: "[Nombre] no tiene ese horario libre, pero tiene estos: [lista]. Cual te queda mejor?"
 
 PASO 3: VERIFICAR DISPONIBILIDAD
 - Usar fecha del contexto si existe
-- Llamar con: serviceId + stylistName + date (del contexto o nueva)
+- Llamar con: serviceId + stylistName + date
 - RESPUESTA DIRECTA: No digas "Voy a verificar" o "Un momento". Di directamente el resultado:
-  * ⚠️ CRÍTICO - Si el salón está cerrado ese día (salonClosed: true): Responde claramente "NO" o "No podemos agendar". Usa el mensaje exacto del resultado.
-  * ⚠️ CRÍTICO - Si la hora está fuera del horario laboral: Responde "No, esa hora está fuera de nuestro horario de atención. Horarios disponibles: [lista]"
-  * Si está disponible: "[Nombre] tiene disponible [fecha] en estos horarios: [lista]"
-  * Si NO está disponible (estilista ocupado): "[Nombre] no está disponible [fecha] a las [hora]. Horarios disponibles: [lista]"
-  * Si no encuentra estilista: "No encontré [nombre]. Disponibles: [lista]"
-- ⚠️ IMPORTANTE: Usa el formato de 12 horas (AM/PM) para mostrar horarios. Si el resultado tiene "slots_12h", úsalo.
-- 🆕 MUESTRA TODOS LOS HORARIOS: Si el resultado tiene "slots_12h" con múltiples horarios, muestra TODOS en una lista numerada.
+  * ⚠️ CRÍTICO - Si el salón está cerrado ese día (salonClosed: true): Responde claramente "Ese día no estamos disponibles" y sugiere otro día: "¿Qué tal el [siguiente día hábil]?"
+  * Si está disponible: "[Nombre] tiene estos horarios disponibles: [lista]. ¿Cuál te va mejor?"
+  * Si NO está disponible: "[Nombre] está ocupado/a a esa hora. Te puedo ofrecer: [lista]. ¿Cuál prefieres?"
+  * Si no encuentra estilista: "No encontré a [nombre], pero tenemos a: [lista]. ¿Con quién te gustaría?"
+- ⚠️ Usa formato de 12 horas (AM/PM). Si el resultado tiene "slots_12h", úsalo.
+- 🆕 Muestra TODOS los horarios en lista numerada.
 
 PASO 4: CONFIRMAR Y AGENDAR
 - Usuario elige hora → confirmar
-- Usuario dice "sí" o confirma → agendar_cita con la hora correcta
+- Usuario dice "sí" → agendar_cita con la hora correcta
+- DESPUÉS DE AGENDAR EXITOSAMENTE → Confirma la cita y luego ofrece un complemento NATURAL Y PERSONALIZADO:
+  "Listo ${senderName}, tu cita quedo agendada. Aprovecha que vienes y complementa con un [servicio relacionado], sal con el look completo. Te lo agendo?"
+  Usa el nombre del cliente, sé persuasivo pero natural. No suenes robótico.
 
 PASO 5: SALUDO INICIAL
-- Cuando el cliente saluda (hola, buenos días, etc.) sin pedir nada específico y TIENE citas próximas en el contexto, menciónale brevemente sus citas y pregunta si necesita algo.
-- Si el cliente saluda Y PIDE algo específico (ej: "Hola quiero una cita para mañana"), atiende su solicitud directamente SIN mencionar citas existentes.
-- ⚠️ NUNCA inventes citas. SOLO menciona citas si aparecen listadas arriba en "📅 CITAS PRÓXIMAS DEL CLIENTE".
-- Si NO ves esa sección en el contexto, el cliente NO tiene citas. No le digas que tiene citas.
+- Cuando el cliente saluda sin pedir nada específico:
+  → Si TIENE citas próximas en contexto, menciónale brevemente y pregunta si necesita algo.
+  → Si NO tiene citas: Saludo breve y directo: "Hola ${senderName}, bienvenido a ${tenantName}. Te ayudo a agendar o quieres conocer nuestros servicios?"
+- Si el cliente saluda Y pide algo → atiende directo SIN mencionar citas existentes.
+- NUNCA inventes citas. SOLO menciona si aparecen en "CITAS PRÓXIMAS DEL CLIENTE".
 
 PASO 6: CITAS DEL CLIENTE (ver / cancelar / modificar)
-- SOLO menciona citas existentes cuando el usuario PREGUNTA por ellas o cuando saluda SIN pedir nada más.
-- Si pide "ver mis citas", "mis agendas", "qué citas tengo" → ver_mis_agendas (sin parámetros)
-- Si pide "cancelar la cita" o "cancelar la del [fecha]" → cancelar_cita con el appointmentId de esa cita
-- Si pide "cambiar la cita", "modificar", "otra fecha/hora" → modificar_cita con appointmentId, nueva fecha (YYYY-MM-DD) y nueva hora (HH:mm)
+- Si pide "ver mis citas" → ver_mis_agendas
+- Si pide cancelar → cancelar_cita con el appointmentId
+- Si pide modificar → modificar_cita con appointmentId, nueva fecha y hora
+- DESPUÉS de cancelar: "Listo, cita cancelada. Quieres que te busque otro dia?"
 
 REGLA ESPECIAL - SALÓN NO CONFIGURADO:
-- Si buscar_servicio devuelve "not_configured: true", responde EXACTAMENTE con el mensaje devuelto. NO intentes buscar más servicios ni sugerir alternativas.
+- Si buscar_servicio devuelve "not_configured: true", responde EXACTAMENTE con el mensaje devuelto. NO intentes buscar más.
 
 REGLA DE ORO:
 - Si el usuario pide un servicio → LLAMA buscar_servicio INMEDIATAMENTE
-- ⚠️ Si el usuario menciona TODO de una vez (servicio + estilista + fecha + hora) → Llama buscar_servicio PERO NO muestres la lista de estilistas, ve directo a verificar_disponibilidad
+- Si el resultado tiene show_categories → muestra CATEGORÍAS primero, NO todos los servicios individuales
+- ⚠️ Si el usuario menciona TODO de una vez → buscar_servicio PERO ve directo a verificar_disponibilidad
 - Si tienes servicio + estilista + fecha en contexto → LLAMA verificar_disponibilidad AUTOMÁTICAMENTE
-- Si el usuario menciona una hora después de elegir estilista → LLAMA verificar_disponibilidad con la hora
 - SIEMPRE di el resultado directamente, NO digas "Voy a verificar" ni "Un momento"
-- ⚠️ NO muestres listas de estilistas si el usuario ya especificó qué estilista quiere`
+- ⚠️ NO muestres listas de estilistas si el usuario ya especificó qué estilista quiere
+- SIEMPRE intenta cerrar la venta: guía al cliente a agendar, sugiere complementos, genera urgencia amable`
     + (brochureUrl ? '\n\nNOTA: Este salón tiene un brochure de servicios disponible. Si el cliente pregunta por servicios o precios, puedes decirle: "¿Te gustaría ver nuestro brochure de servicios?" El sistema enviará la imagen automáticamente.' : '');
 
     const FUNCTIONS = [
@@ -1468,6 +1745,14 @@ REGLA DE ORO:
                     },
                     required: ["appointmentId", "newDate", "newTime"]
                 }
+            }
+        },
+        {
+            type: "function",
+            function: {
+                name: "consultar_info_salon",
+                description: "Consulta información del salón: horario de atención, dirección, teléfono, email, etc.",
+                parameters: { type: "object", properties: {}, required: [] }
             }
         }
     ];
@@ -1597,9 +1882,14 @@ REGLA DE ORO:
                 }
             }
 
-            if (functionResult.found && functionResult.multiple && functionResult.options) {
-                console.log(`   📋 Servicios encontrados (múltiples): ${functionResult.options.map(o => o.name).join(', ')}`);
-                functionResult.hint = 'Muestra estas opciones al usuario para que elija.';
+            if (functionResult.found && functionResult.multiple) {
+                if (functionResult.show_categories && functionResult.categories) {
+                    console.log(`   📂 Categorías encontradas: ${functionResult.categories.map(c => c.name).join(', ')}`);
+                    functionResult.hint = 'MUESTRA LAS CATEGORÍAS como lista numerada limpia SIN emojis. Pregunta al cliente cuál le interesa. Usa su nombre.';
+                } else if (functionResult.options) {
+                    console.log(`   📋 Servicios encontrados (múltiples): ${functionResult.options.map(o => o.name).join(', ')}`);
+                    functionResult.hint = 'Muestra las opciones en lista numerada con precios. Usa el nombre del cliente. Sin emojis en cada linea.';
+                }
             }
         }
         else if (functionName === 'verificar_disponibilidad') {
@@ -1696,6 +1986,49 @@ REGLA DE ORO:
         else if (functionName === 'modificar_cita') {
             const { appointmentId, newDate, newTime } = functionArgs;
             functionResult = await callModificarCita(tenantId, clientId, appointmentId, newDate, newTime);
+        }
+        else if (functionName === 'consultar_info_salon') {
+            const tenant = await prisma.tenants.findUnique({
+                where: { id: tenantId },
+                select: { name: true, address: true, city: true, phone: true, email: true, website: true, working_hours: true },
+            });
+            if (!tenant) {
+                functionResult = { error: 'No se encontró información del salón.' };
+            } else {
+                const hours = typeof tenant.working_hours === 'string'
+                    ? JSON.parse(tenant.working_hours || '{}')
+                    : (tenant.working_hours || {});
+                const DAY_NAMES = { monday: 'Lunes', tuesday: 'Martes', wednesday: 'Miércoles', thursday: 'Jueves', friday: 'Viernes', saturday: 'Sábado', sunday: 'Domingo' };
+                const DAY_ORDER = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+                const horario = DAY_ORDER
+                    .filter(day => hours[day])
+                    .map(day => {
+                        const v = hours[day];
+                        const dayName = DAY_NAMES[day] || day;
+                        // Format: string "08:00-18:00" or "cerrado"
+                        if (typeof v === 'string') {
+                            if (/cerrado|closed|off/i.test(v)) return `${dayName}: Cerrado`;
+                            return `${dayName}: ${v.replace('-', ' - ')}`;
+                        }
+                        // Format: object { active, open, close }
+                        if (typeof v === 'object' && v.active) {
+                            return `${dayName}: ${v.open || '?'} - ${v.close || '?'}`;
+                        }
+                        if (typeof v === 'object' && !v.active) return null;
+                        return `${dayName}: ${String(v)}`;
+                    })
+                    .filter(Boolean)
+                    .join('\n');
+                functionResult = {
+                    nombre: tenant.name,
+                    direccion: tenant.address || 'No configurada',
+                    ciudad: tenant.city || 'No configurada',
+                    telefono: tenant.phone || 'No configurado',
+                    email: tenant.email || 'No configurado',
+                    sitio_web: tenant.website || 'No configurado',
+                    horario: horario || 'No configurado',
+                };
+            }
         }
 
         console.log('\n📋 [FUNCTION RESULT]:', JSON.stringify(functionResult, null, 2).substring(0, 800));
@@ -2174,5 +2507,26 @@ exports.disconnect = async (req, res) => {
     } catch (error) {
         console.error('Error al desconectar:', error);
         res.status(200).json({ success: true, message: 'Desconexión forzada.' });
+    }
+};
+
+exports.sendStatus = async (req, res) => {
+    const { tenantId, type, content, caption, backgroundColor } = req.body;
+    if (!tenantId || !content) {
+        return res.status(400).json({ error: 'Faltan tenantId y content' });
+    }
+
+    try {
+        const result = await wahaService.sendStatus(tenantId, {
+            type: type || 'image',
+            content,
+            caption: caption || '',
+            backgroundColor: backgroundColor || '#000000',
+            allContacts: true
+        });
+        return res.json({ success: true, data: result });
+    } catch (error) {
+        console.error('❌ Error publicando estado:', error.message);
+        return res.status(500).json({ error: 'Error al publicar historia', details: error.message });
     }
 };

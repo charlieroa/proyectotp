@@ -36,4 +36,12 @@ router.post('/webhook', whatsappController.handleWahaWebhook);
  */
 router.post('/disconnect', whatsappController.disconnect);
 
+/**
+ * POST /api/whatsapp/send-status
+ * ------------------------------------------------------
+ * Publica una historia/estado de WhatsApp.
+ * Body: { tenantId, type: 'text'|'image'|'video', content, caption?, backgroundColor? }
+ */
+router.post('/send-status', whatsappController.sendStatus);
+
 module.exports = router;

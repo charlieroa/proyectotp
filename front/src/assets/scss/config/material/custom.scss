@@ -6,6 +6,42 @@ Contact: support@themesbrand.com
 File: Custom Css File
 */
 
+/* Page content white container — cards sit on white, gray stays outside */
+.main-content .page-content {
+  > .container-fluid {
+    background-color: #fff;
+    border-radius: 0.5rem;
+    padding: 1.25rem;
+    margin-bottom: 80px;
+    min-height: calc(100vh - 200px);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  }
+}
+
+/* Floating AI assistant — sits on the gray area outside the white container */
+.customizer-setting {
+  bottom: 16px !important;
+  right: 16px !important;
+}
+
+/* Sileo toast — dark theme, blue accents */
+[data-sileo-viewport] {
+  z-index: 1050 !important;
+
+  /* All states → blue */
+  --sileo-state-success: #3b82f6;
+  --sileo-state-loading: #3b82f6;
+  --sileo-state-error: #3b82f6;
+  --sileo-state-warning: #3b82f6;
+  --sileo-state-info: #3b82f6;
+  --sileo-state-action: #3b82f6;
+}
+
+/* White description text on dark toast */
+[data-sileo-viewport][data-theme="light"] [data-sileo-description] {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
 /* Tenant Switcher - collapsed sidebar */
 [data-sidebar-size="sm"] {
   .tenant-switcher-sidebar {

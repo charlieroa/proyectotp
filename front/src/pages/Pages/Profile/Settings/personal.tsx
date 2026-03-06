@@ -41,7 +41,7 @@ type AssignedSvc = { id: string; name: string };
 type DayKey = "lunes" | "martes" | "miercoles" | "jueves" | "viernes" | "sabado" | "domingo";
 type DayState = { active: boolean; open: string; close: string };
 type WeekState = Record<DayKey, DayState>;
-type RoleFilter = "all" | 2 | 3;
+type RoleFilter = "all" | 2 | 3 | 6;
 
 interface PersonalProps {
   services: Service[];
@@ -420,7 +420,7 @@ const StaffModal: React.FC<{
             const baseBody = {
                 first_name: firstName.trim(),
                 last_name: lastName.trim() || null,
-                email: email.trim() || null,
+                email: email.trim().toLowerCase() || null,
                 phone: phone.trim() || null,
                 role_id: roleId,
                 payment_type: "commission" as PaymentType,
@@ -443,9 +443,24 @@ const StaffModal: React.FC<{
                 const createBody = { ...baseBody, tenant_id: tenantId, password: password.trim() };
                 const { data: created } = await api.post(`/users`, createBody);
                 if (created?.id && isStylist) await saveAssignments(created.id);
+
+                // Mostrar credenciales al admin
+                await Swal.fire({
+                    icon: 'success',
+                    title: '¡Personal creado!',
+                    html: `<div style="text-align:left">
+                        <p><b>Email:</b> ${(email.trim() || '').toLowerCase()}</p>
+                        <p><b>Contraseña:</b> <code>${password.trim()}</code></p>
+                        <hr/>
+                        <small class="text-muted">Comparte estas credenciales con el nuevo personal para que pueda iniciar sesión.</small>
+                    </div>`,
+                    confirmButtonText: 'Entendido',
+                });
             }
 
-            Swal.fire({ icon: 'success', title: edit ? '¡Personal actualizado!' : '¡Personal creado!', showConfirmButton: false, timer: 1500 });
+            if (edit) {
+                Swal.fire({ icon: 'success', title: '¡Personal actualizado!', showConfirmButton: false, timer: 1500 });
+            }
             onSaved();
             onClose();
         } catch (e:any) {
@@ -455,7 +470,7 @@ const StaffModal: React.FC<{
         }
     };
 
-    const roleName = roleId === 2 ? "Cajero" : "Estilista";
+    const roleName = roleId === 2 ? "Cajero" : roleId === 6 ? "Recepcionista" : "Estilista";
 
     return (
         <Modal isOpen={isOpen} toggle={onClose} size="lg" centered>
@@ -472,6 +487,7 @@ const StaffModal: React.FC<{
                             >
                                 <option value={3}>Estilista</option>
                                 <option value={2}>Cajero</option>
+                                <option value={6}>Recepcionista</option>
                             </select>
                         </div>
                     )}
@@ -504,15 +520,7 @@ const StaffModal: React.FC<{
                             placeholder="marcos@example.com"
                         />
                     </div>
-                    <div className="col-md-6">
-                        <label className="form-label">Teléfono</label>
-                        <input
-                            className="form-control"
-                            value={phone}
-                            onChange={(e) => setPhone(e.target.value)}
-                            placeholder="3001234567"
-                        />
-                    </div>
+                    {/* Teléfono removido — no es necesario para personal */}
 
                     <div className="col-md-6">
                         <label className="form-label">
@@ -747,9 +755,9 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
     const loadStaff = async () => {
       setStaffLoading(true);
       try {
-        const { data } = await api.get(`/users/tenant/${tenantId}`, { params: { role_ids: '2,3' } });
+        const { data } = await api.get(`/users/tenant/${tenantId}`, { params: { role_ids: '2,3,6' } });
         const allStaff = Array.isArray(data) ? data : [];
-        const filteredStaffData = allStaff.filter(user => user.role_id === 2 || user.role_id === 3);
+        const filteredStaffData = allStaff.filter(user => [2, 3, 6].includes(user.role_id));
         setStaff(filteredStaffData);
         await loadAssignedForStaff(filteredStaffData);
         setPage(1);
@@ -820,6 +828,8 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
         setRoleFilter(3);
       } else if (roleFilter === 3) {
         setRoleFilter(2);
+      } else if (roleFilter === 2) {
+        setRoleFilter(6);
       } else {
         setRoleFilter("all");
       }
@@ -828,6 +838,7 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
 
     const stylistsCount = staff.filter(u => u.role_id === 3).length;
     const cashiersCount = staff.filter(u => u.role_id === 2).length;
+    const receptionistsCount = staff.filter(u => u.role_id === 6).length;
 
     return (
       <div>
@@ -863,6 +874,10 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
             className={`btn btn-sm rounded-pill ${roleFilter === 2 ? 'btn-info' : 'btn-light'}`}>
             <i className="ri-cash-line me-1"></i>Cajeros ({cashiersCount})
           </button>
+          <button type="button" onClick={() => { setRoleFilter(6); setPage(1); }}
+            className={`btn btn-sm rounded-pill ${roleFilter === 6 ? 'btn-warning' : 'btn-light'}`}>
+            <i className="ri-customer-service-2-line me-1"></i>Recepcionistas ({receptionistsCount})
+          </button>
         </div>
 
         <div className="table-responsive">
@@ -883,7 +898,7 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
                     <td colSpan={6} className="text-center py-5">
                       <i className="ri-team-line fs-36 text-muted d-block mb-2"></i>
                       <h6 className="fw-medium mb-1">
-                        {roleFilter === "all" ? "No hay personal registrado" : roleFilter === 3 ? "No hay estilistas registrados" : "No hay cajeros registrados"}
+                        {roleFilter === "all" ? "No hay personal registrado" : roleFilter === 3 ? "No hay estilistas registrados" : roleFilter === 6 ? "No hay recepcionistas registrados" : "No hay cajeros registrados"}
                       </h6>
                       <p className="text-muted fs-13 mb-3">
                         {roleFilter === "all" ? "Agrega a tu equipo para gestionar citas y servicios." : "Prueba con otro filtro o agrega nuevo personal."}
@@ -903,9 +918,9 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
                       <td>
                         <div className="d-flex align-items-center gap-2">
                           <div className={`avatar-xs rounded-circle d-flex align-items-center justify-content-center ${
-                            u.role_id === 3 ? 'bg-success-subtle' : 'bg-info-subtle'
+                            u.role_id === 3 ? 'bg-success-subtle' : u.role_id === 6 ? 'bg-warning-subtle' : 'bg-info-subtle'
                           }`}>
-                            <span className={`fw-medium ${u.role_id === 3 ? 'text-success' : 'text-info'}`}>
+                            <span className={`fw-medium ${u.role_id === 3 ? 'text-success' : u.role_id === 6 ? 'text-warning' : 'text-info'}`}>
                               {u.first_name.charAt(0).toUpperCase()}
                             </span>
                           </div>
@@ -915,6 +930,8 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
                       <td>
                         {u.role_id === 2
                           ? <span className="badge bg-info-subtle text-info rounded-pill">Cajero</span>
+                          : u.role_id === 6
+                          ? <span className="badge bg-warning-subtle text-warning rounded-pill">Recepcionista</span>
                           : <span className="badge bg-success-subtle text-success rounded-pill">Estilista</span>
                         }
                       </td>

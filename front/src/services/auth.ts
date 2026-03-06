@@ -61,6 +61,12 @@ export const getRoleFromToken = (): number | null => {
 };
 
 
+export const getIsPrimaryBranch = (): boolean => {
+  const dec = getDecodedToken();
+  // Standalone salons (no parent) are always considered primary
+  return dec?.user?.is_primary_branch !== false;
+};
+
 export const isTokenExpired = (): boolean => {
   const dec = getDecodedToken();
   if (!dec?.exp) return false;

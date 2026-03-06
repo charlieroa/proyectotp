@@ -11,7 +11,7 @@ import TarjetaCita from './TarjetaCita';
 import api from '../../services/api';
 import Swal from 'sweetalert2';
 import { jwtDecode } from "jwt-decode";
-import { getToken } from "../../services/auth";
+import { getToken, getRoleFromToken } from "../../services/auth";
 
 // --- Tipos ---
 interface CentroDeCitasDiariasProps { events: any[]; onNewAppointmentClick: () => void; }
@@ -160,6 +160,8 @@ const ModalResumenCierre: React.FC<{ isOpen: boolean; onClose: () => void; onSes
 
 const CentroDeCitasDiarias = ({ events, onNewAppointmentClick }: CentroDeCitasDiariasProps) => {
     const navigate = useNavigate();
+    const userRole = getRoleFromToken();
+    const isRecepcionista = userRole === 6;
     const [selectedDate, setSelectedDate] = useState<Date>(new Date());
     const [searchTerm, setSearchTerm] = useState<string>('');
     const [dropdownOpen, setDropdownOpen] = useState<boolean>(false);
@@ -187,13 +189,17 @@ const CentroDeCitasDiarias = ({ events, onNewAppointmentClick }: CentroDeCitasDi
 
     // --- AJUSTE: Se agregó una alerta de error si la carga de la sesión falla ---
     const fetchCurrentSession = async () => {
+        // Recepcionista no gestiona caja — solo ve citas
+        if (isRecepcionista) {
+            setLoadingSession(false);
+            return;
+        }
         try {
             setLoadingSession(true);
             const { data } = await api.get('/cash/current');
             setCashSession(data);
         } catch (e: any) {
             console.error("Error cargando la sesión de caja", e);
-            // Mostrar una alerta al usuario para que sepa que algo falló
             Swal.fire({
                 icon: 'error',
                 title: 'Error de Conexión',
@@ -231,7 +237,7 @@ const CentroDeCitasDiarias = ({ events, onNewAppointmentClick }: CentroDeCitasDi
 
     useEffect(() => { if (paymentsModalOpen) fetchPrerequisites(); }, [paymentsModalOpen]);
 
-    const gruposPorCliente = useMemo<GrupoCliente[]>(() => { if (!cashSession) return []; const startOfDay = new Date(selectedDate); startOfDay.setHours(0, 0, 0, 0); const endOfDay = new Date(selectedDate); endOfDay.setHours(23, 59, 59, 999); const filtradas: CitaEvento[] = events.filter((event) => { const fechaCita = new Date(event.start); const enFecha = fechaCita >= startOfDay && fechaCita <= endOfDay; const esOperativa = event.extendedProps.status !== 'cancelled' && event.extendedProps.status !== 'completed'; if (!enFecha || !esOperativa) return false; if (searchTerm) { const q = searchTerm.toLowerCase(); return (event.extendedProps.client_first_name?.toLowerCase().includes(q) || event.extendedProps.client_last_name?.toLowerCase().includes(q) || event.extendedProps.stylist_first_name?.toLowerCase().includes(q)); } return true; }); const map = new Map<string | number, GrupoCliente>(); for (const ev of filtradas) { const ep = ev.extendedProps || {}; const clientId = ep.client_id ?? ep.clientId; if (clientId == null) continue; const item = { id: ev.id, service_name: ep.service_name, stylist_first_name: ep.stylist_first_name, start_time: ep.start_time ?? ev.start, }; if (!map.has(clientId)) { map.set(clientId, { clientId, client_first_name: ep.client_first_name, client_last_name: ep.client_last_name, earliestStartISO: item.start_time, count: 1, appointments: [item], }); } else { const g = map.get(clientId)!; g.appointments.push(item); g.count += 1; if (new Date(item.start_time).getTime() < new Date(g.earliestStartISO).getTime()) { g.earliestStartISO = item.start_time; } } } return Array.from(map.values()).sort((a, b) => new Date(a.earliestStartISO).getTime() - new Date(b.earliestStartISO).getTime()); }, [events, selectedDate, searchTerm, cashSession]);
+    const gruposPorCliente = useMemo<GrupoCliente[]>(() => { if (!cashSession && !isRecepcionista) return []; const startOfDay = new Date(selectedDate); startOfDay.setHours(0, 0, 0, 0); const endOfDay = new Date(selectedDate); endOfDay.setHours(23, 59, 59, 999); const filtradas: CitaEvento[] = events.filter((event) => { const fechaCita = new Date(event.start); const enFecha = fechaCita >= startOfDay && fechaCita <= endOfDay; const esOperativa = event.extendedProps.status !== 'cancelled' && event.extendedProps.status !== 'completed'; if (!enFecha || !esOperativa) return false; if (searchTerm) { const q = searchTerm.toLowerCase(); return (event.extendedProps.client_first_name?.toLowerCase().includes(q) || event.extendedProps.client_last_name?.toLowerCase().includes(q) || event.extendedProps.stylist_first_name?.toLowerCase().includes(q)); } return true; }); const map = new Map<string | number, GrupoCliente>(); for (const ev of filtradas) { const ep = ev.extendedProps || {}; const clientId = ep.client_id ?? ep.clientId; if (clientId == null) continue; const item = { id: ev.id, service_name: ep.service_name, stylist_first_name: ep.stylist_first_name, start_time: ep.start_time ?? ev.start, }; if (!map.has(clientId)) { map.set(clientId, { clientId, client_first_name: ep.client_first_name, client_last_name: ep.client_last_name, earliestStartISO: item.start_time, count: 1, appointments: [item], }); } else { const g = map.get(clientId)!; g.appointments.push(item); g.count += 1; if (new Date(item.start_time).getTime() < new Date(g.earliestStartISO).getTime()) { g.earliestStartISO = item.start_time; } } } return Array.from(map.values()).sort((a, b) => new Date(a.earliestStartISO).getTime() - new Date(b.earliestStartISO).getTime()); }, [events, selectedDate, searchTerm, cashSession]);
     const handleOpenPayments = () => { if (cashSession) { setActiveTab('anticipo'); } else if(canSellToStaff) { setActiveTab('venta_personal'); } setPaymentsModalOpen(true); };
     const handleNewSale = () => { navigate('/checkout'); };
     const handleSaveAnticipo = async () => { const amount = parseInt(anticipo.amountDigits || '0', 10) || 0; if (!anticipo.stylist_id || amount <= 0) { Swal.fire('Datos incompletos', 'Selecciona un estilista y un monto válido.', 'warning'); return; } try { await api.post('/cash/movements', { type: 'payroll_advance', category: 'stylist_advance', description: anticipo.description || 'Anticipo', amount, payment_method: 'cash', related_entity_type: 'stylist', related_entity_id: anticipo.stylist_id }); Swal.fire('¡Éxito!', 'Anticipo registrado correctamente.', 'success'); setPaymentsModalOpen(false); setAnticipo({ stylist_id: '', amountDigits: '', description: '' }); fetchCurrentSession(); } catch (e: any) { console.error(e); Swal.fire('Error', e?.response?.data?.error || 'No se pudo registrar el anticipo.', 'error'); } };
@@ -249,18 +255,24 @@ const CentroDeCitasDiarias = ({ events, onNewAppointmentClick }: CentroDeCitasDi
         <Card>
             <CardBody>
                 <div className="d-flex justify-content-between align-items-center mb-3">
-                    <h5 className="card-title mb-0">Operaciones del Día</h5>
-                    <Dropdown isOpen={dropdownOpen} toggle={toggleDropdown}>
-                        <DropdownToggle color="light" caret>Opciones</DropdownToggle>
-                        <DropdownMenu end>
-                            {cashSession && <DropdownItem onClick={() => setCloseModalOpen(true)} disabled={loadingSession}><i className="mdi mdi-door-closed me-2"></i> Cerrar Caja</DropdownItem>}
-                            <DropdownItem onClick={handleNewSale} disabled={loadingSession}><i className="mdi mdi-cart-plus me-2"></i> Venta Rápida (Productos)</DropdownItem>
-                            <DropdownItem onClick={handleOpenPayments} disabled={!cashSession && !canSellToStaff && !canGiveLoans} title={!cashSession && !canSellToStaff && !canGiveLoans ? "Abre la caja o activa los módulos de personal" : ""}><i className="mdi mdi-cash me-2"></i> Egresos / Personal</DropdownItem>
-                            <DropdownItem onClick={onNewAppointmentClick}><i className="mdi mdi-plus me-2"></i> Crear Nueva Cita</DropdownItem>
-                        </DropdownMenu>
-                    </Dropdown>
+                    <h5 className="card-title mb-0">{isRecepcionista ? 'Citas del Día' : 'Operaciones del Día'}</h5>
+                    {isRecepcionista ? (
+                        <Button color="primary" size="sm" onClick={onNewAppointmentClick}>
+                            <i className="mdi mdi-plus me-1"></i> Nueva Cita
+                        </Button>
+                    ) : (
+                        <Dropdown isOpen={dropdownOpen} toggle={toggleDropdown}>
+                            <DropdownToggle color="light" caret>Opciones</DropdownToggle>
+                            <DropdownMenu end>
+                                {cashSession && <DropdownItem onClick={() => setCloseModalOpen(true)} disabled={loadingSession}><i className="mdi mdi-door-closed me-2"></i> Cerrar Caja</DropdownItem>}
+                                <DropdownItem onClick={handleNewSale} disabled={loadingSession}><i className="mdi mdi-cart-plus me-2"></i> Venta Rápida (Productos)</DropdownItem>
+                                <DropdownItem onClick={handleOpenPayments} disabled={!cashSession && !canSellToStaff && !canGiveLoans} title={!cashSession && !canSellToStaff && !canGiveLoans ? "Abre la caja o activa los módulos de personal" : ""}><i className="mdi mdi-cash me-2"></i> Egresos / Personal</DropdownItem>
+                                <DropdownItem onClick={onNewAppointmentClick}><i className="mdi mdi-plus me-2"></i> Crear Nueva Cita</DropdownItem>
+                            </DropdownMenu>
+                        </Dropdown>
+                    )}
                 </div>
-                {loadingSession ? ( <div className='text-center p-5'><Spinner /></div> ) : cashSession ? (
+                {loadingSession ? ( <div className='text-center p-5'><Spinner /></div> ) : (cashSession || isRecepcionista) ? (
                     <>
                         <div className="mb-3"><Flatpickr className="form-control" value={selectedDate} onChange={([date]) => setSelectedDate(date as Date)} options={{ dateFormat: "Y-m-d", altInput: true, altFormat: "F j, Y" }} /></div>
                         <Input type="text" className="form-control" placeholder="Buscar por cliente o estilista..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
@@ -268,7 +280,7 @@ const CentroDeCitasDiarias = ({ events, onNewAppointmentClick }: CentroDeCitasDi
                 ) : null}
             </CardBody>
             <CardBody className="pt-0">
-                {loadingSession ? null : cashSession ? (
+                {loadingSession ? null : (cashSession || isRecepcionista) ? (
                     <SimpleBar style={{ maxHeight: "calc(100vh - 450px)" }}>
                         {gruposPorCliente.length > 0 ? (gruposPorCliente.map((grupo) => (<TarjetaCita key={grupo.clientId} group={grupo} />))) : (<p className="text-muted text-center mt-4">No hay citas pendientes para hoy.</p>)}
                     </SimpleBar>

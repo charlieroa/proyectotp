@@ -260,15 +260,35 @@ model schedule_blocks {
 }
 
 model service_categories {
-  id         String     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenant_id  String?    @db.Uuid
-  name       String     @db.VarChar(100)
-  created_at DateTime?  @default(now()) @db.Timestamptz(6)
-  updated_at DateTime?  @default(now()) @db.Timestamptz(6)
-  tenants    tenants?   @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  services   services[]
+  id             String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenant_id      String?          @db.Uuid
+  name           String           @db.VarChar(100)
+  created_at     DateTime?        @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime?        @default(now()) @db.Timestamptz(6)
+  tenants        tenants?         @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  services       services[]
+  stylist_queues stylist_queues[]
 
   @@unique([tenant_id, name])
+}
+
+model stylist_queues {
+  id             String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id      String             @db.Uuid
+  stylist_id     String             @db.Uuid
+  category_id    String             @db.Uuid
+  position       Int
+  is_active      Boolean            @default(true)
+  last_served_at DateTime?          @db.Timestamptz(6)
+  created_at     DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime           @default(now()) @db.Timestamptz(6)
+  tenants        tenants            @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users          users              @relation(fields: [stylist_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  service_categories service_categories @relation(fields: [category_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([tenant_id, stylist_id, category_id])
+  @@index([tenant_id, category_id, position], map: "idx_stylist_queue_tenant_cat_pos")
+  @@index([stylist_id], map: "idx_stylist_queue_stylist")
 }
 
 model services {
@@ -436,6 +456,7 @@ model tenants {
   name                       String                          @db.VarChar(255)
   slug                       String?                         @unique @db.VarChar(255)
   address                    String?                         @db.VarChar(255)
+  city                       String?                         @db.VarChar(100)
   phone                      String?                         @db.VarChar(50)
   working_hours              Json?
   created_at                 DateTime?                       @default(now()) @db.Timestamptz(6)
@@ -455,12 +476,21 @@ model tenants {
   openai_api_key             String?
   elevenlabs_api_key         String?
   elevenlabs_voice_id        String?
+  greeting_message           String?
+  brochure_url               String?                         @db.VarChar(512)
   geofence_center_lat        Float?
   geofence_center_lng        Float?
   geofence_radius            Float?                          @default(200)
   parent_tenant_id           String?                         @db.Uuid
+  is_primary_branch          Boolean                         @default(false)
+  cross_branch_schedule_block Boolean                        @default(true)
+  manage_all_branches_cash   Boolean                         @default(false)
   business_type              String?                         @default("peluqueria") @db.VarChar(50)
   plan                       String                          @default("free") @db.VarChar(50)
+  stripe_customer_id         String?                         @db.VarChar(255)
+  stripe_subscription_id     String?                         @db.VarChar(255)
+  subscription_status        String?                         @db.VarChar(50)
+  current_period_end         DateTime?                       @db.Timestamptz(6)
   parent_tenant              tenants?                        @relation("TenantBranches", fields: [parent_tenant_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   child_tenants              tenants[]                       @relation("TenantBranches")
   appointments               appointments[]
@@ -482,6 +512,9 @@ model tenants {
   tenant_numbers             tenant_numbers[]
   users                      users[]
   stylist_branch_assignments stylist_branch_assignments[]
+  stylist_queues             stylist_queues[]
+  campaigns                  campaigns[]
+  whatsapp_conversations     whatsapp_conversations[]
 
   @@index([parent_tenant_id], map: "idx_tenants_parent")
 }
@@ -515,6 +548,10 @@ model users {
   current_lng                                           Decimal?              @db.Decimal(11, 8)
   is_inside_geofence                                    Boolean?              @default(false)
   last_location_update                                  DateTime?             @db.Timestamp(6)
+  password_reset_token                                  String?               @db.VarChar(255)
+  password_reset_expires                                DateTime?             @db.Timestamptz(6)
+  campaigns_created                                     campaigns[]           @relation("campaign_creator")
+  campaign_recipients                                   campaign_recipients[]
   appointments_appointments_client_idTousers            appointments[]        @relation("appointments_client_idTousers")
   appointments_appointments_stylist_idTousers           appointments[]        @relation("appointments_stylist_idTousers")
   cash_sessions_cash_sessions_closed_by_user_idTousers  cash_sessions[]       @relation("cash_sessions_closed_by_user_idTousers")
@@ -531,6 +568,9 @@ model users {
   staff_purchases_staff_purchases_stylist_idTousers     staff_purchases[]     @relation("staff_purchases_stylist_idTousers")
   stylist_services                                      stylist_services[]
   stylist_branch_assignments                            stylist_branch_assignments[]
+  stylist_queues                                        stylist_queues[]
+  wa_conversations_as_client                            whatsapp_conversations[] @relation("wa_conv_client")
+  wa_conversations_as_agent                             whatsapp_conversations[] @relation("wa_conv_agent")
   roles                                                 roles?                @relation(fields: [role_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   tenants                                               tenants?              @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
@@ -573,4 +613,73 @@ enum purchase_status_enum {
   pendiente
   deducido
   parcial
+}
+
+model campaigns {
+  id                 String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenant_id          String                @db.Uuid
+  name               String                @db.VarChar(255)
+  subject            String                @db.VarChar(500)
+  html_content       String
+  target_criteria    Json?                 @default("{}")
+  status             String                @default("draft") @db.VarChar(20)
+  total_recipients   Int                   @default(0)
+  sent_count         Int                   @default(0)
+  failed_count       Int                   @default(0)
+  created_at         DateTime?             @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime?             @default(now()) @db.Timestamptz(6)
+  scheduled_at       DateTime?             @db.Timestamptz(6)
+  completed_at       DateTime?             @db.Timestamptz(6)
+  created_by_user_id String?               @db.Uuid
+  tenants            tenants               @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  created_by         users?                @relation("campaign_creator", fields: [created_by_user_id], references: [id], onUpdate: NoAction)
+  campaign_recipients campaign_recipients[]
+}
+
+model campaign_recipients {
+  id             String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  campaign_id    String    @db.Uuid
+  user_id        String?   @db.Uuid
+  email          String    @db.VarChar(255)
+  recipient_name String?   @db.VarChar(255)
+  status         String    @default("pending") @db.VarChar(20)
+  sent_at        DateTime? @db.Timestamptz(6)
+  error_message  String?
+  created_at     DateTime? @default(now()) @db.Timestamptz(6)
+  campaigns      campaigns @relation(fields: [campaign_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users          users?    @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+}
+
+model whatsapp_conversations {
+  id             String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenant_id      String               @db.Uuid
+  chat_id        String               @db.VarChar(100)
+  client_user_id String?              @db.Uuid
+  client_name    String?              @db.VarChar(255)
+  client_phone   String?              @db.VarChar(50)
+  status         String               @default("bot") @db.VarChar(20)
+  blocked        Boolean              @default(false)
+  assigned_to    String?              @db.Uuid
+  created_at     DateTime?            @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime?            @default(now()) @db.Timestamptz(6)
+  tenants        tenants              @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  client_user    users?               @relation("wa_conv_client", fields: [client_user_id], references: [id], onUpdate: NoAction)
+  assigned_user  users?               @relation("wa_conv_agent", fields: [assigned_to], references: [id], onUpdate: NoAction)
+  messages       whatsapp_messages[]
+
+  @@unique([tenant_id, chat_id])
+  @@index([tenant_id, status], map: "idx_wa_conv_tenant_status")
+}
+
+model whatsapp_messages {
+  id              String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  conversation_id String                  @db.Uuid
+  sender_type     String                  @db.VarChar(20)
+  sender_name     String?                 @db.VarChar(255)
+  content         String
+  message_type    String?                 @default("text") @db.VarChar(20)
+  created_at      DateTime?               @default(now()) @db.Timestamptz(6)
+  conversation    whatsapp_conversations  @relation(fields: [conversation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([conversation_id, created_at], map: "idx_wa_msg_conv_created")
 }

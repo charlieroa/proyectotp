@@ -25,7 +25,7 @@ const PLAN_MODULES: Record<string, string[]> = {
   free: [],
   pro: ["admin_fee", "products_for_staff", "loans_to_staff", "allow_past_appointments", "tips"],
   business: ["admin_fee", "products_for_staff", "loans_to_staff", "allow_past_appointments", "tips", "whatsapp_bot"],
-  enterprise: ["admin_fee", "products_for_staff", "loans_to_staff", "allow_past_appointments", "tips", "whatsapp_bot", "shared_stylists", "branch_color"],
+  enterprise: ["admin_fee", "products_for_staff", "loans_to_staff", "allow_past_appointments", "tips", "whatsapp_bot", "shared_stylists", "branch_color", "cross_branch_schedule"],
 };
 const PLAN_LABELS: Record<string, string> = { free: "Gratis", pro: "Pro", business: "Business", enterprise: "Enterprise" };
 
@@ -46,8 +46,8 @@ const getMinPlanForModule = (moduleKey: string): string => {
 /* ===== Props ===== */
 export type DatosTenantProps = {
   section: "datos" | "horario";
-  name: string; phone: string; address: string; email: string; website: string; ivaRate: string; adminFee: string;
-  setName: (v: string) => void; setPhone: (v: string) => void; setAddress: (v: string) => void; setEmail: (v: string) => void;
+  name: string; phone: string; address: string; city: string; email: string; website: string; ivaRate: string; adminFee: string;
+  setName: (v: string) => void; setPhone: (v: string) => void; setAddress: (v: string) => void; setCity: (v: string) => void; setEmail: (v: string) => void;
   setWebsite: (v: string) => void; setIvaRate: (v: string) => void; setAdminFee: (v: string) => void;
 
   productsForStaff: boolean; setProductsForStaff: (v: boolean) => void;
@@ -56,9 +56,12 @@ export type DatosTenantProps = {
   allowPastAppointments: boolean; setAllowPastAppointments: (v: boolean) => void;
 
   sharedStylistsEnabled: boolean; setSharedStylistsEnabled: (v: boolean) => void;
+  crossBranchScheduleBlock: boolean; setCrossBranchScheduleBlock: (v: boolean) => void;
+  manageAllBranchesCash: boolean; setManageAllBranchesCash: (v: boolean) => void;
   tipSalonPercent: string; setTipSalonPercent: (v: string) => void;
   branchColor: string; setBranchColor: (v: string) => void;
   hasBranches: boolean;
+  isPrimaryBranch: boolean;
 
   perDay: WorkingHoursPerDay;
   toggleDay: (day: DayKey) => void;
@@ -144,16 +147,19 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ icon, color, title, description
 
 const DatosTenant: React.FC<DatosTenantProps> = ({
   section,
-  name, phone, address, email, website, ivaRate, adminFee,
-  setName, setPhone, setAddress, setEmail, setWebsite, setIvaRate, setAdminFee,
+  name, phone, address, city, email, website, ivaRate, adminFee,
+  setName, setPhone, setAddress, setCity, setEmail, setWebsite, setIvaRate, setAdminFee,
   productsForStaff, setProductsForStaff,
   adminFeeEnabled, setAdminFeeEnabled,
   loansToStaff, setLoansToStaff,
   allowPastAppointments, setAllowPastAppointments,
   sharedStylistsEnabled, setSharedStylistsEnabled,
+  crossBranchScheduleBlock, setCrossBranchScheduleBlock,
+  manageAllBranchesCash, setManageAllBranchesCash,
   tipSalonPercent, setTipSalonPercent,
   branchColor, setBranchColor,
   hasBranches,
+  isPrimaryBranch,
   perDay, toggleDay, changeHour, applyMondayToAll,
   plan = "free",
   saving = false,
@@ -207,6 +213,13 @@ const DatosTenant: React.FC<DatosTenantProps> = ({
           <div className="input-group">
             <span className="input-group-text"><i className="ri-map-pin-line"></i></span>
             <Input id="tenant-address" value={address} onChange={handleInputChange(setAddress)} placeholder="Ej: Calle 123 #45-67" required />
+          </div>
+        </Col>
+        <Col md={6}>
+          <Label htmlFor="tenant-city" className="form-label">Ciudad</Label>
+          <div className="input-group">
+            <span className="input-group-text"><i className="ri-building-4-line"></i></span>
+            <Input id="tenant-city" value={city} onChange={handleInputChange(setCity)} placeholder="Ej: Bogotá" />
           </div>
         </Col>
         <Col md={6}>
@@ -316,6 +329,28 @@ const DatosTenant: React.FC<DatosTenantProps> = ({
             }
           />
         </Col>
+        {hasBranches && isPrimaryBranch && (
+          <Col md={6}>
+            <ModuleCard
+              icon="ri-calendar-close-line" color="danger"
+              title="Bloqueo de horario entre sedes"
+              description="Si un estilista trabaja a las 8am en sede 1, no aparece disponible en sede 2"
+              checked={crossBranchScheduleBlock} onChange={setCrossBranchScheduleBlock} switchId="cross-branch-schedule-switch"
+              locked={!allowed("cross_branch_schedule")} requiredPlan={minPlan("cross_branch_schedule")}
+            />
+          </Col>
+        )}
+        {hasBranches && isPrimaryBranch && (
+          <Col md={6}>
+            <ModuleCard
+              icon="ri-bank-line" color="info"
+              title="Administrar cajas de todas las sucursales"
+              description="Permite ver y operar las cajas de todas las sucursales desde esta sede principal"
+              checked={manageAllBranchesCash} onChange={setManageAllBranchesCash} switchId="manage-branches-cash-switch"
+              locked={!allowed("cross_branch_schedule")} requiredPlan={minPlan("cross_branch_schedule")}
+            />
+          </Col>
+        )}
         {hasBranches && (
           <Col md={6}>
             <ModuleCard

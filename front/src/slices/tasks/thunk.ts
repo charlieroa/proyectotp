@@ -1,6 +1,5 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
-import { toast } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
+import { sileo } from 'sileo';
 //Include Both Helper File with needed methods
 import {
     getTaskList as getTaskListApi,
@@ -23,30 +22,30 @@ export const getTaskList = createAsyncThunk("tasks/getTaskList", async () => {
 export const addNewTask = createAsyncThunk("tasks/addNewTask", async (task: any) => {
     try {
         const response = addNewTaskApi(task);
-        toast.success("Task Added Successfully", { autoClose: 3000 });
+        sileo.success({ title: "Task Added Successfully" });
         return response;
     } catch (error) {
-        toast.error("Task Added Failed", { autoClose: 3000 });
+        sileo.error({ title: "Task Added Failed" });
         return error;
     }
 });
 export const updateTask = createAsyncThunk("tasks/updateTask", async (task: any) => {
     try {
         const response = updateTaskApi(task);
-        toast.success("Task Updated Successfully", { autoClose: 3000 });
+        sileo.success({ title: "Task Updated Successfully" });
         return response;
     } catch (error) {
-        toast.error("Task Updated Failed", { autoClose: 3000 });
+        sileo.error({ title: "Task Updated Failed" });
         return error;
     }
 });
 export const deleteTask = createAsyncThunk("tasks/deleteTask", async (task: any) => {
     try {
         const response = deleteTaskApi(task);
-        toast.success("Task Updated Successfully", { autoClose: 3000 });
+        sileo.success({ title: "Task Updated Successfully" });
         return { task, ...response };
     } catch (error) {
-        toast.error("Task Updated Failed", { autoClose: 3000 });
+        sileo.error({ title: "Task Updated Failed" });
         return error;
     }
 });
@@ -63,10 +62,10 @@ export const addCardData = createAsyncThunk("tasks/addCardData", async (card: an
     try {
         const response = addNewTasksApi(card);
         const data = await response;
-        toast.success("Card Add Successfully", { autoClose: 2000 })
+        sileo.success({ title: "Card Add Successfully" });
         return data;
     } catch (error) {
-        toast.error("Card Add Failded", { autoClose: 2000 })
+        sileo.error({ title: "Card Add Failded" });
         return error;
     }
 })
@@ -74,20 +73,20 @@ export const updateCardData = createAsyncThunk("tasks/updateCardData", async (ca
     try {
         const response = updateTasksApi(card);
         const data = await response;
-        toast.success("Card Update Successfully", { autoClose: 2000 })
+        sileo.success({ title: "Card Update Successfully" });
         return data;
     } catch (error) {
-        toast.error("Card Update Failded", { autoClose: 2000 })
+        sileo.error({ title: "Card Update Failded" });
         return error
     }
 })
 export const deleteKanban = createAsyncThunk("tasks/deleteKanban", async (card: any) => {
     try {
         const response = deleteTasksApi(card);
-        toast.success("Card Delete Successfully", { autoClose: 2000 })
+        sileo.success({ title: "Card Delete Successfully" });
         return response;
     } catch (error) {
-        toast.error("Card Delete Failded", { autoClose: 2000 })
+        sileo.error({ title: "Card Delete Failded" });
         return error;
     }
 })

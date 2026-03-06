@@ -1,6 +1,7 @@
 // src/hooks/useNotifications.ts
 import { useEffect, useCallback, useState, useRef } from "react";
 import { api } from "../services/api";
+import { sileo } from "sileo";
 
 export interface AppointmentNotification {
     id: string;
@@ -54,14 +55,15 @@ export default function useNotifications({ tenantId, pollingInterval = 30000 }: 
             unreadCount: prev.unreadCount + 1,
         }));
 
-        // Mostrar notificación del navegador si está permitido
-        if (Notification.permission === 'granted') {
-            new Notification('📅 Nueva cita agendada', {
-                body: `${data.clientName} - ${data.serviceName} con ${data.stylistName}`,
-                icon: '/favicon.ico',
-                tag: data.id, // Evita duplicados de notificación del navegador
-            });
-        }
+        // Toast de Sileo para nueva cita
+        sileo.action({
+            title: 'Nueva cita agendada',
+            description: `${data.clientName} — ${data.serviceName} con ${data.stylistName}`,
+            button: {
+                title: 'Ver',
+                onClick: () => window.dispatchEvent(new CustomEvent('open-notifications')),
+            },
+        });
     }, []);
 
     const markAsRead = useCallback((notificationId: string) => {
@@ -109,13 +111,6 @@ export default function useNotifications({ tenantId, pollingInterval = 30000 }: 
             console.warn('⚠️ [POLLING] Error al consultar citas recientes:', error);
         }
     }, [tenantId, addNotification]);
-
-    // Solicitar permiso de notificaciones
-    useEffect(() => {
-        if ('Notification' in window && Notification.permission === 'default') {
-            Notification.requestPermission();
-        }
-    }, []);
 
     // Iniciar polling
     useEffect(() => {

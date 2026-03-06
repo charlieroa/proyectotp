@@ -25,6 +25,12 @@ router.post('/branch', ensureFn(requireAuth, 'requireAuth'), requirePlan('enterp
 // GET /api/tenants/my-businesses - Listar negocios del admin (protegido)
 router.get('/my-businesses', ensureFn(requireAuth, 'requireAuth'), ensureFn(tenantController.getMyBusinesses, 'getMyBusinesses'));
 
+// GET /api/tenants/cross-branch-cash - Resumen de caja cross-branch (protegido)
+router.get('/cross-branch-cash', ensureFn(requireAuth, 'requireAuth'), requirePlan('enterprise'), ensureFn(tenantController.getCrossBranchCashSummary, 'getCrossBranchCashSummary'));
+
+// GET /api/tenants/cross-branch-services - Servicios cross-branch (protegido)
+router.get('/cross-branch-services', ensureFn(requireAuth, 'requireAuth'), requirePlan('enterprise'), ensureFn(tenantController.getCrossBranchServices, 'getCrossBranchServices'));
+
 // POST /api/tenants - Crear un nuevo tenant (protegido)
 router.post('/', ensureFn(requireAuth, 'requireAuth'), ensureFn(tenantController.createTenant, 'createTenant'));
 
@@ -33,6 +39,9 @@ router.get('/', ensureFn(tenantController.getAllTenants, 'getAllTenants'));
 
 // GET /api/tenants/:id/setup-status - Obtener estado de setup
 router.get('/:id/setup-status', ensureFn(requireAuth, 'requireAuth'), ensureFn(tenantController.getSetupStatus, 'getSetupStatus'));
+
+// PUT /api/tenants/:id/set-primary - Establecer sede principal (protegido, enterprise)
+router.put('/:id/set-primary', ensureFn(requireAuth, 'requireAuth'), requirePlan('enterprise'), ensureFn(tenantController.setPrimaryBranch, 'setPrimaryBranch'));
 
 // GET /api/tenants/:id - Obtener un tenant por ID
 router.get('/:id', ensureFn(tenantController.getTenantById, 'getTenantById'));

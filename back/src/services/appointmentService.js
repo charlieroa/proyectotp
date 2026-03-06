@@ -336,7 +336,7 @@ async function checkStylistOffersService(stylistId, serviceId) {
 async function getAvailableSlotsForStylist(tenantId, stylistId, serviceId, date, stepMinutes = 15) {
   const tenantRow = await prisma.tenants.findUnique({
     where: { id: tenantId },
-    select: { working_hours: true },
+    select: { working_hours: true, cross_branch_schedule_block: true, parent_tenant_id: true },
   });
   if (!tenantRow) return { slots: [], reason: 'Tenant no encontrado' };
 
@@ -377,14 +377,25 @@ async function getAvailableSlotsForStylist(tenantId, stylistId, serviceId, date,
   const baseDuration = Number(svcRes?.duration_minutes) || 60;
   const duration = await getStylistEffectiveDuration(stylistId, serviceId, baseDuration);
 
-  const apptRes = await prisma.$queryRawUnsafe(
-    `SELECT start_time, end_time
+  // Check cross-branch schedule blocking: if enabled, check ALL branches in the group
+  let crossBranchEnabled = false;
+  if (tenantRow.parent_tenant_id) {
+    const primaryBranch = await prisma.tenants.findFirst({
+      where: { parent_tenant_id: tenantRow.parent_tenant_id, is_primary_branch: true },
+      select: { cross_branch_schedule_block: true },
+    });
+    crossBranchEnabled = primaryBranch?.cross_branch_schedule_block !== false;
+  }
+
+  const apptBaseQuery = `SELECT start_time, end_time
       FROM appointments
       WHERE stylist_id=$1::uuid
         AND (start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota')::date = $2::date
-        AND status = ANY($3)`,
-    stylistId, date, BLOCKING_STATUSES
-  );
+        AND status = ANY($3)`;
+
+  const apptRes = crossBranchEnabled
+    ? await prisma.$queryRawUnsafe(apptBaseQuery, stylistId, date, BLOCKING_STATUSES)
+    : await prisma.$queryRawUnsafe(apptBaseQuery + ` AND tenant_id=$4::uuid`, stylistId, date, BLOCKING_STATUSES, tenantId);
 
   // Precalcular los limites de cierre de cada rango (en minutos desde medianoche)
   const rangeLimits = effectiveRanges.map(range => {

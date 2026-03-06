@@ -35,7 +35,6 @@ import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd"
 import { Link } from "react-router-dom"
 import SimpleBar from "simplebar-react"
 // import moment from "moment"
-import { ToastContainer } from "react-toastify"
 import Spinners from "Components/Common/Spinner"
 import { AddTeamMember, headData } from "common/data"
 import DeleteModal from "Components/Common/DeleteModal";
@@ -901,7 +900,6 @@ const TasksKanban = () => {
           </Form>
         </ModalBody>
       </Modal>
-      <ToastContainer />
     </React.Fragment>
   )
 }

@@ -269,16 +269,17 @@ exports.createStylist = async (req, res) => {
   }
 
   try {
-    // Nota: si tu proyecto ya hashea en authController, aquí no lo repetimos.
+    const salt = await bcrypt.genSalt(10);
+    const passwordHashed = await bcrypt.hash(password, salt);
+
     const created = await prisma.users.create({
       data: {
         tenant_id,
         role_id: 3,
         first_name,
         last_name,
-        email,
-        password,
-        password_hash: password, // se mantiene el mismo valor; campo requerido en el schema
+        email: email.trim().toLowerCase(),
+        password_hash: passwordHashed,
         phone,
         payment_type,
         base_salary,
@@ -375,7 +376,7 @@ exports.updateStylist = async (req, res) => {
   const data = {};
   for (const key of allowed) {
     if (Object.prototype.hasOwnProperty.call(req.body, key)) {
-      data[key] = req.body[key];
+      data[key] = key === 'email' && req.body[key] ? String(req.body[key]).trim().toLowerCase() : req.body[key];
     }
   }
 

@@ -5,6 +5,7 @@ export interface TenantBusiness {
   name: string;
   business_type: string;
   parent_tenant_id: string | null;
+  is_primary_branch?: boolean;
   address?: string;
   phone?: string;
 }
@@ -25,3 +26,6 @@ export const switchTenant = (targetTenantId: string) =>
     "/auth/switch-tenant",
     { target_tenant_id: targetTenantId }
   );
+
+export const setPrimaryBranch = (tenantId: string) =>
+  api.put(`/tenants/${tenantId}/set-primary`);

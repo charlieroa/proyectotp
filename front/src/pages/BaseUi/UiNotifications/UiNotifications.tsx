@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { Button, Card, CardBody, Col, Container, Form, Row, Toast, ToastBody, ToastHeader, } from 'reactstrap';
 import { Link } from 'react-router-dom';
-import { ToastContainer, toast } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
+import { sileo } from 'sileo';
 
 // Import Content
 import UiContent from '../../../Components/Common/UiContent';
@@ -30,21 +29,21 @@ const UiNotifications = () => {
     const [toast11, setToast11] = useState(true);
     const [position, setPosition] = useState<any>();
 
-    const defaultnotify = () => toast("Welcome Back! This is a Toast Notification", { position: "top-right", hideProgressBar: true, className: 'bg-primary text-white' });
-    const successnotify = () => toast("Your application was successfully sent", { position: "top-center", hideProgressBar: true, closeOnClick: false, className: 'bg-success text-white' });
-    const warningnotify = () => toast("Warning ! Something went wrong try again", { position: "top-center", hideProgressBar: true, closeOnClick: false, className: 'bg-warning text-white' });
-    const errornotify = () => toast("Error ! An error occurred.", { position: "top-center", hideProgressBar: true, closeOnClick: false, className: 'bg-danger text-white' });
+    const defaultnotify = () => sileo.info({ title: "Welcome Back!", description: "This is a Toast Notification" });
+    const successnotify = () => sileo.success({ title: "Your application was successfully sent" });
+    const warningnotify = () => sileo.warning({ title: "Warning! Something went wrong try again" });
+    const errornotify = () => sileo.error({ title: "Error! An error occurred." });
 
-    const topleftnotify = () => toast("Welcome Back ! This is a Toast Notification", { position: "top-left", hideProgressBar: true, className: 'bg-success text-white' });
-    const topcenternotify = () => toast("Welcome Back ! This is a Toast Notification", { position: "top-center", hideProgressBar: true, className: 'bg-success text-white' });
-    const toprightnotify = () => toast("Welcome Back ! This is a Toast Notification", { position: "top-right", hideProgressBar: true, className: 'bg-success text-white' });
-    const bottomleftnotify = () => toast("Welcome Back ! This is a Toast Notification", { position: "bottom-left", hideProgressBar: true, className: 'bg-success text-white' });
-    const bottomcenternotify = () => toast("Welcome Back ! This is a Toast Notification", { position: "bottom-center", hideProgressBar: true, className: 'bg-success text-white' });
-    const bottomrightnotify = () => toast("Welcome Back ! This is a Toast Notification", { position: "bottom-right", hideProgressBar: true, className: 'bg-success text-white' });
+    const topleftnotify = () => sileo.success({ title: "Toast Notification", position: "top-left" });
+    const topcenternotify = () => sileo.success({ title: "Toast Notification", position: "top-center" });
+    const toprightnotify = () => sileo.success({ title: "Toast Notification", position: "top-right" });
+    const bottomleftnotify = () => sileo.success({ title: "Toast Notification", position: "bottom-left" });
+    const bottomcenternotify = () => sileo.success({ title: "Toast Notification", position: "bottom-center" });
+    const bottomrightnotify = () => sileo.success({ title: "Toast Notification", position: "bottom-right" });
 
-    const offsetnotify = () => toast("Welcome Back ! This is a Toast Notification", { position: "top-right", hideProgressBar: true, className: 'bg-success text-white m-5' });
-    const closeiconnotify = () => toast("Welcome Back ! This is a Toast Notification", { position: "top-right", hideProgressBar: true, className: 'bg-success text-white' });
-    const durationnotify = () => toast("Toast Duration 5s", { position: "top-right", hideProgressBar: false, className: 'bg-success text-white' });
+    const offsetnotify = () => sileo.success({ title: "Toast Notification" });
+    const closeiconnotify = () => sileo.success({ title: "Toast Notification" });
+    const durationnotify = () => sileo.success({ title: "Toast Duration 5s" });
 
     document.title = "Notifications | Velzon - React Admin & Dashboard Template";
 
@@ -343,7 +342,6 @@ const UiNotifications = () => {
                                             <Button color="light" className="w-xs" onClick={successnotify}>Success</Button>
                                             <Button color="light" className="w-xs" onClick={warningnotify}>Warning</Button>
                                             <Button color="light" className="w-xs" onClick={errornotify}>Error</Button>
-                                            <ToastContainer />
                                         </div>
                                         <div className="mt-4 pt-2">
                                             <h5 className="fs-14 mb-3">Display Position</h5>
