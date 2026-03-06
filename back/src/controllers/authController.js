@@ -276,7 +276,24 @@ exports.registerTenantAndAdmin = async (req, res) => {
 
   const adminEmailNorm = String(adminEmail).trim().toLowerCase();
 
+  // Normalizar nombre para detectar duplicados (quitar espacios, acentos, lowercase)
+  const normalizeName = (name) =>
+    name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '').toLowerCase().trim();
+
+  const tenantNameNorm = normalizeName(tenantName);
+
   try {
+    // Verificar si ya existe un tenant con nombre similar
+    const existingTenants = await prisma.tenants.findMany({
+      select: { id: true, name: true },
+    });
+    const duplicate = existingTenants.find(t => normalizeName(t.name) === tenantNameNorm);
+    if (duplicate) {
+      return res.status(409).json({
+        error: `Ya existe una peluquería con un nombre similar: "${duplicate.name}". Si es tuya, inicia sesión en vez de registrarte.`,
+      });
+    }
+
     const slug = createSlug(tenantName);
 
     const result = await prisma.$transaction(async (tx) => {
