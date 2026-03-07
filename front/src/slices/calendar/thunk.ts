@@ -56,10 +56,10 @@ const getTenantId = () => {
 
 
 // --- THUNK PARA OBTENER HORARIO DEL NEGOCIO ---
-export const fetchTenantSettings = () => async (dispatch: any) => {
+export const fetchTenantSettings = (targetTenantId?: string) => async (dispatch: any) => {
   dispatch(fetchTenantSettingsStart());
   try {
-    const tenantId = getTenantId();
+    const tenantId = targetTenantId || getTenantId();
     const response = await api.get(`/tenants/${tenantId}`);
     dispatch(fetchTenantSettingsSuccess(response.data));
     return response.data;
@@ -87,11 +87,11 @@ export const fetchDigiturnoQueue = (tenantId: string) => async (dispatch: any) =
 };
 
 
-/** Cargar calendario (citas + catálogos + próximo estilista) (Sin cambios) */
-export const getCalendarData = () => async (dispatch: any) => {
+/** Cargar calendario (citas + catalogos + proximo estilista) */
+export const getCalendarData = (targetTenantId?: string) => async (dispatch: any) => {
   dispatch(getCalendarDataStart());
   try {
-    const tenantId = getTenantId();
+    const tenantId = targetTenantId || getTenantId();
     const today = new Date();
     const year = today.getFullYear();
     const startDate = new Date(year, 0, 1).toISOString().split("T")[0];
@@ -145,14 +145,16 @@ export const getCalendarData = () => async (dispatch: any) => {
 // --- El resto de tus funciones permanece sin cambios ---
 // =================================================================
 
-export const fetchTenantSlots = (date: string, serviceId: string) => async (dispatch: any) => {
+export const fetchTenantSlots = (date: string, serviceId: string, targetTenantId?: string) => async (dispatch: any) => {
   if (!date || !serviceId) {
     dispatch(clearSlotsAction());
     return Promise.resolve([]);
   }
   try {
+    const params: any = { date, service_id: serviceId };
+    if (targetTenantId) params.target_tenant_id = targetTenantId;
     const { data } = await api.get('/appointments/tenant/slots', {
-      params: { date, service_id: serviceId },
+      params,
     });
     const slots = data?.slots || [];
     dispatch(fetchSlotsSuccess(slots));
@@ -164,11 +166,13 @@ export const fetchTenantSlots = (date: string, serviceId: string) => async (disp
   }
 };
 
-export const fetchAvailableStylists = (date: string, time: string, serviceId: string) => async () => {
+export const fetchAvailableStylists = (date: string, time: string, serviceId: string, targetTenantId?: string) => async () => {
   if (!date || !time || !serviceId) return Promise.resolve([]);
   try {
+    const params: any = { date, time, service_id: serviceId };
+    if (targetTenantId) params.target_tenant_id = targetTenantId;
     const { data } = await api.get('/appointments/stylists/available', {
-      params: { date, time, service_id: serviceId },
+      params,
     });
 
     return data?.available || data?.availableStylists || [];
@@ -210,9 +214,9 @@ export const getStylistsForService = (serviceId: string) => async () => {
   }
 };
 
-export const createNewClient = (clientData: any) => async (dispatch: any) => {
+export const createNewClient = (clientData: any, targetTenantId?: string) => async (dispatch: any) => {
   try {
-    const tenantId = getTenantId();
+    const tenantId = targetTenantId || getTenantId();
     const dataToSend = { ...clientData, tenant_id: tenantId, role_id: 4 };
     const { data: newClient } = await api.post(`/users`, dataToSend);
     dispatch(createNewClientSuccess(newClient));

@@ -14,7 +14,7 @@ import { jwtDecode } from "jwt-decode";
 import { getToken, getRoleFromToken } from "../../services/auth";
 
 // --- Tipos ---
-interface CentroDeCitasDiariasProps { events: any[]; onNewAppointmentClick: () => void; }
+interface CentroDeCitasDiariasProps { events: any[]; onNewAppointmentClick: () => void; targetTenantId?: string; }
 type CitaEvento = any;
 type GrupoCliente = { clientId: string | number; client_first_name: string; client_last_name?: string; earliestStartISO: string; count: number; appointments: { id: string | number; service_name: string; stylist_first_name?: string; start_time: string; }[]; };
 type Stylist = { id: string | number; first_name: string; last_name?: string; };
@@ -34,14 +34,16 @@ const formatCOPString = (digits: string) => {
 };
 
 // --- Modales ---
-const ModalAbrirCaja: React.FC<{ isOpen: boolean; onClose: () => void; onSessionOpened: () => void; }> = ({ isOpen, onClose, onSessionOpened }) => {
+const ModalAbrirCaja: React.FC<{ isOpen: boolean; onClose: () => void; onSessionOpened: () => void; targetTenantId?: string; }> = ({ isOpen, onClose, onSessionOpened, targetTenantId }) => {
     const [amountDigits, setAmountDigits] = useState('');
     const [saving, setSaving] = useState(false);
     const handleOpenSession = async () => {
         const amount = parseInt(amountDigits || '0', 10) || 0;
         try {
             setSaving(true);
-            await api.post('/cash/open', { initial_amount: amount });
+            const payload: any = { initial_amount: amount };
+            if (targetTenantId) payload.target_tenant_id = targetTenantId;
+            await api.post('/cash/open', payload);
             await Swal.fire('¡Caja Abierta!', 'La sesión de caja se ha iniciado correctamente.', 'success');
             onSessionOpened();
             onClose();
@@ -67,7 +69,7 @@ const ModalAbrirCaja: React.FC<{ isOpen: boolean; onClose: () => void; onSession
     );
 };
 
-const ModalResumenCierre: React.FC<{ isOpen: boolean; onClose: () => void; onSessionClosed: () => void; sessionData: any | null; }> = ({ isOpen, onClose, onSessionClosed, sessionData }) => {
+const ModalResumenCierre: React.FC<{ isOpen: boolean; onClose: () => void; onSessionClosed: () => void; sessionData: any | null; targetTenantId?: string; }> = ({ isOpen, onClose, onSessionClosed, sessionData, targetTenantId }) => {
     const [saving, setSaving] = useState(false);
 
     const expenseCategoryLabels: Record<string, string> = {
@@ -93,7 +95,9 @@ const ModalResumenCierre: React.FC<{ isOpen: boolean; onClose: () => void; onSes
     const handleCloseSession = async () => {
         try {
             setSaving(true);
-            await api.post('/cash/close', {});
+            const payload: any = {};
+            if (targetTenantId) payload.target_tenant_id = targetTenantId;
+            await api.post('/cash/close', payload);
             await Swal.fire({ title: '¡Caja Cerrada!', text: 'La sesión de caja se ha cerrado y archivado correctamente.', icon: 'success' });
             onSessionClosed();
             onClose();
@@ -158,7 +162,7 @@ const ModalResumenCierre: React.FC<{ isOpen: boolean; onClose: () => void; onSes
 };
 
 
-const CentroDeCitasDiarias = ({ events, onNewAppointmentClick }: CentroDeCitasDiariasProps) => {
+const CentroDeCitasDiarias = ({ events, onNewAppointmentClick, targetTenantId }: CentroDeCitasDiariasProps) => {
     const navigate = useNavigate();
     const userRole = getRoleFromToken();
     const isRecepcionista = userRole === 6;
@@ -196,7 +200,9 @@ const CentroDeCitasDiarias = ({ events, onNewAppointmentClick }: CentroDeCitasDi
         }
         try {
             setLoadingSession(true);
-            const { data } = await api.get('/cash/current');
+            const params: any = {};
+            if (targetTenantId) params.target_tenant_id = targetTenantId;
+            const { data } = await api.get('/cash/current', { params });
             setCashSession(data);
         } catch (e: any) {
             console.error("Error cargando la sesión de caja", e);
@@ -211,7 +217,7 @@ const CentroDeCitasDiarias = ({ events, onNewAppointmentClick }: CentroDeCitasDi
         }
     };
 
-    useEffect(() => { fetchCurrentSession(); }, []);
+    useEffect(() => { fetchCurrentSession(); }, [targetTenantId]);
 
     const fetchPrerequisites = async () => {
         setLoadingStylists(true); setLoadingProducts(true);
@@ -240,8 +246,8 @@ const CentroDeCitasDiarias = ({ events, onNewAppointmentClick }: CentroDeCitasDi
     const gruposPorCliente = useMemo<GrupoCliente[]>(() => { if (!cashSession && !isRecepcionista) return []; const startOfDay = new Date(selectedDate); startOfDay.setHours(0, 0, 0, 0); const endOfDay = new Date(selectedDate); endOfDay.setHours(23, 59, 59, 999); const filtradas: CitaEvento[] = events.filter((event) => { const fechaCita = new Date(event.start); const enFecha = fechaCita >= startOfDay && fechaCita <= endOfDay; const esOperativa = event.extendedProps.status !== 'cancelled' && event.extendedProps.status !== 'completed'; if (!enFecha || !esOperativa) return false; if (searchTerm) { const q = searchTerm.toLowerCase(); return (event.extendedProps.client_first_name?.toLowerCase().includes(q) || event.extendedProps.client_last_name?.toLowerCase().includes(q) || event.extendedProps.stylist_first_name?.toLowerCase().includes(q)); } return true; }); const map = new Map<string | number, GrupoCliente>(); for (const ev of filtradas) { const ep = ev.extendedProps || {}; const clientId = ep.client_id ?? ep.clientId; if (clientId == null) continue; const item = { id: ev.id, service_name: ep.service_name, stylist_first_name: ep.stylist_first_name, start_time: ep.start_time ?? ev.start, }; if (!map.has(clientId)) { map.set(clientId, { clientId, client_first_name: ep.client_first_name, client_last_name: ep.client_last_name, earliestStartISO: item.start_time, count: 1, appointments: [item], }); } else { const g = map.get(clientId)!; g.appointments.push(item); g.count += 1; if (new Date(item.start_time).getTime() < new Date(g.earliestStartISO).getTime()) { g.earliestStartISO = item.start_time; } } } return Array.from(map.values()).sort((a, b) => new Date(a.earliestStartISO).getTime() - new Date(b.earliestStartISO).getTime()); }, [events, selectedDate, searchTerm, cashSession]);
     const handleOpenPayments = () => { if (cashSession) { setActiveTab('anticipo'); } else if(canSellToStaff) { setActiveTab('venta_personal'); } setPaymentsModalOpen(true); };
     const handleNewSale = () => { navigate('/checkout'); };
-    const handleSaveAnticipo = async () => { const amount = parseInt(anticipo.amountDigits || '0', 10) || 0; if (!anticipo.stylist_id || amount <= 0) { Swal.fire('Datos incompletos', 'Selecciona un estilista y un monto válido.', 'warning'); return; } try { await api.post('/cash/movements', { type: 'payroll_advance', category: 'stylist_advance', description: anticipo.description || 'Anticipo', amount, payment_method: 'cash', related_entity_type: 'stylist', related_entity_id: anticipo.stylist_id }); Swal.fire('¡Éxito!', 'Anticipo registrado correctamente.', 'success'); setPaymentsModalOpen(false); setAnticipo({ stylist_id: '', amountDigits: '', description: '' }); fetchCurrentSession(); } catch (e: any) { console.error(e); Swal.fire('Error', e?.response?.data?.error || 'No se pudo registrar el anticipo.', 'error'); } };
-    const handleSaveFactura = async () => { const amount = parseInt(factura.amountDigits || '0', 10) || 0; if (!factura.reference || amount <= 0) { Swal.fire('Datos incompletos', 'Ingresa una referencia y un monto válido.', 'warning'); return; } try { await api.post('/cash/movements', { type: 'expense', category: 'vendor_invoice', invoice_ref: factura.reference, description: factura.description || 'Factura de proveedor', amount, payment_method: 'cash' }); Swal.fire('¡Éxito!', 'Factura registrada correctamente.', 'success'); setPaymentsModalOpen(false); setFactura({ reference: '', amountDigits: '', description: '' }); fetchCurrentSession(); } catch (e: any) { console.error(e); Swal.fire('Error', e?.response?.data?.error || 'No se pudo registrar la factura.', 'error'); } };
+    const handleSaveAnticipo = async () => { const amount = parseInt(anticipo.amountDigits || '0', 10) || 0; if (!anticipo.stylist_id || amount <= 0) { Swal.fire('Datos incompletos', 'Selecciona un estilista y un monto valido.', 'warning'); return; } try { const payload: any = { type: 'payroll_advance', category: 'stylist_advance', description: anticipo.description || 'Anticipo', amount, payment_method: 'cash', related_entity_type: 'stylist', related_entity_id: anticipo.stylist_id }; if (targetTenantId) payload.target_tenant_id = targetTenantId; await api.post('/cash/movements', payload); Swal.fire('¡Éxito!', 'Anticipo registrado correctamente.', 'success'); setPaymentsModalOpen(false); setAnticipo({ stylist_id: '', amountDigits: '', description: '' }); fetchCurrentSession(); } catch (e: any) { console.error(e); Swal.fire('Error', e?.response?.data?.error || 'No se pudo registrar el anticipo.', 'error'); } };
+    const handleSaveFactura = async () => { const amount = parseInt(factura.amountDigits || '0', 10) || 0; if (!factura.reference || amount <= 0) { Swal.fire('Datos incompletos', 'Ingresa una referencia y un monto valido.', 'warning'); return; } try { const payload: any = { type: 'expense', category: 'vendor_invoice', invoice_ref: factura.reference, description: factura.description || 'Factura de proveedor', amount, payment_method: 'cash' }; if (targetTenantId) payload.target_tenant_id = targetTenantId; await api.post('/cash/movements', payload); Swal.fire('¡Éxito!', 'Factura registrada correctamente.', 'success'); setPaymentsModalOpen(false); setFactura({ reference: '', amountDigits: '', description: '' }); fetchCurrentSession(); } catch (e: any) { console.error(e); Swal.fire('Error', e?.response?.data?.error || 'No se pudo registrar la factura.', 'error'); } };
     const calculateTotal = (cart: CartItem[]) => { return cart.reduce((sum, item) => sum + (item.price * item.quantity), 0); };
     const addToCart = (product: ProductForStaff | null) => { if (!product) return; setVentaPersonal(prev => { const existingItem = prev.cart.find(item => item.productId === product.id); if (existingItem) return prev; const priceToUse = product.staff_price ?? product.sale_price; const newItem: CartItem = { productId: product.id, name: product.name, quantity: 1, price: priceToUse, stock: product.stock }; const updatedCart = [...prev.cart, newItem]; return { ...prev, cart: updatedCart, total: calculateTotal(updatedCart) }; }); };
     const handleQuantityChange = (productId: string, newQuantity: number) => { setVentaPersonal(prev => { const updatedCart = prev.cart.map(item => { if (item.productId === productId) { const validatedQty = Math.max(1, Math.min(item.stock, newQuantity || 1)); return { ...item, quantity: validatedQty }; } return item; }); return { ...prev, cart: updatedCart, total: calculateTotal(updatedCart) }; }); };
@@ -457,8 +463,8 @@ const CentroDeCitasDiarias = ({ events, onNewAppointmentClick }: CentroDeCitasDi
                     <Button color="secondary" onClick={() => setPaymentsModalOpen(false)}>Cancelar</Button>
                 </ModalFooter>
             </Modal>
-            <ModalAbrirCaja isOpen={openModalOpen} onClose={() => setOpenModalOpen(false)} onSessionOpened={fetchCurrentSession} />
-            <ModalResumenCierre isOpen={closeModalOpen} onClose={() => setCloseModalOpen(false)} onSessionClosed={fetchCurrentSession} sessionData={cashSession} />
+            <ModalAbrirCaja isOpen={openModalOpen} onClose={() => setOpenModalOpen(false)} onSessionOpened={fetchCurrentSession} targetTenantId={targetTenantId} />
+            <ModalResumenCierre isOpen={closeModalOpen} onClose={() => setCloseModalOpen(false)} onSessionClosed={fetchCurrentSession} sessionData={cashSession} targetTenantId={targetTenantId} />
         </Card>
     );
 };

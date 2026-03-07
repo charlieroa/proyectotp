@@ -9,8 +9,15 @@ const { canAccessTenant } = require('./ficheroController');
 // =============================================
 
 exports.openCashSession = async (req, res) => {
-    const { initial_amount } = req.body;
-    const { tenant_id, id: user_id } = req.user;
+    const { initial_amount, target_tenant_id } = req.body;
+    const { tenant_id: userTenantId, id: user_id } = req.user;
+    const tenant_id = target_tenant_id || userTenantId;
+
+    // Validar acceso cross-branch
+    if (target_tenant_id && target_tenant_id !== userTenantId) {
+        const canAccess = await canAccessTenant(userTenantId, target_tenant_id);
+        if (!canAccess) return res.status(403).json({ error: 'No tiene acceso a este negocio.' });
+    }
 
     const numericAmount = Number(initial_amount);
     if (initial_amount == null || !Number.isFinite(numericAmount) || numericAmount < 0) {
@@ -41,7 +48,8 @@ exports.openCashSession = async (req, res) => {
 };
 
 exports.getCurrentSession = async (req, res) => {
-    const { tenant_id } = req.user;
+    const { tenant_id: userTenantId } = req.user;
+    const tenant_id = req.query.target_tenant_id || userTenantId;
     try {
         // --- MEJORA: Se busca la sesi\u00f3n abierta por tenant_id, no por user_id ---
         // Esto permite que un admin pueda ver/cerrar la caja de otro usuario.
@@ -118,8 +126,15 @@ exports.getCurrentSession = async (req, res) => {
 };
 
 exports.closeCashSession = async (req, res) => {
-    const { final_amount_counted = null } = req.body;
-    const { tenant_id, id: user_id } = req.user;
+    const { final_amount_counted = null, target_tenant_id } = req.body;
+    const { tenant_id: userTenantId, id: user_id } = req.user;
+    const tenant_id = target_tenant_id || userTenantId;
+
+    // Validar acceso cross-branch
+    if (target_tenant_id && target_tenant_id !== userTenantId) {
+        const canAccess = await canAccessTenant(userTenantId, target_tenant_id);
+        if (!canAccess) return res.status(403).json({ error: 'No tiene acceso a este negocio.' });
+    }
 
     let numericFinalAmount = null;
     let difference = null;
@@ -198,9 +213,10 @@ exports.createCashMovement = async (req, res) => {
     const {
         type, description, amount, related_user_id = null, category = null,
         payment_method = null, invoice_ref = null, related_entity_type = null,
-        related_entity_id = null
+        related_entity_id = null, target_tenant_id
     } = req.body;
-    const { tenant_id, id: user_id } = req.user;
+    const { tenant_id: userTenantId, id: user_id } = req.user;
+    const tenant_id = target_tenant_id || userTenantId;
     if (!type || !description || amount == null) { return res.status(400).json({ error: 'Los campos type, description y amount son obligatorios.' }); }
     let numericAmount = Number(amount);
     if (!Number.isFinite(numericAmount)) { return res.status(400).json({ error: 'El monto (amount) debe ser un n\u00famero.' }); }

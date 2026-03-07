@@ -1050,7 +1050,8 @@ exports.getAvailability = async (req, res) => {
 
 exports.getAvailableStylistsByTime = async (req, res) => {
   const { tenant_id: tenantIdFromToken } = req.user;
-  const { service_id, date, time } = req.query;
+  const { service_id, date, time, target_tenant_id } = req.query;
+  const tenantId = target_tenant_id || tenantIdFromToken;
 
   if (!service_id || !date || !time) {
     return res.status(400).json({ error: 'Faltan parámetros obligatorios: service_id, date, time.' });
@@ -1065,7 +1066,7 @@ exports.getAvailableStylistsByTime = async (req, res) => {
       return res.status(404).json({ error: 'Servicio no encontrado.' });
     }
 
-    const availableStylists = await findAvailableStylists(tenantIdFromToken, serviceRecord.name, date, time);
+    const availableStylists = await findAvailableStylists(tenantId, serviceRecord.name, date, time);
 
     return res.status(200).json({
       availableStylists: availableStylists.map(s => ({
@@ -1316,8 +1317,9 @@ exports.deleteAppointment = async (req, res) => {
 };
 
 exports.getTenantSlots = async (req, res) => {
-  const { tenant_id } = req.user;
-  const { date, service_id, interval } = req.query;
+  const { tenant_id: userTenantId } = req.user;
+  const { date, service_id, interval, target_tenant_id } = req.query;
+  const tenant_id = target_tenant_id || userTenantId;
 
   if (!date) {
     return res.status(400).json({ error: 'Falta date (YYYY-MM-DD).' });

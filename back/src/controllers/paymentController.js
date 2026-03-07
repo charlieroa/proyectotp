@@ -9,11 +9,23 @@ const prisma = require('../config/prisma');
  * registra los pagos y los movimientos de caja. TODO en una transacción.
  */
 exports.createInvoiceAndPayments = async (req, res) => {
-  const { tenant_id, id: cashier_id } = req.user;
-  const { client_id, services = [], products = [], payments = [], tip_amount: rawTipAmount = 0 } = req.body;
+  const { tenant_id: userTenantId, id: cashier_id } = req.user;
+  const { client_id, services = [], products = [], payments = [], tip_amount: rawTipAmount = 0, target_tenant_id } = req.body;
+
+  // Usar target_tenant_id si viene (cross-branch), sino el del usuario
+  const effectiveTenantId = target_tenant_id || userTenantId;
 
   if (!client_id || (services.length === 0 && products.length === 0) || payments.length === 0) {
     return res.status(400).json({ error: 'Faltan datos clave: cliente, items a facturar o información de pago.' });
+  }
+
+  // Validar acceso cross-branch si se usa target_tenant_id
+  if (target_tenant_id && target_tenant_id !== userTenantId) {
+    const { canAccessTenant } = require('./ficheroController');
+    const canAccess = await canAccessTenant(userTenantId, target_tenant_id);
+    if (!canAccess) {
+      return res.status(403).json({ error: 'No tiene acceso a este negocio.' });
+    }
   }
 
   const tipAmount = Number(rawTipAmount) || 0;
@@ -21,26 +33,27 @@ exports.createInvoiceAndPayments = async (req, res) => {
   try {
     const result = await prisma.$transaction(async (tx) => {
 
-      // 1) Validar sesión de caja
+      // 1) Validar sesion de caja del tenant efectivo
       const openSession = await tx.cash_sessions.findFirst({
-        where: { tenant_id, status: 'OPEN' },
+        where: { tenant_id: effectiveTenantId, status: 'OPEN' },
         select: { id: true }
       });
       if (!openSession) {
-        throw new Error("No hay una sesión de caja abierta. No se puede procesar el pago.");
+        throw new Error("No hay una sesion de caja abierta. No se puede procesar el pago.");
       }
       const cash_session_id = openSession.id;
 
-      // 2) Calcular total usando precios del momento
+      // 2) Calcular total - buscar appointments por ID sin filtrar por tenant
+      //    (ya validamos acceso arriba, y la cita puede estar en otro tenant)
       let totalServices = 0;
       let totalProducts = 0;
 
       if (services.length > 0) {
         const svcPrices = await tx.$queryRawUnsafe(
-          `SELECT a.id AS appointment_id, s.price::numeric AS price
+          `SELECT a.id AS appointment_id, a.tenant_id AS appt_tenant_id, s.price::numeric AS price
            FROM appointments a JOIN services s ON a.service_id = s.id
-           WHERE a.id = ANY($1::uuid[]) AND a.tenant_id = $2::uuid`,
-          services, tenant_id
+           WHERE a.id = ANY($1::uuid[])`,
+          services
         );
         totalServices = svcPrices.reduce((acc, r) => acc + Number(r.price || 0), 0);
       }
@@ -48,7 +61,7 @@ exports.createInvoiceAndPayments = async (req, res) => {
       if (products.length > 0) {
         for (const p of products) {
           const prodRes = await tx.products.findFirst({
-            where: { id: p.product_id, tenant_id },
+            where: { id: p.product_id, tenant_id: effectiveTenantId },
             select: { sale_price: true }
           });
           if (!prodRes) throw new Error('Producto no encontrado.');
@@ -65,16 +78,16 @@ exports.createInvoiceAndPayments = async (req, res) => {
       let distinctStylists = [];
       if (services.length > 0) {
         const stylistsRes = await tx.$queryRawUnsafe(
-          `SELECT DISTINCT a.stylist_id FROM appointments a WHERE a.id = ANY($1::uuid[]) AND a.tenant_id = $2::uuid`,
-          services, tenant_id
+          `SELECT DISTINCT a.stylist_id FROM appointments a WHERE a.id = ANY($1::uuid[])`,
+          services
         );
         distinctStylists = stylistsRes.map(r => r.stylist_id);
       }
 
-      // 4) Crear factura (con propina si aplica)
+      // 4) Crear factura en el tenant efectivo
       const invoice = await tx.invoices.create({
         data: {
-          tenant_id,
+          tenant_id: effectiveTenantId,
           client_id,
           cash_session_id,
           total_amount: calculatedTotal,
@@ -85,11 +98,12 @@ exports.createInvoiceAndPayments = async (req, res) => {
       });
       const invoiceId = invoice.id;
 
-      // 5) ÍTEMS DE SERVICIO (congelan precio Y CALCULAN COMISIÓN)
+      // 5) ITEMS DE SERVICIO (congelan precio Y CALCULAN COMISION)
       if (services.length > 0) {
         const svcRows = await tx.$queryRawUnsafe(
           `SELECT
               a.id AS appointment_id,
+              a.tenant_id AS appt_tenant_id,
               a.stylist_id,
               s.name,
               s.price::numeric,
@@ -97,12 +111,12 @@ exports.createInvoiceAndPayments = async (req, res) => {
            FROM appointments a
            JOIN services s ON a.service_id = s.id
            JOIN users u ON a.stylist_id = u.id
-           WHERE a.id = ANY($1::uuid[]) AND a.tenant_id = $2::uuid`,
-          services, tenant_id
+           WHERE a.id = ANY($1::uuid[])`,
+          services
         );
 
         for (const row of svcRows) {
-          const { appointment_id, name, price, stylist_id, commission_rate } = row;
+          const { appointment_id, appt_tenant_id, name, price, stylist_id, commission_rate } = row;
 
           const servicePrice = Number(price || 0);
           const commissionRate = Number(commission_rate || 0);
@@ -119,19 +133,19 @@ exports.createInvoiceAndPayments = async (req, res) => {
               total_price: servicePrice,
               commission_value: calculatedCommissionValue,
               seller_id: stylist_id,
-              tenant_id,
+              tenant_id: effectiveTenantId,
             }
           });
 
-          // Marcar appointment como completado
+          // Marcar appointment como completado (usar su propio tenant_id)
           await tx.$queryRawUnsafe(
             "UPDATE appointments SET status = 'completed', updated_at = NOW() WHERE id = $1::uuid AND tenant_id = $2::uuid",
-            appointment_id, tenant_id
+            appointment_id, appt_tenant_id
           );
         }
       }
 
-      // 6) ÍTEMS DE PRODUCTO (con su propia lógica de comisión, si la tuviera)
+      // 6) ITEMS DE PRODUCTO
       if (products.length > 0) {
         for (const p of products) {
           const { product_id, quantity, seller_id = null } = p;
@@ -140,11 +154,11 @@ exports.createInvoiceAndPayments = async (req, res) => {
             if (distinctStylists.length === 1) {
               sellerToUse = distinctStylists[0];
             } else {
-              throw new Error('Falta "seller_id" en un producto y la factura tiene 0 o múltiples estilistas.');
+              throw new Error('Falta "seller_id" en un producto y la factura tiene 0 o multiples estilistas.');
             }
           }
           const prodRes = await tx.products.findFirst({
-            where: { id: product_id, tenant_id },
+            where: { id: product_id, tenant_id: effectiveTenantId },
             select: { name: true, sale_price: true }
           });
           if (!prodRes) throw new Error('Producto no encontrado.');
@@ -163,14 +177,14 @@ exports.createInvoiceAndPayments = async (req, res) => {
               unit_price: unit,
               total_price: lineTotal,
               seller_id: sellerToUse,
-              tenant_id,
+              tenant_id: effectiveTenantId,
             }
           });
 
-          // Stock update with guard: stock >= qty
+          // Stock update
           const stockUpdate = await tx.$queryRawUnsafe(
             "UPDATE products SET stock = stock - $1 WHERE id = $2::uuid AND tenant_id = $3::uuid AND stock >= $1 RETURNING id",
-            qty, product_id, tenant_id
+            qty, product_id, effectiveTenantId
           );
           if (!stockUpdate || stockUpdate.length === 0) {
             throw new Error(`Stock insuficiente para el producto: ${prodName}`);
@@ -182,7 +196,7 @@ exports.createInvoiceAndPayments = async (req, res) => {
       for (const p of payments) {
         await tx.payments.create({
           data: {
-            tenant_id,
+            tenant_id: effectiveTenantId,
             invoice_id: invoiceId,
             amount: Number(p.amount || 0),
             payment_method: p.payment_method,
@@ -193,7 +207,7 @@ exports.createInvoiceAndPayments = async (req, res) => {
         if (String(p.payment_method || '').toLowerCase() === 'cash') {
           await tx.cash_movements.create({
             data: {
-              tenant_id,
+              tenant_id: effectiveTenantId,
               user_id: cashier_id,
               invoice_id: invoiceId,
               type: 'income',
@@ -207,10 +221,10 @@ exports.createInvoiceAndPayments = async (req, res) => {
         }
       }
 
-      // 8) Registrar propina del salón como ingreso en caja
+      // 8) Registrar propina del salon como ingreso en caja
       if (tipAmount > 0) {
         const tenantInfo = await tx.tenants.findUnique({
-          where: { id: tenant_id },
+          where: { id: effectiveTenantId },
           select: { tip_salon_percent: true }
         });
         const tipSalonPercent = Number(tenantInfo?.tip_salon_percent ?? 10);
@@ -219,11 +233,11 @@ exports.createInvoiceAndPayments = async (req, res) => {
         if (salonTip > 0) {
           await tx.cash_movements.create({
             data: {
-              tenant_id,
+              tenant_id: effectiveTenantId,
               user_id: cashier_id,
               invoice_id: invoiceId,
               type: 'income',
-              description: `Propina salón (${tipSalonPercent}%) - Factura #${String(invoiceId).slice(0, 8)}`,
+              description: `Propina salon (${tipSalonPercent}%) - Factura #${String(invoiceId).slice(0, 8)}`,
               amount: salonTip,
               category: 'propina_salon',
               payment_method: 'cash',

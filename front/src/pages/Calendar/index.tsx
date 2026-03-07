@@ -2,7 +2,7 @@
 // File: src/pages/Calendar/index.tsx
 // =============================================
 import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { Card, CardBody, Container, Row, Col } from "reactstrap";
+import { Card, CardBody, Container, Row, Col, Input } from "reactstrap";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
@@ -13,23 +13,23 @@ import esLocale from "@fullcalendar/core/locales/es";
 import { useDispatch, useSelector } from "react-redux";
 import Swal from "sweetalert2";
 
-// ⬇️ Hook de sockets
 import useCalendarSocket from "../../hooks/useCalendarSocket";
 
-// ✅ Thunks de Calendar
 import {
   getCalendarData as onGetCalendarData,
   updateAppointment as onUpdateAppointment,
   cancelAppointment as onCancelAppointment,
 } from "../../slices/thunks";
 
-// ✅ Thunk de Settings (importado directamente)
 import { fetchTenantSettings } from "../../slices/Settings/settingsSlice";
 
-// Componentes
 import BreadCrumb from "../../Components/Common/BreadCrumb";
 import CentroDeCitasDiarias from "../../Components/Calendar/CentroDeCitasDiarias";
 import AppointmentModal from "../../Components/Calendar/AppointmentModal";
+import { getIsPrimaryBranch, getTenantIdFromToken } from "../../services/auth";
+import api from "../../services/api";
+
+type BranchOption = { id: string; name: string; };
 
 // ✅ HELPER: Verificar si una fecha es pasada (solo fecha, sin hora)
 const isDateInPast = (date: Date): boolean => {
@@ -72,36 +72,24 @@ const isDayOpen = (date: Date, workingHours: any): boolean => {
 };
 
 const Calendar = () => {
-  document.title = "Calendario | Sistema de Peluquerías";
+  document.title = "Calendario | Sistema de Peluquerias";
   const dispatch: any = useDispatch();
 
   const { events, loading, tenantWorkingHours } = useSelector((state: any) => state.Calendar);
 
-  // ✅ Lee directamente desde el slice de Settings
   const settingsState = useSelector((state: any) => state.Settings || state.settings);
   const settingsLoaded = settingsState?.loaded === true;
   const allowPastAppointments = settingsState?.data?.allow_past_appointments ?? false;
 
-  // ✅ Debug temporal (puedes quitar esto después de verificar que funciona)
-  console.log('🔍 [Calendar] Settings:', {
-    settingsLoaded,
-    allowPastAppointments,
-    'settingsState.data': settingsState?.data
-  });
-
-  // Toma tenantId: primero del Redux store, luego sessionStorage, luego localStorage (JWT)
   const loginState = useSelector((s: any) => s.Login || {});
   const tenantId = useMemo(() => {
-    // 1. Redux store (si hay login activo en esta sesión)
     const fromRedux = loginState?.user?.user?.tenant_id || loginState?.user?.tenant_id;
     if (fromRedux) return fromRedux;
-    // 2. sessionStorage (persiste entre recargas en la misma pestaña)
     try {
       const stored = JSON.parse(sessionStorage.getItem('authUser') || '{}');
       if (stored?.user?.tenant_id) return stored.user.tenant_id;
       if (stored?.tenant_id) return stored.tenant_id;
     } catch {}
-    // 3. localStorage token (JWT decodificado)
     try {
       const token = localStorage.getItem('token');
       if (token) {
@@ -112,23 +100,43 @@ const Calendar = () => {
     return null;
   }, [loginState]);
 
+  // --- Selector de sucursal (cross-branch) ---
+  const [branches, setBranches] = useState<BranchOption[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState<string>('');
+  const isPrimary = getIsPrimaryBranch();
+
+  // Cargar sucursales si es primary branch
+  useEffect(() => {
+    if (!isPrimary) return;
+    api.get('/tenants/my-businesses')
+      .then(({ data }) => {
+        if (Array.isArray(data) && data.length > 1) {
+          setBranches(data.map((b: any) => ({ id: b.id, name: b.name })));
+        }
+      })
+      .catch(() => {});
+  }, [isPrimary]);
+
+  // El tenant efectivo: el seleccionado o el propio
+  const effectiveTenantId = selectedBranchId || tenantId;
+  // Solo pasar targetTenantId cuando es diferente al propio
+  const targetTenantId = selectedBranchId && selectedBranchId !== tenantId ? selectedBranchId : undefined;
+
   const [modalOpen, setModalOpen] = useState<boolean>(false);
   const [selectedEvent, setSelectedEvent] = useState<any>(null);
   const [defaultDate, setDefaultDate] = useState<Date | null>(null);
 
   useEffect(() => {
-    dispatch(onGetCalendarData());
-    dispatch(fetchTenantSettings());
-  }, [dispatch]);
+    dispatch(onGetCalendarData(targetTenantId || undefined));
+    dispatch(fetchTenantSettings(targetTenantId || undefined));
+  }, [dispatch, targetTenantId]);
 
-  // Refrescar eventos cuando llegue un cambio por polling
   const refreshCalendar = useCallback(() => {
-    dispatch(onGetCalendarData());
-  }, [dispatch]);
+    dispatch(onGetCalendarData(targetTenantId || undefined));
+  }, [dispatch, targetTenantId]);
 
-  // WebSocket para detectar cambios en citas en tiempo real
   useCalendarSocket({
-    tenantId,
+    tenantId: effectiveTenantId,
     onAnyChange: () => {
       console.log('🔄 [CALENDAR] Refrescando por WebSocket...');
       refreshCalendar();
@@ -311,6 +319,36 @@ const Calendar = () => {
         <Container fluid>
           <BreadCrumb title="Calendario" pageTitle="Citas" />
 
+          {/* Selector de sucursal (solo si tiene multiples sucursales) */}
+          {branches.length > 1 && (
+            <Row className="mb-3">
+              <Col md={4}>
+                <div className="d-flex align-items-center gap-2">
+                  <i className="ri-store-2-line fs-5 text-primary"></i>
+                  <Input
+                    type="select"
+                    value={selectedBranchId}
+                    onChange={(e) => setSelectedBranchId(e.target.value)}
+                    className="form-select"
+                  >
+                    <option value="">Mi sucursal</option>
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </Input>
+                </div>
+              </Col>
+              {targetTenantId && (
+                <Col md={8} className="d-flex align-items-center">
+                  <span className="badge bg-info-subtle text-info fs-6">
+                    <i className="ri-building-line me-1"></i>
+                    Gestionando: {branches.find(b => b.id === selectedBranchId)?.name}
+                  </span>
+                </Col>
+              )}
+            </Row>
+          )}
+
           {/* ✅ Indicador visual si las citas pasadas están permitidas (y settings ya cargaron) */}
           {settingsLoaded && allowPastAppointments && (
             <Row className="mb-3">
@@ -326,7 +364,7 @@ const Calendar = () => {
 
           <Row>
             <Col xl={3}>
-              <CentroDeCitasDiarias events={events} onNewAppointmentClick={handleNewAppointmentClick} />
+              <CentroDeCitasDiarias events={events} onNewAppointmentClick={handleNewAppointmentClick} targetTenantId={targetTenantId} />
             </Col>
             <Col xl={9}>
               <Card className="card-h-100">
@@ -400,8 +438,8 @@ const Calendar = () => {
         onClose={() => setModalOpen(false)}
         selectedEvent={selectedEvent}
         defaultDate={defaultDate}
-        // ✅ Prop consistente en camelCase (el Modal la recibe así)
         allowPastAppointments={allowPastAppointments}
+        targetTenantId={targetTenantId}
       />
     </React.Fragment>
   );

@@ -70,6 +70,7 @@ interface AppointmentModalProps {
   selectedEvent: any | null;
   defaultDate?: Date | null;
   allowPastAppointments?: boolean;
+  targetTenantId?: string;
 }
 
 // Helpers de fecha/hora
@@ -142,6 +143,7 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
   selectedEvent,
   defaultDate,
   allowPastAppointments = false,
+  targetTenantId,
 }) => {
   const dispatch: any = useDispatch();
   const { clients = [], services = [] } =
@@ -299,7 +301,7 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
     if (service_id && date) {
       setIsLoadingTimeSlots(true);
       const dateStr = toYyyyMmDd(date);
-      dispatch(fetchTenantSlots(dateStr, service_id))
+      dispatch(fetchTenantSlots(dateStr, service_id, targetTenantId))
         .then((payload: any) => {
           const fetched = normalizeSlotsPayload(payload);
           let filtered = fetched;
@@ -332,10 +334,9 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
       setIsLoadingStylists(true);
       const dateStr = toYyyyMmDd(date);
 
-      dispatch(fetchAvailableStylists(dateStr, start_time, service_id))
+      dispatch(fetchAvailableStylists(dateStr, start_time, service_id, targetTenantId))
         .then((stylists: Stylist[]) => {
-          // Guardamos la respuesta tal cual del backend (sin alterar orden aún)
-          console.log("📥 Estilistas recibidos del backend:", stylists);
+          console.log("Estilistas recibidos del backend:", stylists);
           setAvailableStylists(stylists);
         })
         .catch(() => setAvailableStylists([]))
@@ -389,8 +390,7 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
     setIsSuggestingMain(true);
     try {
       const dateStr = toYyyyMmDd(date);
-      // Pedimos de nuevo para tener el orden fresco "Justo" del backend
-      const stylists: Stylist[] = await dispatch(fetchAvailableStylists(dateStr, start_time, service_id));
+      const stylists: Stylist[] = await dispatch(fetchAvailableStylists(dateStr, start_time, service_id, targetTenantId));
 
       // Lógica de asignación: El primero que NO esté ocupado y NO esté usado
       const nextStylist = stylists.find(s => !s.is_busy && !isStylistUsedElsewhere(s.id));
@@ -464,7 +464,7 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
     }
     setIsCreatingClient(true);
     try {
-      const result = await dispatch(createNewClient({ first_name: first_name.trim(), last_name: last_name.trim(), phone: phone.trim() }));
+      const result = await dispatch(createNewClient({ first_name: first_name.trim(), last_name: last_name.trim(), phone: phone.trim() }, targetTenantId));
       validation.setFieldValue('client_id', String(result.id));
       setShowClientModal(false);
       setNewClientData({ first_name: '', last_name: '', phone: '' });

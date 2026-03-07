@@ -52,10 +52,10 @@ const getTenantIdFromToken = (): string | null => {
 // ✅ Thunk para cargar settings del tenant
 export const fetchTenantSettings = createAsyncThunk(
   'settings/fetchTenantSettings',
-  async (_, { rejectWithValue }) => {
+  async (targetTenantId: string | undefined, { rejectWithValue }) => {
     try {
-      const tenantId = getTenantIdFromToken();
-      if (!tenantId) return null; // Super admin has no tenant
+      const tenantId = targetTenantId || getTenantIdFromToken();
+      if (!tenantId) return null;
 
       const { data } = await api.get(`/tenants/${tenantId}`);
       return data;
