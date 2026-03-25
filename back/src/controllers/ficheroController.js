@@ -4,6 +4,7 @@ const prisma = require('../config/prisma');
 exports.getQueues = async (req, res) => {
   const { tenant_id } = req.user;
   const { tenantId } = req.params;
+  const includeAbsent = req.query.include_absent === 'true';
 
   try {
     // Check if user can view this tenant's queues (same tenant or primary branch)
@@ -13,7 +14,17 @@ exports.getQueues = async (req, res) => {
     }
 
     const queues = await prisma.stylist_queues.findMany({
-      where: { tenant_id: tenantId },
+      where: {
+        tenant_id: tenantId,
+        ...(includeAbsent
+          ? {}
+          : {
+              is_active: true,
+              users: {
+                is_inside_geofence: true
+              }
+            })
+      },
       include: {
         users: {
           select: {
@@ -91,31 +102,13 @@ exports.getNextStylist = async (req, res) => {
         orderBy: { position: 'asc' }
       });
 
-      if (!nextStylist) {
-        // Fallback: get first active stylist (even if not in geofence)
-        const fallback = await tx.stylist_queues.findFirst({
-          where: {
-            tenant_id: targetTenantId,
-            category_id: categoryId,
-            is_active: true
-          },
-          include: {
-            users: {
-              select: { id: true, first_name: true, last_name: true }
-            }
-          },
-          orderBy: { position: 'asc' }
-        });
-
-        if (!fallback) return null;
-        return fallback;
-      }
+      if (!nextStylist) return null;
 
       return nextStylist;
     });
 
     if (!result) {
-      return res.status(404).json({ message: 'No hay estilistas disponibles en esta cola.' });
+      return res.status(404).json({ message: 'No hay estilistas disponibles dentro de la geocerca para esta cola.' });
     }
 
     // Rotate: move this stylist to the end

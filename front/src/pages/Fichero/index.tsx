@@ -22,6 +22,9 @@ type QueueCategory = {
   stylists: QueueStylist[];
 };
 
+const isStylistAvailableForQueue = (stylist: QueueStylist) =>
+  stylist.is_active && stylist.is_inside_geofence;
+
 type Branch = {
   id: string;
   name: string;
@@ -158,7 +161,13 @@ const FicheroDigital: React.FC = () => {
         </Card>
       ) : (
         <Row className="g-3">
-          {queues.map((q) => (
+          {queues
+            .map((q) => ({
+              ...q,
+              stylists: q.stylists.filter(isStylistAvailableForQueue)
+            }))
+            .filter((q) => q.stylists.length > 0)
+            .map((q) => (
             <Col key={q.category_id} xs={12} md={6} lg={4} xl={3}>
               <Card className="h-100 shadow-sm border">
                 <div className="p-3 border-bottom bg-light-subtle d-flex justify-content-between align-items-center">
@@ -173,7 +182,7 @@ const FicheroDigital: React.FC = () => {
                   <div className="p-2">
                     {q.stylists.map((s, idx) => {
                       const isNext = idx === 0;
-                      const isPresent = s.is_inside_geofence && s.is_active;
+                      const isPresent = isStylistAvailableForQueue(s);
 
                       return (
                         <div
@@ -221,15 +230,9 @@ const FicheroDigital: React.FC = () => {
                                 <i className="ri-history-line me-1"></i>
                                 {getTimeSince(s.last_served_at)}
                               </small>
-                              {isPresent ? (
-                                <Badge color="success" pill className="fs-9">
-                                  <i className="ri-map-pin-line me-1"></i>Presente
-                                </Badge>
-                              ) : (
-                                <Badge color="secondary" pill className="fs-9">
-                                  <i className="ri-map-pin-line me-1"></i>Ausente
-                                </Badge>
-                              )}
+                              <Badge color="success" pill className="fs-9">
+                                <i className="ri-map-pin-line me-1"></i>Presente
+                              </Badge>
                             </div>
                           </div>
                         </div>
