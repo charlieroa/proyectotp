@@ -817,7 +817,8 @@ exports.getQueuePosition = async (req, res) => {
     const { id: stylistId, tenant_id } = req.user;
 
     try {
-        // Obtener todas las citas pendientes ordenadas por fecha/hora
+        // Obtener todas las citas activas (pending + aprobadas) ordenadas por fecha/hora.
+        // Incluimos confirmed/scheduled para que al aprobar una cita el estilista siga en la cola.
         const queueQuery = `
             SELECT
                 a.id,
@@ -826,7 +827,7 @@ exports.getQueuePosition = async (req, res) => {
                 ROW_NUMBER() OVER (ORDER BY a.start_time ASC) as position
             FROM appointments a
             WHERE a.tenant_id = $1::uuid
-                AND a.status = 'pending_approval'
+                AND a.status IN ('pending_approval', 'confirmed', 'scheduled')
                 AND a.start_time >= NOW()
             ORDER BY a.start_time ASC
         `;
@@ -846,28 +847,15 @@ exports.getQueuePosition = async (req, res) => {
             }
         }
 
-        // Si no tiene citas pendientes, verificar si tiene citas programadas (scheduled)
+        // Si el estilista no tiene ninguna cita activa en la cola
         if (position === null) {
-            const scheduledRes = await prisma.$queryRawUnsafe(
-                `SELECT COUNT(*) as count
-                FROM appointments
-                WHERE stylist_id = $1::uuid
-                    AND tenant_id = $2::uuid
-                    AND status = 'scheduled'
-                    AND start_time >= NOW()`,
-                stylistId, tenant_id
-            );
-            const hasScheduled = parseInt(scheduledRes[0].count || 0, 10) > 0;
-
             return res.status(200).json({
                 has_pending: false,
                 position: null,
                 is_next: false,
                 total_in_queue: totalInQueue,
-                has_scheduled: hasScheduled,
-                message: hasScheduled
-                    ? 'No tienes citas pendientes de aprobacion'
-                    : 'No tienes citas en el fichero digital'
+                has_scheduled: false,
+                message: 'No tienes citas en el fichero digital'
             });
         }
 
