@@ -783,60 +783,7 @@ const BranchColumn: React.FC<{
 
               {isToday && fichero.length > 0 && (
                 <Section title="Fichero · próximo turno" accent="#6b7280">
-                  {fichero.slice(0, 5).map((f) => {
-                    const stylistColor = colorFromString(f.stylist_name || "?");
-                    return (
-                      <div
-                        key={f.category_id}
-                        className="d-flex align-items-center"
-                        style={{ gap: 7, padding: "3px 6px", borderRadius: 5, fontSize: 12 }}
-                        title={`${f.category_name} → ${f.stylist_name}${f.in_salon ? " (en salón)" : ""}`}
-                      >
-                        <span
-                          className="text-uppercase fw-semibold text-truncate flex-shrink-0"
-                          style={{
-                            fontSize: 9,
-                            letterSpacing: 0.4,
-                            color: "#6b7280",
-                            background: "#f3f4f6",
-                            padding: "2px 7px",
-                            borderRadius: 999,
-                            maxWidth: "42%",
-                          }}
-                        >
-                          {f.category_name}
-                        </span>
-                        <span
-                          className="d-inline-flex align-items-center justify-content-center fw-bold flex-shrink-0"
-                          style={{
-                            width: 18,
-                            height: 18,
-                            borderRadius: "50%",
-                            background: stylistColor,
-                            color: "#fff",
-                            fontSize: 8,
-                            boxShadow: f.in_salon ? "0 0 0 1.5px #10b981" : "none",
-                          }}
-                        >
-                          {getInitials(f.stylist_name)}
-                        </span>
-                        <span
-                          className="text-truncate"
-                          style={{ minWidth: 0, flex: 1, color: "#374151" }}
-                        >
-                          {f.stylist_name}
-                        </span>
-                        {f.in_salon && (
-                          <span style={{ fontSize: 9, color: "#10b981", fontWeight: 700, flexShrink: 0 }}>
-                            en salón
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {fichero.length > 5 && (
-                    <div className="text-muted small ps-1">+{fichero.length - 5} categorías</div>
-                  )}
+                  <FicheroGrid items={fichero} />
                 </Section>
               )}
             </>
@@ -901,6 +848,97 @@ const Section: React.FC<{
     </div>
   </div>
 );
+
+const FicheroGrid: React.FC<{ items: FicheroRow[] }> = ({ items }) => {
+  const visible = items.slice(0, 8);
+  const rowsCount = Math.ceil(visible.length / 2);
+  const remaining = items.length - visible.length;
+  return (
+    <>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1px 1fr",
+          columnGap: 10,
+          rowGap: 4,
+          alignItems: "center",
+        }}
+      >
+        {visible.length > 1 && (
+          <div
+            style={{
+              gridColumn: 2,
+              gridRow: `1 / span ${rowsCount}`,
+              borderLeft: "1px dashed #d1d5db",
+              height: "100%",
+            }}
+          />
+        )}
+        {visible.map((f, idx) => {
+          const col = idx % 2 === 0 ? 1 : 3;
+          const row = Math.floor(idx / 2) + 1;
+          const stylistColor = colorFromString(f.stylist_name || "?");
+          const firstName = (f.stylist_name || "").split(/\s+/)[0] || f.stylist_name;
+          return (
+            <div
+              key={f.category_id}
+              className="d-flex align-items-center"
+              style={{
+                gridColumn: col,
+                gridRow: row,
+                gap: 5,
+                fontSize: 11,
+                minWidth: 0,
+                padding: "1px 0",
+              }}
+              title={`${f.category_name} → ${f.stylist_name}${f.in_salon ? " (en salón)" : ""}`}
+            >
+              <span
+                className="text-uppercase fw-semibold text-truncate flex-shrink-0"
+                style={{
+                  fontSize: 8.5,
+                  letterSpacing: 0.3,
+                  color: "#6b7280",
+                  background: "#f3f4f6",
+                  padding: "1px 6px",
+                  borderRadius: 999,
+                  maxWidth: "55%",
+                }}
+              >
+                {f.category_name}
+              </span>
+              <span
+                className="d-inline-flex align-items-center justify-content-center fw-bold flex-shrink-0"
+                style={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: "50%",
+                  background: stylistColor,
+                  color: "#fff",
+                  fontSize: 7.5,
+                  boxShadow: f.in_salon ? "0 0 0 1.5px #10b981" : "none",
+                }}
+              >
+                {getInitials(f.stylist_name)}
+              </span>
+              <span
+                className="text-truncate"
+                style={{ minWidth: 0, flex: 1, color: "#374151" }}
+              >
+                {firstName}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      {remaining > 0 && (
+        <div className="text-muted small ps-1 mt-1" style={{ fontSize: 10 }}>
+          +{remaining} categoría{remaining === 1 ? "" : "s"}
+        </div>
+      )}
+    </>
+  );
+};
 
 const StylistRevenueItem: React.FC<{
   item: StylistRevenue;
