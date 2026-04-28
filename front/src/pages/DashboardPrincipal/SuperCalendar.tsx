@@ -4,6 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { useCurrency } from "../../contexts/CurrencyContext";
 import { api } from "../../services/api";
 import AppointmentDetailDrawer, { ApptDetail } from "../../Components/Calendar/AppointmentDetailDrawer";
+import AhoraHero from "../../Components/Calendar/AhoraHero";
+import QuickPayDrawer from "../../Components/Payment/QuickPayDrawer";
 
 type ApptStatus =
   | "scheduled"
@@ -142,6 +144,7 @@ const SuperCalendar: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState<boolean>(() => localStorage.getItem(LS_AUTOREFRESH) === "1");
   const [drawerAppt, setDrawerAppt] = useState<ApptDetail | null>(null);
+  const [quickPayAppt, setQuickPayAppt] = useState<ApptShort | null>(null);
   const [hiddenBranches, setHiddenBranches] = useState<Set<string>>(() => {
     try {
       const raw = localStorage.getItem(LS_HIDDEN_BRANCHES);
@@ -387,6 +390,7 @@ const SuperCalendar: React.FC = () => {
               formatCurrency={formatCurrency}
               onApptClick={(a) => handleApptClick(a, b)}
               onOpenDrillDown={() => navigate(`/calendar?branch=${b.id}&view=stylists`)}
+              onPayNow={(a) => setQuickPayAppt(a)}
             />
           ))}
         </div>
@@ -398,6 +402,32 @@ const SuperCalendar: React.FC = () => {
         appointment={drawerAppt}
         onReschedule={handleDrawerReschedule}
         onChanged={fetchData}
+      />
+
+      <QuickPayDrawer
+        isOpen={quickPayAppt !== null}
+        onClose={() => setQuickPayAppt(null)}
+        appointment={
+          quickPayAppt
+            ? {
+                id: quickPayAppt.id,
+                client_id: quickPayAppt.client_id,
+                client_name: quickPayAppt.client_name || "Cliente",
+                service_id: quickPayAppt.service_id,
+                service_name: quickPayAppt.service_name || "Servicio",
+                service_price: Number(quickPayAppt.service_price || 0),
+                stylist_id: quickPayAppt.stylist_id,
+                stylist_name: quickPayAppt.stylist_name || "",
+              }
+            : null
+        }
+        onPaid={() => {
+          setQuickPayAppt(null);
+          fetchData();
+        }}
+        onOpenFullPOS={() => {
+          if (quickPayAppt) navigate(`/pointofsale`);
+        }}
       />
     </div>
   );
@@ -568,7 +598,8 @@ const BranchColumn: React.FC<{
   formatCurrency: (n: number) => string;
   onApptClick: (a: ApptShort) => void;
   onOpenDrillDown: () => void;
-}> = ({ branch, isToday, formatCurrency, onApptClick, onOpenDrillDown }) => {
+  onPayNow: (a: ApptShort) => void;
+}> = ({ branch, isToday, formatCurrency, onApptClick, onOpenDrillDown, onPayNow }) => {
   const { stylists, appointments, fichero, open_tickets, pending_payment, revenue_today, low_stock } = branch;
   const stylistRevenue = branch.stylist_revenue || [];
   const allKpisZero =
@@ -731,11 +762,25 @@ const BranchColumn: React.FC<{
           {hasActivity && (
             <>
               {isToday && appointments.current.length > 0 && (
-                <Section title="Ahora" count={appointments.in_progress} accent="#f59e0b" pulse>
-                  {appointments.current.map((a) => (
-                    <ApptItem key={a.id} appt={a} onClick={() => onApptClick(a)} showTime={false} formatCurrency={formatCurrency} />
+                <div className="d-flex flex-column" style={{ gap: 8 }}>
+                  {appointments.current.slice(0, 1).map((a) => (
+                    <AhoraHero
+                      key={a.id}
+                      appt={a}
+                      branchColor={branch.color}
+                      formatCurrency={formatCurrency}
+                      onClick={() => onApptClick(a)}
+                      onPayNow={undefined}
+                    />
                   ))}
-                </Section>
+                  {appointments.current.length > 1 && (
+                    <Section title={`Otras en curso`} count={appointments.current.length - 1} accent="#f59e0b">
+                      {appointments.current.slice(1).map((a) => (
+                        <ApptItem key={a.id} appt={a} onClick={() => onApptClick(a)} showTime={false} formatCurrency={formatCurrency} />
+                      ))}
+                    </Section>
+                  )}
+                </div>
               )}
 
               {appointments.pending_payment.length > 0 && (
@@ -745,7 +790,14 @@ const BranchColumn: React.FC<{
                   accent="#06b6d4"
                 >
                   {appointments.pending_payment.slice(0, 4).map((a) => (
-                    <ApptItem key={a.id} appt={a} onClick={() => onApptClick(a)} showTime={false} formatCurrency={formatCurrency} />
+                    <ApptItem
+                      key={a.id}
+                      appt={a}
+                      onClick={() => onApptClick(a)}
+                      showTime={false}
+                      formatCurrency={formatCurrency}
+                      onPayNow={() => onPayNow(a)}
+                    />
                   ))}
                   {appointments.pending_payment.length > 4 && (
                     <div className="text-muted small ps-1">+{appointments.pending_payment.length - 4} más</div>
@@ -991,7 +1043,8 @@ const ApptItem: React.FC<{
   onClick: () => void;
   showTime: boolean;
   formatCurrency: (n: number) => string;
-}> = ({ appt, onClick, showTime, formatCurrency }) => {
+  onPayNow?: () => void;
+}> = ({ appt, onClick, showTime, formatCurrency, onPayNow }) => {
   const color = STATUS_COLOR[appt.status] || "#9ca3af";
   const stylistColor = colorFromString(appt.stylist_name || "?");
   const hasPrice = typeof appt.service_price === "number" && appt.service_price > 0;
@@ -1048,6 +1101,30 @@ const ApptItem: React.FC<{
       >
         {appt.client_name}
       </span>
+      {onPayNow && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onPayNow();
+          }}
+          className="d-inline-flex align-items-center justify-content-center flex-shrink-0"
+          style={{
+            width: 22,
+            height: 22,
+            borderRadius: 999,
+            background: "#059669",
+            color: "#fff",
+            border: "none",
+            fontSize: 12,
+            cursor: "pointer",
+            marginLeft: 2,
+          }}
+          title="Cobrar rápido"
+        >
+          <i className="ri-money-dollar-circle-line" />
+        </button>
+      )}
     </div>
   );
 };
