@@ -39,6 +39,14 @@ type FicheroRow = {
 
 type LowStockProduct = { id: string; name: string; stock: number };
 
+type StylistRevenue = {
+  stylist_id: string;
+  stylist_name: string;
+  services_sold: number;
+  products_sold: number;
+  revenue: number;
+};
+
 type Branch = {
   id: string;
   name: string;
@@ -59,6 +67,7 @@ type Branch = {
   open_tickets: { count: number; amount: number };
   revenue_today: number;
   low_stock: { count: number; products: LowStockProduct[] };
+  stylist_revenue?: StylistRevenue[];
 };
 
 type BranchesResponse = { date: string; branches: Branch[] };
@@ -552,6 +561,7 @@ const BranchColumn: React.FC<{
   onOpenDrillDown: () => void;
 }> = ({ branch, isToday, formatCurrency, onApptClick, onOpenDrillDown }) => {
   const { stylists, appointments, fichero, open_tickets, pending_payment, revenue_today, low_stock } = branch;
+  const stylistRevenue = branch.stylist_revenue || [];
   const hasActivity =
     stylists.in_salon > 0 ||
     appointments.total > 0 ||
@@ -728,6 +738,17 @@ const BranchColumn: React.FC<{
                 </Section>
               )}
 
+              {stylistRevenue.length > 0 && (
+                <Section title="Ganancia por estilista" count={stylistRevenue.length} accent="#059669">
+                  {stylistRevenue.slice(0, 5).map((s) => (
+                    <StylistRevenueItem key={s.stylist_id} item={s} formatCurrency={formatCurrency} />
+                  ))}
+                  {stylistRevenue.length > 5 && (
+                    <div className="text-muted small ps-1">+{stylistRevenue.length - 5} más</div>
+                  )}
+                </Section>
+              )}
+
               <Section
                 title={isToday ? "Próximas" : "Agendadas"}
                 count={appointments.upcoming_count}
@@ -850,6 +871,52 @@ const Section: React.FC<{
     </div>
   </div>
 );
+
+const StylistRevenueItem: React.FC<{
+  item: StylistRevenue;
+  formatCurrency: (n: number) => string;
+}> = ({ item, formatCurrency }) => {
+  const stylistColor = colorFromString(item.stylist_name || "?");
+  const breakdown = [
+    item.services_sold > 0 ? `${item.services_sold} servicio${item.services_sold === 1 ? "" : "s"}` : null,
+    item.products_sold > 0 ? `${item.products_sold} producto${item.products_sold === 1 ? "" : "s"}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <div
+      className="d-flex align-items-center"
+      style={{ gap: 7, padding: "4px 6px", borderRadius: 5, fontSize: 12 }}
+      title={`${item.stylist_name} · ${breakdown || "sin desglose"}`}
+    >
+      <span
+        className="d-inline-flex align-items-center justify-content-center fw-bold flex-shrink-0"
+        style={{
+          width: 22,
+          height: 22,
+          borderRadius: "50%",
+          background: stylistColor,
+          color: "#fff",
+          fontSize: 9,
+          letterSpacing: 0.3,
+        }}
+      >
+        {getInitials(item.stylist_name)}
+      </span>
+      <span className="text-truncate" style={{ minWidth: 0, flex: 1, color: "#374151" }}>
+        {item.stylist_name}
+      </span>
+      {breakdown && (
+        <span className="text-muted text-truncate" style={{ fontSize: 10, maxWidth: "35%", flexShrink: 0 }}>
+          {breakdown}
+        </span>
+      )}
+      <span style={{ color: "#059669", fontSize: 11.5, fontWeight: 700, flexShrink: 0 }}>
+        {formatCurrency(item.revenue)}
+      </span>
+    </div>
+  );
+};
 
 const ApptItem: React.FC<{
   appt: ApptShort;
