@@ -525,33 +525,42 @@ const MiniKpi: React.FC<{ label: string; value: React.ReactNode; color?: string;
   </div>
 );
 
-const AlertPill: React.FC<{
+type AlertTone = "amber" | "red" | "cyan";
+const ALERT_TONE: Record<AlertTone, { bg: string; border: string; icon: string; text: string }> = {
+  amber: { bg: "#fffbeb", border: "#fde68a", icon: "#b45309", text: "#78350f" },
+  red:   { bg: "#fef2f2", border: "#fecaca", icon: "#b91c1c", text: "#7f1d1d" },
+  cyan:  { bg: "#ecfeff", border: "#a5f3fc", icon: "#0891b2", text: "#155e75" },
+};
+
+const AlertRow: React.FC<{
   icon: string;
+  tone: AlertTone;
   label: string;
-  bg: string;
-  fg: string;
-  border: string;
+  value: string;
   title?: string;
-}> = ({ icon, label, bg, fg, border, title }) => (
-  <span
-    className="d-inline-flex align-items-center"
-    style={{
-      gap: 4,
-      padding: "3px 8px",
-      borderRadius: 12,
-      background: bg,
-      color: fg,
-      border: `1px solid ${border}`,
-      fontSize: 11,
-      fontWeight: 600,
-      whiteSpace: "nowrap",
-    }}
-    title={title}
-  >
-    <i className={icon} />
-    {label}
-  </span>
-);
+}> = ({ icon, tone, label, value, title }) => {
+  const c = ALERT_TONE[tone];
+  return (
+    <div
+      className="d-flex align-items-center"
+      style={{
+        gap: 8,
+        padding: "6px 10px",
+        background: c.bg,
+        border: `1px solid ${c.border}`,
+        borderRadius: 6,
+        fontSize: 12,
+      }}
+      title={title}
+    >
+      <i className={icon} style={{ fontSize: 13, color: c.icon, flexShrink: 0 }} />
+      <span className="text-truncate" style={{ color: c.text, fontWeight: 600, flex: 1, minWidth: 0 }}>
+        {label}
+      </span>
+      <span style={{ color: c.text, fontWeight: 700, flexShrink: 0, whiteSpace: "nowrap" }}>{value}</span>
+    </div>
+  );
+};
 
 const BranchColumn: React.FC<{
   branch: Branch;
@@ -590,12 +599,12 @@ const BranchColumn: React.FC<{
       }}
     >
       <CardBody className="d-flex flex-column p-0" style={{ flex: 1, minHeight: 0 }}>
-        {/* Header sucursal con barra de color */}
+        {/* Header sucursal con barra de color y sub-línea de contexto */}
         <div
           className="d-flex align-items-center"
           style={{
             gap: 10,
-            padding: "10px 14px",
+            padding: "11px 14px",
             background: `linear-gradient(135deg, ${branch.color}1f, ${branch.color}05)`,
             borderBottom: `1px solid ${branch.color}33`,
           }}
@@ -603,129 +612,114 @@ const BranchColumn: React.FC<{
           <div
             className="d-inline-flex align-items-center justify-content-center flex-shrink-0"
             style={{
-              width: 30,
-              height: 30,
+              width: 32,
+              height: 32,
               borderRadius: 8,
               background: branch.color,
               color: "#fff",
               boxShadow: `0 2px 6px ${branch.color}66`,
             }}
           >
-            <i className="ri-store-2-line" style={{ fontSize: 15 }} />
+            <i className="ri-store-2-line" style={{ fontSize: 16 }} />
           </div>
-          <h6 className="mb-0 fw-bold text-truncate flex-grow-1" title={branch.name} style={{ color: "#1f2937" }}>
-            {branch.name}
-          </h6>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              className="fw-bold text-truncate"
+              title={branch.name}
+              style={{ color: "#1f2937", fontSize: 14, lineHeight: 1.25 }}
+            >
+              {branch.name}
+            </div>
+            <div
+              className="text-muted text-truncate"
+              style={{ fontSize: 11, marginTop: 2, lineHeight: 1.3 }}
+            >
+              {[
+                `${stylists.in_salon}/${stylists.total} estilistas`,
+                appointments.total > 0 ? `${appointments.total} citas` : null,
+                revenue_today > 0 ? formatCurrency(revenue_today) : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </div>
+          </div>
         </div>
 
         <div className="d-flex flex-column" style={{ padding: 14, gap: 12, flex: 1, minHeight: 0 }}>
-        {/* KPIs principales — solo cuando hay algún dato distinto de cero */}
-        {!allKpisZero ? (
-          <div className="d-flex justify-content-between gap-1">
-            <MiniKpi
-              label="EN SALÓN"
-              icon="ri-user-line"
-              value={
-                <>
-                  <span style={{ color: stylists.in_salon > 0 ? "#10b981" : "#9ca3af" }}>{stylists.in_salon}</span>
-                  <small className="text-muted ms-1" style={{ fontSize: 11 }}>
-                    /{stylists.total}
-                  </small>
-                </>
-              }
-            />
-            <MiniKpi label="CITAS" icon="ri-calendar-line" value={appointments.total} />
-            <MiniKpi label="COBRADAS" icon="ri-check-line" value={appointments.completed} color="#059669" />
-            <MiniKpi
-              label="INGRESO"
-              icon="ri-money-dollar-circle-line"
-              value={<span title={formatCurrency(revenue_today)}>{formatCurrency(revenue_today)}</span>}
-              color="#059669"
-            />
-          </div>
-        ) : (
-          <div
-            className="d-flex align-items-center justify-content-between"
-            style={{
-              fontSize: 11,
-              color: "#6b7280",
-              padding: "6px 10px",
-              background: "#f9fafb",
-              borderRadius: 6,
-            }}
-          >
-            <span className="d-inline-flex align-items-center" style={{ gap: 5 }}>
-              <i className="ri-moon-clear-line" style={{ fontSize: 13 }} />
-              Día sin movimiento aún
-            </span>
-            <span style={{ fontWeight: 600 }}>
-              {stylists.in_salon}/{stylists.total} estilistas
-            </span>
-          </div>
-        )}
-
-        {/* Barra de progreso del día */}
-        {appointments.total > 0 && (
-          <div>
-            <div
-              className="d-flex justify-content-between"
-              style={{
-                fontSize: 9,
-                color: "#6b7280",
-                textTransform: "uppercase",
-                letterSpacing: 0.6,
-                marginBottom: 4,
-                fontWeight: 600,
-              }}
-            >
-              <span>Avance del día</span>
-              <span>{Math.round(completionPct)}%</span>
-            </div>
-            <div style={{ height: 6, background: "#f1f5f9", borderRadius: 999, overflow: "hidden" }}>
-              <div
-                style={{
-                  width: `${completionPct}%`,
-                  height: "100%",
-                  background: "linear-gradient(90deg, #10b981, #059669)",
-                  transition: "width 0.4s ease",
-                  borderRadius: 999,
-                }}
+        {/* KPIs + barra progreso — solo cuando hay algún dato relevante */}
+        {!allKpisZero && (
+          <div className="d-flex flex-column" style={{ gap: 10 }}>
+            <div className="d-flex justify-content-between gap-1">
+              <MiniKpi
+                label="EN SALÓN"
+                icon="ri-user-line"
+                value={
+                  <>
+                    <span style={{ color: stylists.in_salon > 0 ? "#10b981" : "#9ca3af" }}>{stylists.in_salon}</span>
+                    <small className="text-muted ms-1" style={{ fontSize: 11 }}>
+                      /{stylists.total}
+                    </small>
+                  </>
+                }
+              />
+              <MiniKpi label="CITAS" icon="ri-calendar-line" value={appointments.total} />
+              <MiniKpi label="COBRADAS" icon="ri-check-line" value={appointments.completed} color="#059669" />
+              <MiniKpi
+                label="INGRESO"
+                icon="ri-money-dollar-circle-line"
+                value={<span title={formatCurrency(revenue_today)}>{formatCurrency(revenue_today)}</span>}
+                color="#059669"
               />
             </div>
-          </div>
-        )}
-
-        {/* Pills de alertas (única fila compacta, scroll horizontal si sobran) */}
-        {(pending_payment.count > 0 || open_tickets.count > 0 || low_stock.count > 0) && (
-          <div
-            className="d-flex flex-wrap"
-            style={{ gap: 4 }}
-          >
-            {pending_payment.count > 0 && (
-              <AlertPill
-                icon="ri-alarm-warning-line"
-                label={`${pending_payment.count} por cobrar · ${formatCurrency(pending_payment.amount)}`}
-                bg="#cffafe"
-                fg="#0e7490"
-                border="#a5f3fc"
-              />
+            {appointments.total > 0 && (
+              <div>
+                <div
+                  className="d-flex justify-content-between"
+                  style={{
+                    fontSize: 9,
+                    color: "#6b7280",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.6,
+                    marginBottom: 4,
+                    fontWeight: 600,
+                  }}
+                >
+                  <span>Avance del día</span>
+                  <span>{Math.round(completionPct)}%</span>
+                </div>
+                <div style={{ height: 6, background: "#f1f5f9", borderRadius: 999, overflow: "hidden" }}>
+                  <div
+                    style={{
+                      width: `${completionPct}%`,
+                      height: "100%",
+                      background: "linear-gradient(90deg, #10b981, #059669)",
+                      transition: "width 0.4s ease",
+                      borderRadius: 999,
+                    }}
+                  />
+                </div>
+              </div>
             )}
+          </div>
+        )}
+
+        {/* Alertas como filas (no pills) — pending_payment se omite porque ya hay Section "Listas para cobrar" */}
+        {(open_tickets.count > 0 || low_stock.count > 0) && (
+          <div className="d-flex flex-column" style={{ gap: 5 }}>
             {open_tickets.count > 0 && (
-              <AlertPill
+              <AlertRow
                 icon="ri-bill-line"
-                label={`${open_tickets.count} ticket${open_tickets.count === 1 ? "" : "s"} · ${formatCurrency(open_tickets.amount)}`}
-                bg="#fef3c7"
-                fg="#92400e"
-                border="#fde68a"
+                tone="amber"
+                label={`Tickets abiertos (${open_tickets.count})`}
+                value={formatCurrency(open_tickets.amount)}
               />
             )}
             {low_stock.count > 0 && (
-              <AlertPill
+              <AlertRow
                 icon="ri-archive-line"
-                label={`${low_stock.count} stock bajo`}
-                bg="#fee2e2"
-                fg="#991b1b"
-                border="#fecaca"
+                tone="red"
+                label="Stock bajo"
+                value={`${low_stock.count} productos`}
                 title={low_stock.products.map((p) => `${p.name} (${p.stock})`).join("\n")}
               />
             )}
