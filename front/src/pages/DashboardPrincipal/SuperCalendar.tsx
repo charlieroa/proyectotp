@@ -562,6 +562,12 @@ const BranchColumn: React.FC<{
 }> = ({ branch, isToday, formatCurrency, onApptClick, onOpenDrillDown }) => {
   const { stylists, appointments, fichero, open_tickets, pending_payment, revenue_today, low_stock } = branch;
   const stylistRevenue = branch.stylist_revenue || [];
+  const allKpisZero =
+    stylists.in_salon === 0 &&
+    appointments.total === 0 &&
+    appointments.completed === 0 &&
+    revenue_today === 0;
+  const hasUpcoming = appointments.next.length > 0 || appointments.upcoming_count > 0;
   const hasActivity =
     stylists.in_salon > 0 ||
     appointments.total > 0 ||
@@ -613,29 +619,50 @@ const BranchColumn: React.FC<{
         </div>
 
         <div className="d-flex flex-column" style={{ padding: 14, gap: 12, flex: 1, minHeight: 0 }}>
-        {/* KPIs principales */}
-        <div className="d-flex justify-content-between gap-1">
-          <MiniKpi
-            label="EN SALÓN"
-            icon="ri-user-line"
-            value={
-              <>
-                <span style={{ color: stylists.in_salon > 0 ? "#10b981" : "#9ca3af" }}>{stylists.in_salon}</span>
-                <small className="text-muted ms-1" style={{ fontSize: 11 }}>
-                  /{stylists.total}
-                </small>
-              </>
-            }
-          />
-          <MiniKpi label="CITAS" icon="ri-calendar-line" value={appointments.total} />
-          <MiniKpi label="COBRADAS" icon="ri-check-line" value={appointments.completed} color="#059669" />
-          <MiniKpi
-            label="INGRESO"
-            icon="ri-money-dollar-circle-line"
-            value={<span title={formatCurrency(revenue_today)}>{formatCurrency(revenue_today)}</span>}
-            color="#059669"
-          />
-        </div>
+        {/* KPIs principales — solo cuando hay algún dato distinto de cero */}
+        {!allKpisZero ? (
+          <div className="d-flex justify-content-between gap-1">
+            <MiniKpi
+              label="EN SALÓN"
+              icon="ri-user-line"
+              value={
+                <>
+                  <span style={{ color: stylists.in_salon > 0 ? "#10b981" : "#9ca3af" }}>{stylists.in_salon}</span>
+                  <small className="text-muted ms-1" style={{ fontSize: 11 }}>
+                    /{stylists.total}
+                  </small>
+                </>
+              }
+            />
+            <MiniKpi label="CITAS" icon="ri-calendar-line" value={appointments.total} />
+            <MiniKpi label="COBRADAS" icon="ri-check-line" value={appointments.completed} color="#059669" />
+            <MiniKpi
+              label="INGRESO"
+              icon="ri-money-dollar-circle-line"
+              value={<span title={formatCurrency(revenue_today)}>{formatCurrency(revenue_today)}</span>}
+              color="#059669"
+            />
+          </div>
+        ) : (
+          <div
+            className="d-flex align-items-center justify-content-between"
+            style={{
+              fontSize: 11,
+              color: "#6b7280",
+              padding: "6px 10px",
+              background: "#f9fafb",
+              borderRadius: 6,
+            }}
+          >
+            <span className="d-inline-flex align-items-center" style={{ gap: 5 }}>
+              <i className="ri-moon-clear-line" style={{ fontSize: 13 }} />
+              Día sin movimiento aún
+            </span>
+            <span style={{ fontWeight: 600 }}>
+              {stylists.in_salon}/{stylists.total} estilistas
+            </span>
+          </div>
+        )}
 
         {/* Barra de progreso del día */}
         {appointments.total > 0 && (
@@ -707,13 +734,7 @@ const BranchColumn: React.FC<{
 
         {/* Contenido principal: lista + secciones (crece con flex) */}
         <div className="d-flex flex-column" style={{ gap: 12, flex: 1 }}>
-          {!hasActivity ? (
-            <div className="text-center py-4" style={{ color: "#9ca3af" }}>
-              <i className="ri-cup-line" style={{ fontSize: 30, opacity: 0.4 }} />
-              <div className="small fst-italic mt-2">Sin actividad hoy</div>
-              <div style={{ fontSize: 10 }}>Esperando a empezar</div>
-            </div>
-          ) : (
+          {hasActivity && (
             <>
               {isToday && appointments.current.length > 0 && (
                 <Section title="Ahora" count={appointments.in_progress} accent="#f59e0b" pulse>
@@ -749,61 +770,76 @@ const BranchColumn: React.FC<{
                 </Section>
               )}
 
-              <Section
-                title={isToday ? "Próximas" : "Agendadas"}
-                count={appointments.upcoming_count}
-                accent="#6b7280"
-              >
-                {appointments.next.length === 0 ? (
-                  <div className="text-muted small fst-italic ps-1">
-                    {isToday ? "No hay próximas citas" : "Sin agenda"}
-                  </div>
-                ) : (
-                  <>
-                    {appointments.next.map((a) => (
-                      <ApptItem key={a.id} appt={a} onClick={() => onApptClick(a)} showTime={true} formatCurrency={formatCurrency} />
-                    ))}
-                    {appointments.upcoming_count > appointments.next.length && (
-                      <div className="text-muted small ps-1">
-                        +{appointments.upcoming_count - appointments.next.length} más
-                      </div>
-                    )}
-                  </>
-                )}
-              </Section>
+              {hasUpcoming && (
+                <Section
+                  title={isToday ? "Próximas" : "Agendadas"}
+                  count={appointments.upcoming_count}
+                  accent="#6b7280"
+                >
+                  {appointments.next.map((a) => (
+                    <ApptItem key={a.id} appt={a} onClick={() => onApptClick(a)} showTime={true} formatCurrency={formatCurrency} />
+                  ))}
+                  {appointments.upcoming_count > appointments.next.length && (
+                    <div className="text-muted small ps-1">
+                      +{appointments.upcoming_count - appointments.next.length} más
+                    </div>
+                  )}
+                </Section>
+              )}
 
               {isToday && fichero.length > 0 && (
                 <Section title="Fichero · próximo turno" accent="#6b7280">
-                  {fichero.slice(0, 5).map((f) => (
-                    <div key={f.category_id} className="d-flex align-items-center gap-2 small ps-1">
-                      <span
-                        className="text-muted text-truncate"
-                        style={{ minWidth: 0, maxWidth: "32%", fontSize: 11 }}
-                        title={f.category_name}
+                  {fichero.slice(0, 5).map((f) => {
+                    const stylistColor = colorFromString(f.stylist_name || "?");
+                    return (
+                      <div
+                        key={f.category_id}
+                        className="d-flex align-items-center"
+                        style={{ gap: 7, padding: "3px 6px", borderRadius: 5, fontSize: 12 }}
+                        title={`${f.category_name} → ${f.stylist_name}${f.in_salon ? " (en salón)" : ""}`}
                       >
-                        {f.category_name}
-                      </span>
-                      <span
-                        style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: "50%",
-                          background: f.in_salon ? "#10b981" : "#9ca3af",
-                          flexShrink: 0,
-                        }}
-                        title={f.in_salon ? "En salón" : "Fuera"}
-                      />
-                      <span className="text-truncate flex-grow-1" style={{ minWidth: 0, fontSize: 12 }}>
-                        {f.stylist_name}
-                      </span>
-                      <span
-                        className="text-muted ms-auto"
-                        style={{ fontSize: 10, fontWeight: 600 }}
-                      >
-                        #{f.position}
-                      </span>
-                    </div>
-                  ))}
+                        <span
+                          className="text-uppercase fw-semibold text-truncate flex-shrink-0"
+                          style={{
+                            fontSize: 9,
+                            letterSpacing: 0.4,
+                            color: "#6b7280",
+                            background: "#f3f4f6",
+                            padding: "2px 7px",
+                            borderRadius: 999,
+                            maxWidth: "42%",
+                          }}
+                        >
+                          {f.category_name}
+                        </span>
+                        <span
+                          className="d-inline-flex align-items-center justify-content-center fw-bold flex-shrink-0"
+                          style={{
+                            width: 18,
+                            height: 18,
+                            borderRadius: "50%",
+                            background: stylistColor,
+                            color: "#fff",
+                            fontSize: 8,
+                            boxShadow: f.in_salon ? "0 0 0 1.5px #10b981" : "none",
+                          }}
+                        >
+                          {getInitials(f.stylist_name)}
+                        </span>
+                        <span
+                          className="text-truncate"
+                          style={{ minWidth: 0, flex: 1, color: "#374151" }}
+                        >
+                          {f.stylist_name}
+                        </span>
+                        {f.in_salon && (
+                          <span style={{ fontSize: 9, color: "#10b981", fontWeight: 700, flexShrink: 0 }}>
+                            en salón
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
                   {fichero.length > 5 && (
                     <div className="text-muted small ps-1">+{fichero.length - 5} categorías</div>
                   )}
