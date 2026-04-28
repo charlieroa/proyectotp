@@ -1,555 +1,918 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { Card, CardBody, Row, Col, Badge, Spinner, Input, UncontrolledTooltip } from "reactstrap";
-import { useDispatch } from "react-redux";
-import Swal from "sweetalert2";
+import { Card, CardBody, Spinner, Input, Button } from "reactstrap";
+import { useNavigate } from "react-router-dom";
+import { useCurrency } from "../../contexts/CurrencyContext";
 import { api } from "../../services/api";
-import { getCalendarData as onGetCalendarData } from "../../slices/thunks";
-import AppointmentModal from "../../Components/Calendar/AppointmentModal";
+import AppointmentDetailDrawer, { ApptDetail } from "../../Components/Calendar/AppointmentDetailDrawer";
 
-type Branch = { id: string; name: string; branch_color: string };
-type StylistBranch = { id: string; name: string; color: string };
-type Stylist = {
-  id: string;
-  first_name: string;
-  last_name: string;
-  branches: StylistBranch[];
-};
-type Appointment = {
+type ApptStatus =
+  | "scheduled"
+  | "rescheduled"
+  | "pending_approval"
+  | "checked_in"
+  | "checked_out"
+  | "completed"
+  | "cancelled";
+
+type ApptShort = {
   id: string;
   start_time: string;
-  end_time: string;
-  status: string;
-  tenant_id: string;
-  stylist_id: string;
-  service_id: string;
-  client_id: string;
+  end_time?: string;
+  status: ApptStatus;
+  service_id?: string;
   service_name: string;
-  price: number;
-  stylist_first_name: string;
-  stylist_last_name: string;
+  service_price?: number;
+  stylist_id?: string;
   stylist_name: string;
-  client_first_name: string;
-  client_last_name: string;
+  client_id?: string;
   client_name: string;
-  branch_name: string;
-  branch_color: string;
-};
-type SalesByBranch = { tenant_id: string; branch_name: string; branch_color: string; total_sales: number; invoice_count: number };
-type ActiveByBranch = { tenant_id: string; branch_name: string; active_count: number };
-type LowStockProduct = { id: string; name: string; stock: number; branch_name: string };
-
-const formatterCOP = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 });
-
-// Time grid constants
-const START_HOUR = 6;
-const END_HOUR = 22;
-const SLOT_COUNT = (END_HOUR - START_HOUR) * 2; // 32 half-hour slots
-const SLOT_WIDTH = 80; // px per 30-min slot
-
-const formatHour12 = (h: number, m: number): string => {
-  const period = h >= 12 ? 'PM' : 'AM';
-  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
-  return `${h12}:${m.toString().padStart(2, '0')} ${period}`;
 };
 
-const generateTimeSlots = (): string[] => {
-  const slots: string[] = [];
-  for (let h = START_HOUR; h < END_HOUR; h++) {
-    slots.push(formatHour12(h, 0));
-    slots.push(formatHour12(h, 30));
-  }
-  return slots;
+type FicheroRow = {
+  category_id: string;
+  category_name: string;
+  position: number;
+  stylist_id: string;
+  stylist_name: string;
+  in_salon: boolean;
 };
 
-const TIME_SLOTS = generateTimeSlots();
+type LowStockProduct = { id: string; name: string; stock: number };
 
-// Calculate grid column from a Date for a given day
-const timeToCol = (date: Date): number => {
-  const hours = date.getHours();
-  const minutes = date.getMinutes();
-  const totalMinutes = (hours - START_HOUR) * 60 + minutes;
-  return Math.max(0, Math.min(SLOT_COUNT, totalMinutes / 30));
+type Branch = {
+  id: string;
+  name: string;
+  color: string;
+  stylists: { total: number; in_salon: number };
+  appointments: {
+    total: number;
+    in_progress: number;
+    completed: number;
+    cancelled: number;
+    upcoming_count: number;
+    current: ApptShort[];
+    next: ApptShort[];
+    pending_payment: ApptShort[];
+  };
+  pending_payment: { count: number; amount: number };
+  fichero: FicheroRow[];
+  open_tickets: { count: number; amount: number };
+  revenue_today: number;
+  low_stock: { count: number; products: LowStockProduct[] };
 };
 
-const formatDateTitle = (date: Date): string => {
-  const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-  const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-  return `${days[date.getDay()]} ${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
+type BranchesResponse = { date: string; branches: Branch[] };
+
+const STATUS_LABEL: Record<ApptStatus, string> = {
+  scheduled: "Agendada",
+  rescheduled: "Reagendada",
+  pending_approval: "Por aprobar",
+  checked_in: "En curso",
+  checked_out: "Listo para cobrar",
+  completed: "Pagada",
+  cancelled: "Cancelada",
 };
 
-const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  scheduled: { label: 'Agendada', color: 'primary' },
-  pending_approval: { label: 'Pendiente', color: 'warning' },
-  checked_in: { label: 'En atencion', color: 'info' },
-  checked_out: { label: 'Finalizada', color: 'success' },
-  completed: { label: 'Completada', color: 'success' },
-  cancelled: { label: 'Cancelada', color: 'danger' },
-  rescheduled: { label: 'Reagendada', color: 'secondary' },
-  no_show: { label: 'No asistio', color: 'dark' },
+const STATUS_COLOR: Record<ApptStatus, string> = {
+  scheduled: "#9ca3af",
+  rescheduled: "#9ca3af",
+  pending_approval: "#a78bfa",
+  checked_in: "#f59e0b",
+  checked_out: "#06b6d4",
+  completed: "#059669",
+  cancelled: "#ef4444",
 };
+
+const LS_AUTOREFRESH = "supercal_autorefresh";
+const LS_HIDDEN_BRANCHES = "supercal_hidden_branches";
+
+function todayISO(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+function shiftDate(iso: string, days: number): string {
+  const d = new Date(iso + "T12:00:00");
+  d.setDate(d.getDate() + days);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+function fmtTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+function formatDateTitle(iso: string): string {
+  const d = new Date(iso + "T12:00:00");
+  const days = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+  const months = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+  return `${days[d.getDay()]} ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+}
+function getInitials(name?: string): string {
+  if (!name) return "?";
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+function colorFromString(s: string): string {
+  const palette = [
+    "#6366f1", "#8b5cf6", "#ec4899", "#14b8a6", "#f59e0b",
+    "#10b981", "#3b82f6", "#ef4444", "#0ea5e9", "#a855f7",
+  ];
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) hash = (hash << 5) - hash + s.charCodeAt(i);
+  return palette[Math.abs(hash) % palette.length];
+}
 
 const SuperCalendar: React.FC = () => {
-  const dispatch: any = useDispatch();
+  const { formatCurrency } = useCurrency();
+  const navigate = useNavigate();
+
+  const [date, setDate] = useState<string>(todayISO());
+  const [data, setData] = useState<BranchesResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [initialLoaded, setInitialLoaded] = useState(false);
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [stylists, setStylists] = useState<Stylist[]>([]);
-  const [salesByBranch, setSalesByBranch] = useState<SalesByBranch[]>([]);
-  const [activeByBranch, setActiveByBranch] = useState<ActiveByBranch[]>([]);
-  const [lowStock, setLowStock] = useState<LowStockProduct[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [selectedBranches, setSelectedBranches] = useState<Set<string>>(new Set());
-  const [rescheduleModalOpen, setRescheduleModalOpen] = useState(false);
-  const [rescheduleEvent, setRescheduleEvent] = useState<any>(null);
-  const [selectedDate, setSelectedDate] = useState<Date>(() => {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d;
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState<boolean>(() => localStorage.getItem(LS_AUTOREFRESH) === "1");
+  const [drawerAppt, setDrawerAppt] = useState<ApptDetail | null>(null);
+  const [hiddenBranches, setHiddenBranches] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(LS_HIDDEN_BRANCHES);
+      return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch {
+      return new Set();
+    }
   });
 
-  const fetchData = useCallback(async (date: Date) => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
+    setErrorMsg(null);
     try {
-      const start = new Date(date);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(date);
-      end.setHours(23, 59, 59, 999);
-
-      const [calRes, branchRes] = await Promise.all([
-        api.get('/appointments/super-calendar', { params: { start: start.toISOString(), end: end.toISOString() } }),
-        api.get('/tenants/my-businesses'),
-      ]);
-
-      const data = calRes.data;
-      setAppointments(data.appointments || []);
-      setStylists(data.stylists || []);
-      setSalesByBranch(data.widgets?.sales_by_branch || []);
-      setActiveByBranch(data.widgets?.active_stylists_by_branch || []);
-      setLowStock(data.widgets?.low_stock_products || []);
-
-      const branchList: Branch[] = (branchRes.data || []).map((b: any) => ({
-        id: b.id,
-        name: b.name,
-        branch_color: b.branch_color || '#3788d8',
-      }));
-      setBranches(branchList);
-      setSelectedBranches(prev => prev.size > 0 ? prev : new Set(branchList.map(b => b.id)));
-    } catch (err) {
-      console.error('Error loading super calendar:', err);
+      const { data: resp } = await api.get<BranchesResponse>("/dashboard-v2/branches-day", { params: { date } });
+      setData(resp);
+    } catch (err: any) {
+      console.error("SuperCalendar fetch error:", err);
+      setData(null);
+      const status = err?.response?.status;
+      const apiMsg = err?.response?.data?.error || err?.message || "Error desconocido";
+      setErrorMsg(status ? `${status}: ${apiMsg}` : apiMsg);
     } finally {
       setLoading(false);
-      setInitialLoaded(true);
     }
-  }, []);
+  }, [date]);
 
   useEffect(() => {
-    fetchData(selectedDate);
-  }, [selectedDate, fetchData]);
+    fetchData();
+  }, [fetchData]);
 
-  const toggleBranch = (id: string) => {
-    setSelectedBranches(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+  // Auto-refresh cada 60s
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const id = setInterval(() => fetchData(), 60_000);
+    return () => clearInterval(id);
+  }, [autoRefresh, fetchData]);
+
+  const toggleAutoRefresh = () => {
+    setAutoRefresh((prev) => {
+      const next = !prev;
+      localStorage.setItem(LS_AUTOREFRESH, next ? "1" : "0");
       return next;
     });
   };
 
-  const goToday = () => {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    setSelectedDate(d);
-  };
-  const goPrev = () => setSelectedDate(prev => { const d = new Date(prev); d.setDate(d.getDate() - 1); return d; });
-  const goNext = () => setSelectedDate(prev => { const d = new Date(prev); d.setDate(d.getDate() + 1); return d; });
-
-  const handleAppointmentClick = (appt: Appointment) => {
-    const canModify = ['scheduled', 'rescheduled', 'pending_approval'].includes(appt.status);
-    if (!canModify) return;
-
-    const startTime = new Date(appt.start_time).toLocaleString('es-CO', {
-      weekday: 'short', day: 'numeric', month: 'short',
-      hour: 'numeric', minute: '2-digit', hour12: true,
-    });
-
-    Swal.fire({
-      title: '¿Qué deseas hacer con esta cita?',
-      html: `<div class="text-start">
-        <p class="mb-1"><strong>${appt.service_name || 'Servicio'}</strong></p>
-        <p class="mb-1" style="color:#878a99"><i class="ri-user-line me-1"></i>${appt.client_name || 'Sin cliente'}</p>
-        <p class="mb-1" style="color:#878a99"><i class="ri-scissors-line me-1"></i>${appt.stylist_name || ''}</p>
-        <p class="mb-1" style="color:#878a99"><i class="ri-time-line me-1"></i>${startTime}</p>
-        <p class="mb-0" style="color:#878a99"><i class="ri-building-line me-1"></i>${appt.branch_name || ''}</p>
-      </div>`,
-      showDenyButton: true,
-      showCancelButton: true,
-      confirmButtonText: '<i class="ri-calendar-event-line me-1"></i> Reprogramar',
-      denyButtonText: '<i class="ri-close-circle-line me-1"></i> Cancelar Cita',
-      cancelButtonText: 'Cerrar',
-      confirmButtonColor: '#f7b84b',
-      denyButtonColor: '#f06548',
-    }).then((result) => {
-      if (result.isConfirmed) {
-        // Load calendar data (services, clients) then open modal
-        dispatch(onGetCalendarData());
-        setRescheduleEvent({
-          id: appt.id,
-          client_id: appt.client_id,
-          service_id: appt.service_id,
-          stylist_id: appt.stylist_id,
-          start_time: appt.start_time,
-          end_time: appt.end_time,
-          status: appt.status,
-          service_name: appt.service_name,
-          client_first_name: appt.client_first_name,
-          client_last_name: appt.client_last_name,
-          stylist_first_name: appt.stylist_first_name,
-          stylist_last_name: appt.stylist_last_name,
-        });
-        setRescheduleModalOpen(true);
-      } else if (result.isDenied) {
-        Swal.fire({
-          title: '¿Confirmar cancelación?',
-          text: 'Esta acción marcará la cita como cancelada.',
-          icon: 'warning',
-          showCancelButton: true,
-          confirmButtonColor: '#f06548',
-          cancelButtonColor: '#878a99',
-          confirmButtonText: 'Sí, cancelar cita',
-          cancelButtonText: 'No, volver',
-        }).then(async (confirmResult) => {
-          if (confirmResult.isConfirmed) {
-            try {
-              await api.patch(`/appointments/${appt.id}/status`, { status: 'cancelled' });
-              Swal.fire({ icon: 'success', title: 'Cita cancelada', timer: 2000, showConfirmButton: false });
-              fetchData(selectedDate);
-            } catch (err: any) {
-              Swal.fire({ icon: 'error', title: 'Error', text: err?.response?.data?.error || 'No se pudo cancelar la cita.' });
-            }
-          }
-        });
-      }
+  const toggleBranchHidden = (id: string) => {
+    setHiddenBranches((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      localStorage.setItem(LS_HIDDEN_BRANCHES, JSON.stringify(Array.from(next)));
+      return next;
     });
   };
 
-  // Group appointments by stylist_id, filtered by selected branches
-  const appointmentsByStylist = useMemo(() => {
-    const map: Record<string, Appointment[]> = {};
-    appointments.forEach(a => {
-      if (selectedBranches.has(a.tenant_id)) {
-        if (!map[a.stylist_id]) map[a.stylist_id] = [];
-        map[a.stylist_id].push(a);
-      }
+  const visibleBranches = useMemo<Branch[]>(() => {
+    if (!data) return [];
+    return data.branches.filter((b) => !hiddenBranches.has(b.id));
+  }, [data, hiddenBranches]);
+
+  const isToday = date === todayISO();
+
+  const handleApptClick = (appt: ApptShort, branch: Branch) => {
+    setDrawerAppt({
+      id: appt.id,
+      start_time: appt.start_time,
+      end_time: appt.end_time,
+      status: appt.status,
+      service_name: appt.service_name || "Servicio",
+      service_price: appt.service_price,
+      stylist_id: appt.stylist_id,
+      stylist_name: appt.stylist_name,
+      client_id: appt.client_id,
+      client_name: appt.client_name || "Sin cliente",
+      branch_name: branch.name,
+      tenant_id: branch.id,
     });
-    return map;
-  }, [appointments, selectedBranches]);
+  };
 
-  // Sort stylists: shared (multi-branch) first, then alphabetically
-  const sortedStylists = useMemo(() => {
-    // Only show stylists who belong to at least one selected branch
-    const filtered = stylists.filter(s =>
-      s.branches.some(b => selectedBranches.has(b.id))
-    );
-    return [...filtered].sort((a, b) => {
-      const aBranches = a.branches.length;
-      const bBranches = b.branches.length;
-      if (aBranches !== bBranches) return bBranches - aBranches; // more branches first
-      return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
-    });
-  }, [stylists, selectedBranches]);
-
-  if (loading && !initialLoaded) {
-    return <div className="text-center p-5"><Spinner /> <span className="ms-2">Cargando supercalendario...</span></div>;
-  }
-
-  const gridTotalWidth = SLOT_COUNT * SLOT_WIDTH;
+  const handleDrawerReschedule = (a: ApptDetail) => {
+    // SuperCalendar no tiene AppointmentModal local; abrimos /calendar con la sucursal
+    if (a.tenant_id) {
+      navigate(`/calendar?branch=${a.tenant_id}&view=stylists`);
+    } else {
+      navigate("/calendar");
+    }
+  };
 
   return (
     <div>
-      {/* Date navigation + Branch filters */}
+      <style>{`
+        .branch-card {
+          transition: transform 0.18s ease, box-shadow 0.18s ease;
+        }
+        .branch-card:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08) !important;
+        }
+        .branch-footer-btn .footer-arrow {
+          transition: transform 0.18s ease;
+        }
+        .branch-footer-btn:hover {
+          background: var(--branch-color, #6b7280) !important;
+          color: #fff !important;
+          border-style: solid !important;
+        }
+        .branch-footer-btn:hover .footer-arrow {
+          transform: translateX(4px);
+        }
+        .appt-row {
+          transition: background 0.12s ease;
+        }
+        .appt-row:hover {
+          background: #f9fafb;
+        }
+        .pulse-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          display: inline-block;
+          animation: supercal-pulse-ring 1.5s infinite;
+        }
+        @keyframes supercal-pulse-ring {
+          0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.55); }
+          70% { box-shadow: 0 0 0 7px rgba(245, 158, 11, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+        }
+      `}</style>
+      {/* Toolbar superior */}
       <Card className="border shadow-sm mb-3">
         <CardBody className="py-2">
-          <div className="d-flex flex-wrap align-items-center justify-content-between gap-2">
-            <div className="d-flex align-items-center gap-2">
-              <button className="btn btn-sm btn-soft-primary" onClick={goPrev}>
-                <i className="ri-arrow-left-s-line"></i>
-              </button>
-              <button className="btn btn-sm btn-soft-primary" onClick={goToday}>Hoy</button>
-              <button className="btn btn-sm btn-soft-primary" onClick={goNext}>
-                <i className="ri-arrow-right-s-line"></i>
-              </button>
-              <h6 className="mb-0 ms-2">{formatDateTitle(selectedDate)}</h6>
-              {loading && <Spinner size="sm" className="ms-2" />}
-            </div>
-            {branches.length >= 1 && (
-              <div className="d-flex flex-wrap gap-2">
-                {branches.map(b => (
-                  <div
-                    key={b.id}
-                    className="d-flex align-items-center gap-1 px-2 py-1 rounded border"
-                    style={{
-                      cursor: 'pointer',
-                      backgroundColor: selectedBranches.has(b.id) ? b.branch_color + '20' : 'transparent',
-                      borderColor: selectedBranches.has(b.id) ? b.branch_color : '#dee2e6',
-                      fontSize: '0.8rem',
-                    }}
-                    onClick={() => toggleBranch(b.id)}
-                  >
-                    <Input
-                      type="checkbox"
-                      className="form-check-input m-0"
-                      checked={selectedBranches.has(b.id)}
-                      onChange={() => toggleBranch(b.id)}
-                      style={{ accentColor: b.branch_color, width: 14, height: 14 }}
-                    />
-                    <span className="d-inline-block rounded-circle" style={{ width: 8, height: 8, backgroundColor: b.branch_color }} />
-                    <span className="fw-medium">{b.name}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </CardBody>
-      </Card>
+          <div className="d-flex flex-wrap align-items-center gap-2">
+            <Button color="soft-secondary" size="sm" onClick={() => setDate(shiftDate(date, -1))}>
+              <i className="ri-arrow-left-s-line" />
+            </Button>
+            <Input
+              type="date"
+              bsSize="sm"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              style={{ maxWidth: 160 }}
+            />
+            <Button color="soft-secondary" size="sm" onClick={() => setDate(shiftDate(date, 1))}>
+              <i className="ri-arrow-right-s-line" />
+            </Button>
+            <Button color={isToday ? "primary" : "soft-primary"} size="sm" onClick={() => setDate(todayISO())}>
+              Hoy
+            </Button>
+            <h6 className="mb-0 ms-2 d-none d-md-block">{formatDateTitle(date)}</h6>
+            {loading && <Spinner size="sm" className="ms-2" />}
 
-      {/* Stylist Timeline */}
-      <Card className="border shadow-sm mb-3">
-        <CardBody className="p-0">
-          <div style={{ display: 'flex', overflow: 'hidden' }}>
-            {/* Sticky left column: stylist names */}
-            <div style={{ minWidth: 180, maxWidth: 180, flexShrink: 0, borderRight: '2px solid #e9ebec', zIndex: 2, background: '#fff' }}>
-              {/* Header cell */}
-              <div style={{ height: 40, borderBottom: '1px solid #e9ebec', display: 'flex', alignItems: 'center', padding: '0 12px' }}>
-                <span className="fw-semibold text-muted" style={{ fontSize: '0.8rem' }}>Estilista</span>
-              </div>
-              {/* Stylist rows */}
-              {sortedStylists.map(s => (
-                <div
-                  key={s.id}
-                  style={{
-                    height: 60,
-                    borderBottom: '1px solid #f3f3f9',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'center',
-                    padding: '4px 12px',
-                  }}
-                >
-                  <div className="fw-medium text-truncate" style={{ fontSize: '0.85rem' }}>
-                    {s.first_name} {s.last_name || ''}
-                  </div>
-                  <div className="d-flex flex-wrap gap-1 mt-1">
-                    {s.branches.map(b => (
+            <div className="ms-auto d-flex align-items-center gap-2">
+              <label className="d-inline-flex align-items-center gap-1 mb-0 small">
+                <Input type="checkbox" checked={autoRefresh} onChange={toggleAutoRefresh} />
+                <span>Auto-refresh 60s</span>
+              </label>
+              {data && data.branches.length > 1 && (
+                <div className="d-flex flex-wrap align-items-center gap-1">
+                  {data.branches.map((b) => {
+                    const hidden = hiddenBranches.has(b.id);
+                    return (
                       <span
                         key={b.id}
-                        className="badge"
+                        onClick={() => toggleBranchHidden(b.id)}
+                        className="d-inline-flex align-items-center gap-1 px-2 py-1 rounded border"
                         style={{
-                          backgroundColor: b.color + '25',
-                          color: b.color,
-                          fontSize: '0.65rem',
-                          fontWeight: 500,
-                          padding: '1px 5px',
-                          border: `1px solid ${b.color}40`,
+                          cursor: "pointer",
+                          fontSize: "0.75rem",
+                          background: hidden ? "transparent" : `${b.color}1a`,
+                          borderColor: hidden ? "#dee2e6" : b.color,
+                          opacity: hidden ? 0.5 : 1,
                         }}
+                        title={hidden ? "Mostrar" : "Ocultar"}
                       >
+                        <span
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: "50%",
+                            background: b.color,
+                            display: "inline-block",
+                          }}
+                        />
                         {b.name}
                       </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-              {sortedStylists.length === 0 && (
-                <div style={{ padding: 16 }} className="text-muted small">Sin estilistas</div>
-              )}
-            </div>
-
-            {/* Scrollable time grid */}
-            <div style={{ overflowX: 'auto', flex: 1 }}>
-              <div style={{ minWidth: gridTotalWidth }}>
-                {/* Time header */}
-                <div style={{ display: 'flex', height: 40, borderBottom: '1px solid #e9ebec' }}>
-                  {TIME_SLOTS.map((slot, i) => {
-                    const isHour = slot.includes(':00');
-                    return (
-                      <div
-                        key={slot}
-                        style={{
-                          width: SLOT_WIDTH,
-                          minWidth: SLOT_WIDTH,
-                          borderLeft: isHour ? '1px solid #e9ebec' : '1px solid #f3f3f9',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: '0.75rem',
-                          color: isHour ? '#495057' : '#adb5bd',
-                          fontWeight: isHour ? 600 : 400,
-                          backgroundColor: isHour ? '#fafbfc' : 'transparent',
-                        }}
-                      >
-                        {slot}
-                      </div>
                     );
                   })}
                 </div>
-
-                {/* Stylist rows with appointments */}
-                {sortedStylists.map(s => {
-                  const stylistAppts = appointmentsByStylist[s.id] || [];
-                  return (
-                    <div
-                      key={s.id}
-                      style={{
-                        height: 60,
-                        borderBottom: '1px solid #f3f3f9',
-                        position: 'relative',
-                        display: 'flex',
-                      }}
-                    >
-                      {/* Grid lines */}
-                      {TIME_SLOTS.map((slot, i) => {
-                        const isHour = slot.includes(':00');
-                        return (
-                          <div
-                            key={slot}
-                            style={{
-                              width: SLOT_WIDTH,
-                              minWidth: SLOT_WIDTH,
-                              borderLeft: isHour ? '1px solid #e9ebec' : '1px solid #f8f8fb',
-                              height: '100%',
-                            }}
-                          />
-                        );
-                      })}
-
-                      {/* Appointment blocks */}
-                      {stylistAppts.map(appt => {
-                        const apptStart = new Date(appt.start_time);
-                        const apptEnd = new Date(appt.end_time);
-                        const colStart = timeToCol(apptStart);
-                        const colEnd = timeToCol(apptEnd);
-                        const width = Math.max((colEnd - colStart) * SLOT_WIDTH, SLOT_WIDTH / 2);
-                        const left = colStart * SLOT_WIDTH;
-                        const tooltipId = `appt-${appt.id}`;
-                        const bgColor = appt.branch_color || '#3788d8';
-
-                        return (
-                          <React.Fragment key={appt.id}>
-                            <div
-                              id={tooltipId}
-                              onClick={() => handleAppointmentClick(appt)}
-                              style={{
-                                position: 'absolute',
-                                top: 4,
-                                bottom: 4,
-                                left: left + 1,
-                                width: width - 2,
-                                backgroundColor: bgColor,
-                                borderRadius: 4,
-                                padding: '2px 6px',
-                                overflow: 'hidden',
-                                cursor: 'pointer',
-                                color: '#fff',
-                                fontSize: '0.72rem',
-                                lineHeight: 1.3,
-                                display: 'flex',
-                                flexDirection: 'column',
-                                justifyContent: 'center',
-                                boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
-                                zIndex: 1,
-                                transition: 'transform .15s, box-shadow .15s',
-                              }}
-                              onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(1.03)'; (e.currentTarget as HTMLDivElement).style.boxShadow = '0 3px 8px rgba(0,0,0,0.25)'; }}
-                              onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(1)'; (e.currentTarget as HTMLDivElement).style.boxShadow = '0 1px 3px rgba(0,0,0,0.15)'; }}
-                            >
-                              <div className="fw-semibold text-truncate">{appt.service_name}</div>
-                              <div className="text-truncate" style={{ opacity: 0.9 }}>{appt.client_name}</div>
-                              <div className="text-truncate" style={{ opacity: 0.85 }}>
-                                {apptStart.toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit', hour12: true })}
-                              </div>
-                            </div>
-                            <UncontrolledTooltip target={tooltipId} placement="top">
-                              Click para cancelar o reprogramar
-                            </UncontrolledTooltip>
-                          </React.Fragment>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
-
-                {sortedStylists.length === 0 && (
-                  <div className="text-center text-muted py-4">
-                    No hay estilistas para mostrar. Verifica los filtros de sede.
-                  </div>
-                )}
-              </div>
+              )}
             </div>
           </div>
         </CardBody>
       </Card>
 
-      {/* Widgets */}
-      <Row className="mb-3">
-        <Col md={4}>
-          <Card className="border shadow-sm">
-            <CardBody>
-              <h6 className="text-muted mb-3">Ventas por Sede</h6>
-              {salesByBranch.length === 0 ? <p className="text-muted small">Sin ventas en este periodo</p> : (
-                salesByBranch.map(s => (
-                  <div key={s.tenant_id} className="d-flex justify-content-between align-items-center mb-2">
-                    <div className="d-flex align-items-center">
-                      <span className="d-inline-block rounded-circle me-2" style={{ width: 10, height: 10, backgroundColor: s.branch_color }} />
-                      <span className="small">{s.branch_name}</span>
-                    </div>
-                    <strong className="small">{formatterCOP.format(Number(s.total_sales))}</strong>
-                  </div>
-                ))
-              )}
-            </CardBody>
-          </Card>
-        </Col>
-        <Col md={4}>
-          <Card className="border shadow-sm">
-            <CardBody>
-              <h6 className="text-muted mb-3">Estilistas Activos</h6>
-              {activeByBranch.length === 0 ? <p className="text-muted small">Ninguno en geofence actualmente</p> : (
-                activeByBranch.map(a => (
-                  <div key={a.tenant_id} className="d-flex justify-content-between align-items-center mb-2">
-                    <span className="small">{a.branch_name}</span>
-                    <Badge color="success">{a.active_count}</Badge>
-                  </div>
-                ))
-              )}
-            </CardBody>
-          </Card>
-        </Col>
-        <Col md={4}>
-          <Card className="border shadow-sm">
-            <CardBody>
-              <h6 className="text-muted mb-3">Stock Bajo</h6>
-              {lowStock.length === 0 ? <p className="text-muted small">Todo el inventario OK</p> : (
-                lowStock.slice(0, 5).map(p => (
-                  <div key={p.id} className="d-flex justify-content-between align-items-center mb-2">
-                    <span className="small">{p.name} <small className="text-muted">({p.branch_name})</small></span>
-                    <Badge color={p.stock <= 2 ? "danger" : "warning"}>{p.stock} uds</Badge>
-                  </div>
-                ))
-              )}
-            </CardBody>
-          </Card>
-        </Col>
-      </Row>
+      {/* Resumen agregado del grupo */}
+      {data && visibleBranches.length > 0 && (
+        <GroupSummary branches={visibleBranches} formatCurrency={formatCurrency} />
+      )}
 
-      {/* Reschedule Modal */}
-      <AppointmentModal
-        isOpen={rescheduleModalOpen}
-        onClose={() => {
-          setRescheduleModalOpen(false);
-          setRescheduleEvent(null);
-          fetchData(selectedDate);
-        }}
-        selectedEvent={rescheduleEvent}
+      {/* Grilla kanban de sucursales */}
+      {loading && !data ? (
+        <Card>
+          <CardBody className="text-center py-5">
+            <Spinner /> <span className="ms-2 text-muted">Cargando sucursales...</span>
+          </CardBody>
+        </Card>
+      ) : errorMsg ? (
+        <Card>
+          <CardBody className="text-center py-5">
+            <i className="ri-error-warning-line text-danger" style={{ fontSize: 28 }} />
+            <div className="mt-2 text-danger fw-semibold">No se pudo cargar el SuperCalendario</div>
+            <div className="text-muted small mt-1">{errorMsg}</div>
+            <Button size="sm" color="soft-secondary" className="mt-3" onClick={fetchData}>
+              Reintentar
+            </Button>
+          </CardBody>
+        </Card>
+      ) : !data || data.branches.length === 0 ? (
+        <Card>
+          <CardBody className="text-center text-muted py-5">
+            No se encontraron sucursales asociadas a tu cuenta.
+          </CardBody>
+        </Card>
+      ) : visibleBranches.length === 0 ? (
+        <Card>
+          <CardBody className="text-center text-muted py-5">
+            Todas las sucursales están ocultas. Activa al menos una en el filtro de arriba.
+          </CardBody>
+        </Card>
+      ) : (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+            gap: 16,
+          }}
+        >
+          {visibleBranches.map((b) => (
+            <BranchColumn
+              key={b.id}
+              branch={b}
+              isToday={isToday}
+              formatCurrency={formatCurrency}
+              onApptClick={(a) => handleApptClick(a, b)}
+              onOpenDrillDown={() => navigate(`/calendar?branch=${b.id}&view=stylists`)}
+            />
+          ))}
+        </div>
+      )}
+
+      <AppointmentDetailDrawer
+        isOpen={drawerAppt !== null}
+        onClose={() => setDrawerAppt(null)}
+        appointment={drawerAppt}
+        onReschedule={handleDrawerReschedule}
+        onChanged={fetchData}
       />
+    </div>
+  );
+};
+
+const GroupSummary: React.FC<{ branches: Branch[]; formatCurrency: (n: number) => string }> = ({
+  branches,
+  formatCurrency,
+}) => {
+  const agg = branches.reduce(
+    (acc, b) => {
+      acc.in_salon += b.stylists.in_salon;
+      acc.stylists_total += b.stylists.total;
+      acc.appts_total += b.appointments.total;
+      acc.completed += b.appointments.completed;
+      acc.in_progress += b.appointments.in_progress;
+      acc.revenue += b.revenue_today;
+      acc.pending_count += b.pending_payment.count;
+      acc.pending_amount += b.pending_payment.amount;
+      acc.tickets_count += b.open_tickets.count;
+      acc.tickets_amount += b.open_tickets.amount;
+      acc.low_stock += b.low_stock.count;
+      return acc;
+    },
+    {
+      in_salon: 0,
+      stylists_total: 0,
+      appts_total: 0,
+      completed: 0,
+      in_progress: 0,
+      revenue: 0,
+      pending_count: 0,
+      pending_amount: 0,
+      tickets_count: 0,
+      tickets_amount: 0,
+      low_stock: 0,
+    }
+  );
+
+  const Stat: React.FC<{ label: string; value: React.ReactNode; color?: string; sub?: string }> = ({
+    label,
+    value,
+    color,
+    sub,
+  }) => (
+    <div className="px-3 py-2" style={{ minWidth: 0, flex: "1 1 0" }}>
+      <div className="text-muted text-uppercase" style={{ fontSize: 10, letterSpacing: 0.6 }}>
+        {label}
+      </div>
+      <div className="fw-bold" style={{ fontSize: 20, lineHeight: 1.1, color: color || "#111827" }}>
+        {value}
+      </div>
+      {sub && (
+        <div className="text-muted" style={{ fontSize: 11 }}>
+          {sub}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <Card className="border-0 shadow-sm mb-3">
+      <CardBody className="p-0">
+        <div className="d-flex flex-wrap align-items-stretch divide-stats">
+          <Stat
+            label="En salón"
+            value={
+              <>
+                <span style={{ color: agg.in_salon > 0 ? "#10b981" : "#9ca3af" }}>{agg.in_salon}</span>
+                <small className="text-muted ms-1" style={{ fontSize: 13 }}>
+                  /{agg.stylists_total}
+                </small>
+              </>
+            }
+            sub={`${branches.length} sucursal${branches.length === 1 ? "" : "es"}`}
+          />
+          <Stat label="Citas hoy" value={agg.appts_total} sub={`${agg.in_progress} en curso`} />
+          <Stat label="Cobradas" value={agg.completed} color="#059669" />
+          <Stat label="Ingreso" value={formatCurrency(agg.revenue)} color="#059669" />
+          {agg.pending_count > 0 && (
+            <Stat
+              label="Por cobrar"
+              value={agg.pending_count}
+              color="#0e7490"
+              sub={formatCurrency(agg.pending_amount)}
+            />
+          )}
+          {agg.tickets_count > 0 && (
+            <Stat
+              label="Tickets abiertos"
+              value={agg.tickets_count}
+              color="#92400e"
+              sub={formatCurrency(agg.tickets_amount)}
+            />
+          )}
+          {agg.low_stock > 0 && <Stat label="Stock bajo" value={agg.low_stock} color="#991b1b" />}
+        </div>
+      </CardBody>
+      <style>{`
+        .divide-stats > * + * { border-left: 1px solid #f1f5f9; }
+        @media (max-width: 768px) {
+          .divide-stats > * + * { border-left: none; border-top: 1px solid #f1f5f9; }
+        }
+      `}</style>
+    </Card>
+  );
+};
+
+const MiniKpi: React.FC<{ label: string; value: React.ReactNode; color?: string; icon?: string }> = ({
+  label,
+  value,
+  color,
+  icon,
+}) => (
+  <div className="text-center flex-fill" style={{ minWidth: 0 }}>
+    <div className="d-flex align-items-baseline justify-content-center" style={{ gap: 4 }}>
+      {icon && <i className={icon} style={{ fontSize: 11, color: color || "#9ca3af", opacity: 0.7 }} />}
+      <div className="fw-bold" style={{ color: color || "#111827", fontSize: 17, lineHeight: 1.1 }}>
+        {value}
+      </div>
+    </div>
+    <div className="text-muted text-uppercase text-truncate mt-1" style={{ fontSize: 9, letterSpacing: 0.5 }}>
+      {label}
+    </div>
+  </div>
+);
+
+const AlertPill: React.FC<{
+  icon: string;
+  label: string;
+  bg: string;
+  fg: string;
+  border: string;
+  title?: string;
+}> = ({ icon, label, bg, fg, border, title }) => (
+  <span
+    className="d-inline-flex align-items-center"
+    style={{
+      gap: 4,
+      padding: "3px 8px",
+      borderRadius: 12,
+      background: bg,
+      color: fg,
+      border: `1px solid ${border}`,
+      fontSize: 11,
+      fontWeight: 600,
+      whiteSpace: "nowrap",
+    }}
+    title={title}
+  >
+    <i className={icon} />
+    {label}
+  </span>
+);
+
+const BranchColumn: React.FC<{
+  branch: Branch;
+  isToday: boolean;
+  formatCurrency: (n: number) => string;
+  onApptClick: (a: ApptShort) => void;
+  onOpenDrillDown: () => void;
+}> = ({ branch, isToday, formatCurrency, onApptClick, onOpenDrillDown }) => {
+  const { stylists, appointments, fichero, open_tickets, pending_payment, revenue_today, low_stock } = branch;
+  const hasActivity =
+    stylists.in_salon > 0 ||
+    appointments.total > 0 ||
+    open_tickets.count > 0 ||
+    pending_payment.count > 0 ||
+    revenue_today > 0;
+
+  const completionPct = appointments.total > 0 ? (appointments.completed / appointments.total) * 100 : 0;
+
+  return (
+    <Card
+      className="branch-card mb-0 shadow-sm"
+      style={{
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
+        borderTop: `4px solid ${branch.color}`,
+        borderRadius: 10,
+        overflow: "hidden",
+      }}
+    >
+      <CardBody className="d-flex flex-column p-0" style={{ flex: 1, minHeight: 0 }}>
+        {/* Header sucursal con barra de color */}
+        <div
+          className="d-flex align-items-center"
+          style={{
+            gap: 10,
+            padding: "10px 14px",
+            background: `linear-gradient(135deg, ${branch.color}1f, ${branch.color}05)`,
+            borderBottom: `1px solid ${branch.color}33`,
+          }}
+        >
+          <div
+            className="d-inline-flex align-items-center justify-content-center flex-shrink-0"
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: 8,
+              background: branch.color,
+              color: "#fff",
+              boxShadow: `0 2px 6px ${branch.color}66`,
+            }}
+          >
+            <i className="ri-store-2-line" style={{ fontSize: 15 }} />
+          </div>
+          <h6 className="mb-0 fw-bold text-truncate flex-grow-1" title={branch.name} style={{ color: "#1f2937" }}>
+            {branch.name}
+          </h6>
+        </div>
+
+        <div className="d-flex flex-column" style={{ padding: 14, gap: 12, flex: 1, minHeight: 0 }}>
+        {/* KPIs principales */}
+        <div className="d-flex justify-content-between gap-1">
+          <MiniKpi
+            label="EN SALÓN"
+            icon="ri-user-line"
+            value={
+              <>
+                <span style={{ color: stylists.in_salon > 0 ? "#10b981" : "#9ca3af" }}>{stylists.in_salon}</span>
+                <small className="text-muted ms-1" style={{ fontSize: 11 }}>
+                  /{stylists.total}
+                </small>
+              </>
+            }
+          />
+          <MiniKpi label="CITAS" icon="ri-calendar-line" value={appointments.total} />
+          <MiniKpi label="COBRADAS" icon="ri-check-line" value={appointments.completed} color="#059669" />
+          <MiniKpi
+            label="INGRESO"
+            icon="ri-money-dollar-circle-line"
+            value={<span title={formatCurrency(revenue_today)}>{formatCurrency(revenue_today)}</span>}
+            color="#059669"
+          />
+        </div>
+
+        {/* Barra de progreso del día */}
+        {appointments.total > 0 && (
+          <div>
+            <div
+              className="d-flex justify-content-between"
+              style={{
+                fontSize: 9,
+                color: "#6b7280",
+                textTransform: "uppercase",
+                letterSpacing: 0.6,
+                marginBottom: 4,
+                fontWeight: 600,
+              }}
+            >
+              <span>Avance del día</span>
+              <span>{Math.round(completionPct)}%</span>
+            </div>
+            <div style={{ height: 6, background: "#f1f5f9", borderRadius: 999, overflow: "hidden" }}>
+              <div
+                style={{
+                  width: `${completionPct}%`,
+                  height: "100%",
+                  background: "linear-gradient(90deg, #10b981, #059669)",
+                  transition: "width 0.4s ease",
+                  borderRadius: 999,
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Pills de alertas (única fila compacta, scroll horizontal si sobran) */}
+        {(pending_payment.count > 0 || open_tickets.count > 0 || low_stock.count > 0) && (
+          <div
+            className="d-flex flex-wrap"
+            style={{ gap: 4 }}
+          >
+            {pending_payment.count > 0 && (
+              <AlertPill
+                icon="ri-alarm-warning-line"
+                label={`${pending_payment.count} por cobrar · ${formatCurrency(pending_payment.amount)}`}
+                bg="#cffafe"
+                fg="#0e7490"
+                border="#a5f3fc"
+              />
+            )}
+            {open_tickets.count > 0 && (
+              <AlertPill
+                icon="ri-bill-line"
+                label={`${open_tickets.count} ticket${open_tickets.count === 1 ? "" : "s"} · ${formatCurrency(open_tickets.amount)}`}
+                bg="#fef3c7"
+                fg="#92400e"
+                border="#fde68a"
+              />
+            )}
+            {low_stock.count > 0 && (
+              <AlertPill
+                icon="ri-archive-line"
+                label={`${low_stock.count} stock bajo`}
+                bg="#fee2e2"
+                fg="#991b1b"
+                border="#fecaca"
+                title={low_stock.products.map((p) => `${p.name} (${p.stock})`).join("\n")}
+              />
+            )}
+          </div>
+        )}
+
+        {/* Contenido principal: lista + secciones (crece con flex) */}
+        <div className="d-flex flex-column" style={{ gap: 12, flex: 1 }}>
+          {!hasActivity ? (
+            <div className="text-center py-4" style={{ color: "#9ca3af" }}>
+              <i className="ri-cup-line" style={{ fontSize: 30, opacity: 0.4 }} />
+              <div className="small fst-italic mt-2">Sin actividad hoy</div>
+              <div style={{ fontSize: 10 }}>Esperando a empezar</div>
+            </div>
+          ) : (
+            <>
+              {isToday && appointments.current.length > 0 && (
+                <Section title="Ahora" count={appointments.in_progress} accent="#f59e0b" pulse>
+                  {appointments.current.map((a) => (
+                    <ApptItem key={a.id} appt={a} onClick={() => onApptClick(a)} showTime={false} formatCurrency={formatCurrency} />
+                  ))}
+                </Section>
+              )}
+
+              {appointments.pending_payment.length > 0 && (
+                <Section
+                  title="Listas para cobrar"
+                  count={appointments.pending_payment.length}
+                  accent="#06b6d4"
+                >
+                  {appointments.pending_payment.slice(0, 4).map((a) => (
+                    <ApptItem key={a.id} appt={a} onClick={() => onApptClick(a)} showTime={false} formatCurrency={formatCurrency} />
+                  ))}
+                  {appointments.pending_payment.length > 4 && (
+                    <div className="text-muted small ps-1">+{appointments.pending_payment.length - 4} más</div>
+                  )}
+                </Section>
+              )}
+
+              <Section
+                title={isToday ? "Próximas" : "Agendadas"}
+                count={appointments.upcoming_count}
+                accent="#6b7280"
+              >
+                {appointments.next.length === 0 ? (
+                  <div className="text-muted small fst-italic ps-1">
+                    {isToday ? "No hay próximas citas" : "Sin agenda"}
+                  </div>
+                ) : (
+                  <>
+                    {appointments.next.map((a) => (
+                      <ApptItem key={a.id} appt={a} onClick={() => onApptClick(a)} showTime={true} formatCurrency={formatCurrency} />
+                    ))}
+                    {appointments.upcoming_count > appointments.next.length && (
+                      <div className="text-muted small ps-1">
+                        +{appointments.upcoming_count - appointments.next.length} más
+                      </div>
+                    )}
+                  </>
+                )}
+              </Section>
+
+              {isToday && fichero.length > 0 && (
+                <Section title="Fichero · próximo turno" accent="#6b7280">
+                  {fichero.slice(0, 5).map((f) => (
+                    <div key={f.category_id} className="d-flex align-items-center gap-2 small ps-1">
+                      <span
+                        className="text-muted text-truncate"
+                        style={{ minWidth: 0, maxWidth: "32%", fontSize: 11 }}
+                        title={f.category_name}
+                      >
+                        {f.category_name}
+                      </span>
+                      <span
+                        style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: "50%",
+                          background: f.in_salon ? "#10b981" : "#9ca3af",
+                          flexShrink: 0,
+                        }}
+                        title={f.in_salon ? "En salón" : "Fuera"}
+                      />
+                      <span className="text-truncate flex-grow-1" style={{ minWidth: 0, fontSize: 12 }}>
+                        {f.stylist_name}
+                      </span>
+                      <span
+                        className="text-muted ms-auto"
+                        style={{ fontSize: 10, fontWeight: 600 }}
+                      >
+                        #{f.position}
+                      </span>
+                    </div>
+                  ))}
+                  {fichero.length > 5 && (
+                    <div className="text-muted small ps-1">+{fichero.length - 5} categorías</div>
+                  )}
+                </Section>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Pie con drill-down */}
+        <button
+          type="button"
+          onClick={onOpenDrillDown}
+          className="branch-footer-btn btn btn-sm w-100 mt-auto d-flex align-items-center justify-content-center"
+          style={{
+            background: "transparent",
+            color: branch.color,
+            border: `1px dashed ${branch.color}55`,
+            borderRadius: 6,
+            fontSize: 12,
+            fontWeight: 600,
+            gap: 4,
+            ...({ "--branch-color": branch.color } as React.CSSProperties),
+          }}
+        >
+          <span>Ver agenda detalle</span>
+          <i className="ri-arrow-right-line footer-arrow" />
+        </button>
+        </div>
+      </CardBody>
+    </Card>
+  );
+};
+
+const Section: React.FC<{
+  title: string;
+  count?: number;
+  accent?: string;
+  pulse?: boolean;
+  children: React.ReactNode;
+}> = ({ title, count, accent, pulse, children }) => (
+  <div>
+    <div
+      className="d-flex align-items-center justify-content-between mb-1"
+      style={{ paddingBottom: 3, borderBottom: "1px solid #f1f5f9" }}
+    >
+      <span
+        className="fw-semibold text-uppercase d-inline-flex align-items-center"
+        style={{ fontSize: 10, letterSpacing: 0.6, color: accent || "#6b7280", gap: 6 }}
+      >
+        {pulse && <span className="pulse-dot" style={{ background: accent || "#f59e0b" }} />}
+        {title}
+      </span>
+      {typeof count === "number" && (
+        <span
+          className="text-muted"
+          style={{ fontSize: 11, fontWeight: 600 }}
+        >
+          {count}
+        </span>
+      )}
+    </div>
+    <div className="d-flex flex-column" style={{ gap: 2 }}>
+      {children}
+    </div>
+  </div>
+);
+
+const ApptItem: React.FC<{
+  appt: ApptShort;
+  onClick: () => void;
+  showTime: boolean;
+  formatCurrency: (n: number) => string;
+}> = ({ appt, onClick, showTime, formatCurrency }) => {
+  const color = STATUS_COLOR[appt.status] || "#9ca3af";
+  const stylistColor = colorFromString(appt.stylist_name || "?");
+  const hasPrice = typeof appt.service_price === "number" && appt.service_price > 0;
+  return (
+    <div
+      onClick={onClick}
+      className="appt-row d-flex align-items-center"
+      style={{ gap: 7, cursor: "pointer", padding: "4px 6px", borderRadius: 5, fontSize: 12 }}
+      title={`${STATUS_LABEL[appt.status]} · ${appt.service_name} · ${appt.stylist_name} → ${appt.client_name}`}
+    >
+      {showTime ? (
+        <span className="fw-semibold" style={{ minWidth: 38, flexShrink: 0, color: "#374151", fontSize: 11 }}>
+          {fmtTime(appt.start_time)}
+        </span>
+      ) : (
+        <span
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
+            background: color,
+            flexShrink: 0,
+            display: "inline-block",
+          }}
+        />
+      )}
+      <span
+        className="d-inline-flex align-items-center justify-content-center fw-bold flex-shrink-0"
+        style={{
+          width: 20,
+          height: 20,
+          borderRadius: "50%",
+          background: stylistColor,
+          color: "#fff",
+          fontSize: 9,
+          letterSpacing: 0.3,
+        }}
+        title={appt.stylist_name}
+      >
+        {getInitials(appt.stylist_name)}
+      </span>
+      <span className="text-truncate" style={{ minWidth: 0, flex: 1, color: "#374151" }} title={appt.service_name}>
+        {appt.service_name}
+      </span>
+      {hasPrice && (
+        <span style={{ color: "#059669", fontSize: 10.5, fontWeight: 700, flexShrink: 0 }}>
+          {formatCurrency(appt.service_price as number)}
+        </span>
+      )}
+      <span
+        className="text-muted text-truncate"
+        style={{ fontSize: 11, maxWidth: "30%", flexShrink: 0 }}
+        title={`${appt.stylist_name} — ${appt.client_name}`}
+      >
+        {appt.client_name}
+      </span>
     </div>
   );
 };
