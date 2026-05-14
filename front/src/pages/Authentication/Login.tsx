@@ -36,6 +36,7 @@ const Login = (props: any) => {
   const [userLogin, setUserLogin] = useState<any>({});
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [loader, setLoader] = useState<boolean>(false);
+  const [logoHover, setLogoHover] = useState<boolean>(false);
 
   useEffect(() => {
     if (user) {
@@ -167,11 +168,20 @@ const Login = (props: any) => {
         {/* Logo centrado */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '28px' }}>
           <Link to="/" style={{ display: 'inline-block' }}>
-            <img src={logoLight} alt="Tupelukeria" style={{
-              height: '70px',
-              display: 'block',
-              filter: 'drop-shadow(0 0 15px rgba(139, 92, 246, 0.4))',
-            }} />
+            <img
+              src={logoLight}
+              alt="Tupelukeria"
+              onMouseEnter={() => setLogoHover(true)}
+              onMouseLeave={() => setLogoHover(false)}
+              style={{
+                height: '70px',
+                display: 'block',
+                transition: 'filter 250ms ease',
+                filter: logoHover
+                  ? 'drop-shadow(0 0 15px rgba(34, 211, 238, 0.5))'
+                  : 'drop-shadow(0 0 10px rgba(139, 92, 246, 0.4))',
+              }}
+            />
           </Link>
           <p style={{
             marginTop: '10px',

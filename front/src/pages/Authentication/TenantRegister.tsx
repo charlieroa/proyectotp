@@ -27,6 +27,7 @@ const TenantRegister = () => {
 
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [logoHover, setLogoHover] = useState(false);
 
   const selectedPlan = useMemo(() => {
     const planKey = searchParams.get('plan');
@@ -199,11 +200,20 @@ const TenantRegister = () => {
         {/* Logo centrado */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '28px' }}>
           <Link to="/" style={{ display: 'inline-block' }}>
-            <img src={logoLight} alt="Tupelukeria" style={{
-              height: '70px',
-              display: 'block',
-              filter: 'drop-shadow(0 0 15px rgba(139, 92, 246, 0.4))',
-            }} />
+            <img
+              src={logoLight}
+              alt="Tupelukeria"
+              onMouseEnter={() => setLogoHover(true)}
+              onMouseLeave={() => setLogoHover(false)}
+              style={{
+                height: '70px',
+                display: 'block',
+                transition: 'filter 250ms ease',
+                filter: logoHover
+                  ? 'drop-shadow(0 0 15px rgba(34, 211, 238, 0.5))'
+                  : 'drop-shadow(0 0 10px rgba(139, 92, 246, 0.4))',
+              }}
+            />
           </Link>
           <p style={{
             marginTop: '10px',
