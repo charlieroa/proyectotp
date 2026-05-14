@@ -14,8 +14,10 @@ import logoLight from "../../assets/images/logo-light.png";
 import { createSelector } from 'reselect';
 
 import Swal from 'sweetalert2';
+import { useTranslation } from 'react-i18next';
 
 const Login = (props: any) => {
+  const { t } = useTranslation();
   const dispatch: any = useDispatch();
   const navigate = useNavigate();
 
@@ -58,8 +60,8 @@ const Login = (props: any) => {
       password: userLogin.password,
     },
     validationSchema: Yup.object({
-      email: Yup.string().required("Ingresa tu email"),
-      password: Yup.string().required("Ingresa tu contraseña"),
+      email: Yup.string().required(t("enter_email")),
+      password: Yup.string().required(t("enter_password")),
     }),
     onSubmit: (values) => {
       setLoader(true);
@@ -76,9 +78,9 @@ const Login = (props: any) => {
       const messageRaw = (error || "").toString();
       Swal.fire({
         icon: "error",
-        title: "Credenciales inválidas",
-        text: messageRaw?.trim() || "Verifica tu email y contraseña.",
-        confirmButtonText: "Entendido",
+        title: t("invalid_credentials"),
+        text: messageRaw?.trim() || t("check_credentials"),
+        confirmButtonText: t("got_it"),
         confirmButtonColor: "#7c3aed",
         background: "#0f172a",
         color: "#e2e8f0",
@@ -89,7 +91,7 @@ const Login = (props: any) => {
     }
   }, [dispatch, errorMsg, error]);
 
-  document.title = "Iniciar Sesión | Tupelukeria";
+  document.title = `${t("sign_in")} | Tupelukeria`;
 
   const inputStyle = (touched: boolean, hasError: boolean) => ({
     width: '100%',
@@ -177,7 +179,7 @@ const Login = (props: any) => {
             color: '#94a3b8',
             fontWeight: 400,
           }}>
-            Ahora la IA en tu pelukeria
+            {t("ai_tagline")}
           </p>
         </div>
 
@@ -203,7 +205,7 @@ const Login = (props: any) => {
             cursor: 'default',
             boxShadow: '0 2px 10px rgba(139, 92, 246, 0.3)',
           }}>
-            Iniciar Sesión
+            {t("sign_in")}
           </div>
           <div
             onClick={() => navigate('/register-tenant')}
@@ -222,7 +224,7 @@ const Login = (props: any) => {
             onMouseEnter={(e) => (e.currentTarget.style.color = '#a78bfa')}
             onMouseLeave={(e) => (e.currentTarget.style.color = '#64748b')}
           >
-            Crear Cuenta
+            {t("create_account")}
           </div>
         </div>
 
@@ -252,12 +254,12 @@ const Login = (props: any) => {
                 color: '#94a3b8',
                 marginBottom: '8px',
               }}>
-                Email
+                {t("email")}
               </label>
               <input
                 name="email"
                 type="email"
-                placeholder="tu@email.com"
+                placeholder={t("your_email")}
                 onChange={validation.handleChange}
                 onBlur={validation.handleBlur}
                 value={validation.values.email || ""}
@@ -288,21 +290,21 @@ const Login = (props: any) => {
                   fontWeight: 500,
                   color: '#94a3b8',
                 }}>
-                  Contraseña
+                  {t("password")}
                 </label>
                 <Link to="/forgot-password" style={{
                   fontSize: '12px',
                   color: '#8b5cf6',
                   textDecoration: 'none',
                 }}>
-                  ¿Olvidaste tu contraseña?
+                  {t("forgot_password")}
                 </Link>
               </div>
               <div style={{ position: 'relative' }}>
                 <input
                   name="password"
                   type={showPassword ? "text" : "password"}
-                  placeholder="Ingresa tu contraseña"
+                  placeholder={t("enter_password")}
                   onChange={validation.handleChange}
                   onBlur={validation.handleBlur}
                   value={validation.values.password || ""}
@@ -364,7 +366,7 @@ const Login = (props: any) => {
                 color: '#94a3b8',
                 cursor: 'pointer',
               }}>
-                Recordarme
+                {t("remember_me")}
               </label>
             </div>
 
@@ -392,7 +394,7 @@ const Login = (props: any) => {
               }}
             >
               {loader && <Spinner size="sm" />}
-              Iniciar Sesión
+              {t("sign_in")}
             </button>
           </form>
         </div>

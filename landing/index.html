@@ -214,18 +214,23 @@
 
                 <!-- Desktop Menu -->
                 <nav class="hidden lg:flex space-x-8 items-center">
-                    <a href="#ecosistema" class="text-sm font-semibold text-slate-400 hover:text-white transition-colors">Ecosistema</a>
-                    <a href="#soluciones" class="text-sm font-semibold text-slate-400 hover:text-white transition-colors">Modulos Inteligentes</a>
-                    <a href="#precios" class="text-sm font-semibold text-slate-400 hover:text-white transition-colors">Planes</a>
+                    <a href="#ecosistema" class="text-sm font-semibold text-slate-400 hover:text-white transition-colors" data-i18n="nav_ecosystem">Ecosistema</a>
+                    <a href="#soluciones" class="text-sm font-semibold text-slate-400 hover:text-white transition-colors" data-i18n="nav_modules">Modulos Inteligentes</a>
+                    <a href="#precios" class="text-sm font-semibold text-slate-400 hover:text-white transition-colors" data-i18n="nav_plans">Planes</a>
                 </nav>
 
                 <!-- CTA Buttons -->
                 <div class="hidden lg:flex items-center space-x-6">
+                    <!-- Language Toggle -->
+                    <button id="lang-toggle" onclick="toggleLanguage()" class="text-sm font-semibold text-slate-400 hover:text-white transition-colors flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-slate-700/50 hover:border-slate-600 bg-dark-800/50">
+                        <span id="lang-flag">🇪🇸</span>
+                        <span id="lang-label">ES</span>
+                    </button>
                     <a href="https://app.tupelukeria.com/login" class="text-sm font-semibold text-slate-300 hover:text-white transition-colors flex items-center gap-2">
-                        <i class="fa-regular fa-user"></i> Acceso
+                        <i class="fa-regular fa-user"></i> <span data-i18n="nav_access">Acceso</span>
                     </a>
                     <a href="https://app.tupelukeria.com/register-tenant" class="px-6 py-2.5 text-sm font-bold rounded-full text-white btn-primary shadow-[0_0_20px_rgba(139,92,246,0.3)] hover:shadow-[0_0_30px_rgba(34,211,238,0.4)] transition-all hover:-translate-y-0.5">
-                        Iniciar Sistema <i class="fa-solid fa-arrow-right text-xs ml-1"></i>
+                        <span data-i18n="nav_start">Iniciar Sistema</span> <i class="fa-solid fa-arrow-right text-xs ml-1"></i>
                     </a>
                 </div>
 
@@ -241,12 +246,16 @@
         <!-- Menu Movil -->
         <div id="mobile-menu" class="hidden lg:hidden bg-dark-950/95 backdrop-blur-2xl border-t border-slate-800/50 absolute w-full shadow-2xl transition-all origin-top">
             <div class="px-4 pt-4 pb-8 space-y-2">
-                <a href="#ecosistema" class="mobile-link block px-4 py-3 rounded-xl text-base font-semibold text-slate-300 hover:text-white hover:bg-dark-800/50">Ecosistema</a>
-                <a href="#soluciones" class="mobile-link block px-4 py-3 rounded-xl text-base font-semibold text-slate-300 hover:text-white hover:bg-dark-800/50">Modulos Inteligentes</a>
-                <a href="#precios" class="mobile-link block px-4 py-3 rounded-xl text-base font-semibold text-slate-300 hover:text-white hover:bg-dark-800/50">Planes</a>
+                <!-- Mobile Language Toggle -->
+                <button onclick="toggleLanguage()" class="mobile-link flex items-center gap-2 px-4 py-3 rounded-xl text-base font-semibold text-slate-300 hover:text-white hover:bg-dark-800/50 w-full">
+                    <span id="lang-flag-mobile">🇪🇸</span> <span id="lang-label-mobile">Cambiar a English</span>
+                </button>
+                <a href="#ecosistema" class="mobile-link block px-4 py-3 rounded-xl text-base font-semibold text-slate-300 hover:text-white hover:bg-dark-800/50" data-i18n="nav_ecosystem">Ecosistema</a>
+                <a href="#soluciones" class="mobile-link block px-4 py-3 rounded-xl text-base font-semibold text-slate-300 hover:text-white hover:bg-dark-800/50" data-i18n="nav_modules">Modulos Inteligentes</a>
+                <a href="#precios" class="mobile-link block px-4 py-3 rounded-xl text-base font-semibold text-slate-300 hover:text-white hover:bg-dark-800/50" data-i18n="nav_plans">Planes</a>
                 <div class="pt-6 flex flex-col gap-3 px-4">
-                    <a href="https://app.tupelukeria.com/login" class="block w-full text-center px-4 py-3 border border-slate-700 rounded-full text-white font-bold hover:bg-dark-800">Acceso Usuarios</a>
-                    <a href="https://app.tupelukeria.com/register-tenant" class="block w-full text-center px-4 py-3 rounded-full btn-primary text-white font-bold shadow-lg shadow-ai-500/20">Iniciar Sistema</a>
+                    <a href="https://app.tupelukeria.com/login" class="block w-full text-center px-4 py-3 border border-slate-700 rounded-full text-white font-bold hover:bg-dark-800" data-i18n="nav_access_users">Acceso Usuarios</a>
+                    <a href="https://app.tupelukeria.com/register-tenant" class="block w-full text-center px-4 py-3 rounded-full btn-primary text-white font-bold shadow-lg shadow-ai-500/20" data-i18n="nav_start">Iniciar Sistema</a>
                 </div>
             </div>
         </div>
@@ -264,23 +273,23 @@
                           <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-ai-cyanLight opacity-75"></span>
                           <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-ai-cyanLight"></span>
                         </span>
-                        Tupelukeria es completop. <span class="text-white">Operado 100% por voz.</span>
+                        <span data-i18n="hero_badge">Tupelukeria es completop.</span> <span class="text-white" data-i18n="hero_badge2">Operado 100% por voz.</span>
                     </div>
 
                     <h1 class="text-5xl md:text-6xl lg:text-7xl font-black text-white leading-[1.1] mb-6 tracking-tighter">
-                        Habla con tu negocio.<br />
-                        <span class="text-gradient-ai">Nosotros lo administramos.</span>
+                        <span data-i18n="hero_title1">Habla con tu negocio.</span><br />
+                        <span class="text-gradient-ai" data-i18n="hero_title2">Nosotros lo administramos.</span>
                     </h1>
 
-                    <p class="text-lg md:text-xl text-slate-400 mb-10 max-w-2xl mx-auto lg:mx-0 font-inter font-light leading-relaxed">
+                    <p class="text-lg md:text-xl text-slate-400 mb-10 max-w-2xl mx-auto lg:mx-0 font-inter font-light leading-relaxed" data-i18n-html="hero_desc">
                         Un ecosistema de IA integrado en WhatsApp. Envia notas de voz para agendar, retener clientes o pedir metricas. <strong class="text-white font-medium">Geolocalizacion, digiturno justo e inventario autonomo.</strong> El software que piensa por ti.
                     </p>
 
                     <div class="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
                         <a href="https://app.tupelukeria.com/register-tenant" class="px-8 py-4 rounded-full btn-primary text-white font-bold text-lg transition-all shadow-[0_0_20px_rgba(139,92,246,0.3)] hover:shadow-[0_0_35px_rgba(34,211,238,0.4)] hover:-translate-y-1 flex items-center justify-center gap-3">
-                            Desplegar IA en mi Salon <i class="fa-solid fa-microphone-lines"></i>
+                            <span data-i18n="hero_cta1">Desplegar IA en mi Salon</span> <i class="fa-solid fa-microphone-lines"></i>
                         </a>
-                        <a href="#ecosistema" class="px-8 py-4 rounded-full bg-dark-800 border border-slate-700 text-white font-bold text-lg hover:bg-dark-700 transition-all flex items-center justify-center gap-2">
+                        <a href="#ecosistema" class="px-8 py-4 rounded-full bg-dark-800 border border-slate-700 text-white font-bold text-lg hover:bg-dark-700 transition-all flex items-center justify-center gap-2" data-i18n="hero_cta2">
                             Ver Modulos
                         </a>
                     </div>
@@ -388,7 +397,7 @@
     <!-- Carousel de Logos -->
     <section class="py-10 border-b border-slate-800/50 bg-dark-950 z-10 relative overflow-hidden">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-6">
-            <p class="text-center text-sm font-semibold text-slate-500 uppercase tracking-widest">Mas de 500 peluquerias y barberias en Colombia ya son <span class="text-ai-cyanLight">completop</span></p>
+            <p class="text-center text-sm font-semibold text-slate-500 uppercase tracking-widest" data-i18n-html="carousel_text">Mas de 500 peluquerias y barberias en Colombia ya son <span class="text-ai-cyanLight">completop</span></p>
         </div>
 
         <div class="w-full inline-flex flex-nowrap overflow-hidden mask-carousel">
@@ -450,9 +459,9 @@
     <section id="ecosistema" class="py-24 relative z-10 border-b border-slate-800/50 bg-dark-950/80">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="text-center max-w-3xl mx-auto mb-16" data-aos="fade-up">
-                <h2 class="text-ai-500 font-semibold tracking-widest uppercase text-xs mb-3">Arquitectura Multi-Entorno</h2>
-                <h3 class="text-3xl md:text-5xl font-black text-white mb-6 tracking-tight">Un Cerebro Central. <br class="md:hidden" /><span class="text-gradient-ai">Tres Experiencias Dedicadas.</span></h3>
-                <p class="text-slate-400 text-lg leading-relaxed font-inter">
+                <h2 class="text-ai-500 font-semibold tracking-widest uppercase text-xs mb-3" data-i18n="eco_subtitle">Arquitectura Multi-Entorno</h2>
+                <h3 class="text-3xl md:text-5xl font-black text-white mb-6 tracking-tight"><span data-i18n="eco_title1">Un Cerebro Central.</span> <br class="md:hidden" /><span class="text-gradient-ai" data-i18n="eco_title2">Tres Experiencias Dedicadas.</span></h3>
+                <p class="text-slate-400 text-lg leading-relaxed font-inter" data-i18n-html="eco_desc">
                     En lugar de un panel generico, desarrollamos entornos especializados de alto rendimiento. <span class="text-white font-medium">El dueno controla, el staff ejecuta y el cliente reserva.</span> Todo sincronizado en tiempo real por el Agente Tupelukeria.com.
                 </p>
             </div>
@@ -464,12 +473,12 @@
                     <div class="w-14 h-14 rounded-2xl bg-dark-900 border border-slate-700 flex items-center justify-center text-ai-cyan mb-6 shadow-lg shadow-ai-cyan/20 shrink-0">
                         <i class="fa-solid fa-crown text-2xl"></i>
                     </div>
-                    <h4 class="text-2xl font-bold text-white mb-3">Para el Dueno</h4>
-                    <p class="text-slate-400 text-sm mb-6 border-b border-slate-800 pb-6 min-h-[70px] font-inter">Control total desde tu celular. Supervisa tu salon en tiempo real sin tener que estar fisicamente alli.</p>
+                    <h4 class="text-2xl font-bold text-white mb-3" data-i18n="eco_owner_title">Para el Dueno</h4>
+                    <p class="text-slate-400 text-sm mb-6 border-b border-slate-800 pb-6 min-h-[70px] font-inter" data-i18n="eco_owner_desc">Control total desde tu celular. Supervisa tu salon en tiempo real sin tener que estar fisicamente alli.</p>
                     <ul class="flex-1 flex flex-col gap-4">
-                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-microphone-lines text-ai-cyan mt-1 shrink-0"></i> <span>Metricas e instrucciones precisas via <strong>notas de voz</strong> al Agente.</span></li>
-                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-bullhorn text-ai-cyan mt-1 shrink-0"></i> <span>Campanas de recuperacion y retencion 100% automatizadas.</span></li>
-                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-boxes-stacked text-ai-cyan mt-1 shrink-0"></i> <span>Control de inventario maestro con alertas de reabastecimiento.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-microphone-lines text-ai-cyan mt-1 shrink-0"></i> <span data-i18n-html="eco_owner_f1">Metricas e instrucciones precisas via <strong>notas de voz</strong> al Agente.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-bullhorn text-ai-cyan mt-1 shrink-0"></i> <span data-i18n="eco_owner_f2">Campanas de recuperacion y retencion 100% automatizadas.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-boxes-stacked text-ai-cyan mt-1 shrink-0"></i> <span data-i18n="eco_owner_f3">Control de inventario maestro con alertas de reabastecimiento.</span></li>
                     </ul>
                 </div>
 
@@ -479,12 +488,12 @@
                     <div class="w-14 h-14 rounded-2xl bg-ai-600 flex items-center justify-center text-white mb-6 shadow-lg shadow-ai-500/30 shrink-0">
                         <i class="fa-solid fa-scissors text-2xl"></i>
                     </div>
-                    <h4 class="text-2xl font-bold text-white mb-3">App del Estilista</h4>
-                    <p class="text-slate-400 text-sm mb-6 border-b border-slate-800 pb-6 min-h-[70px] font-inter">Herramientas de empoderamiento para que el equipo gane mas, se organice mejor y trabaje feliz.</p>
+                    <h4 class="text-2xl font-bold text-white mb-3" data-i18n="eco_stylist_title">App del Estilista</h4>
+                    <p class="text-slate-400 text-sm mb-6 border-b border-slate-800 pb-6 min-h-[70px] font-inter" data-i18n="eco_stylist_desc">Herramientas de empoderamiento para que el equipo gane mas, se organice mejor y trabaje feliz.</p>
                     <ul class="flex-1 flex flex-col gap-4">
-                        <li class="flex items-start gap-3 text-sm text-white font-medium font-inter"><i class="fa-solid fa-list-ol text-ai-400 mt-1 shrink-0"></i> <span><strong>Fichero Digital:</strong> Justicia y oportunidades iguales para atender sin cita.</span></li>
-                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-user-check text-ai-400 mt-1 shrink-0"></i> <span><strong>Check-in Automatico:</strong> Te activa en la fila de turnos al llegar via GPS.</span></li>
-                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-money-bill-wave text-ai-400 mt-1 shrink-0"></i> <span>Visor de comisiones, bonos y ganancias diarias en tiempo real.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-white font-medium font-inter"><i class="fa-solid fa-list-ol text-ai-400 mt-1 shrink-0"></i> <span data-i18n-html="eco_stylist_f1"><strong>Fichero Digital:</strong> Justicia y oportunidades iguales para atender sin cita.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-user-check text-ai-400 mt-1 shrink-0"></i> <span data-i18n-html="eco_stylist_f2"><strong>Check-in Automatico:</strong> Te activa en la fila de turnos al llegar via GPS.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-money-bill-wave text-ai-400 mt-1 shrink-0"></i> <span data-i18n="eco_stylist_f3">Visor de comisiones, bonos y ganancias diarias en tiempo real.</span></li>
                     </ul>
                 </div>
 
@@ -494,12 +503,12 @@
                     <div class="w-14 h-14 rounded-2xl bg-dark-900 border border-slate-700 flex items-center justify-center text-ai-fuchsia mb-6 shadow-lg shadow-ai-fuchsia/20 shrink-0">
                         <i class="fa-solid fa-mobile-screen text-2xl"></i>
                     </div>
-                    <h4 class="text-2xl font-bold text-white mb-3">Para el Cliente</h4>
-                    <p class="text-slate-400 text-sm mb-6 border-b border-slate-800 pb-6 min-h-[70px] font-inter">Cero descargas de apps molestas. Todo ocurre instantaneamente donde el cliente ya pasa su tiempo.</p>
+                    <h4 class="text-2xl font-bold text-white mb-3" data-i18n="eco_client_title">Para el Cliente</h4>
+                    <p class="text-slate-400 text-sm mb-6 border-b border-slate-800 pb-6 min-h-[70px] font-inter" data-i18n="eco_client_desc">Cero descargas de apps molestas. Todo ocurre instantaneamente donde el cliente ya pasa su tiempo.</p>
                     <ul class="flex-1 flex flex-col gap-4">
-                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-brands fa-whatsapp text-ai-fuchsia mt-1 shrink-0"></i> <span>Reserva de citas enviando <strong>notas de voz</strong> directas al WhatsApp del local.</span></li>
-                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-gift text-ai-fuchsia mt-1 shrink-0"></i> <span>Recibe descuentos automaticos y recordatorios de retencion.</span></li>
-                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-regular fa-calendar-check text-ai-fuchsia mt-1 shrink-0"></i> <span>Gestion autonoma (cancelar o reagendar) sin quitarle tiempo al staff.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-brands fa-whatsapp text-ai-fuchsia mt-1 shrink-0"></i> <span data-i18n-html="eco_client_f1">Reserva de citas enviando <strong>notas de voz</strong> directas al WhatsApp del local.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-gift text-ai-fuchsia mt-1 shrink-0"></i> <span data-i18n="eco_client_f2">Recibe descuentos automaticos y recordatorios de retencion.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-regular fa-calendar-check text-ai-fuchsia mt-1 shrink-0"></i> <span data-i18n="eco_client_f3">Gestion autonoma (cancelar o reagendar) sin quitarle tiempo al staff.</span></li>
                     </ul>
                 </div>
             </div>
@@ -513,15 +522,15 @@
             <!-- Feature 1: Geolocalizacion & Digiturno -->
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
                 <div data-aos="fade-right">
-                    <h2 class="text-3xl md:text-5xl font-black text-white mb-6 leading-tight">Adios a los tiempos muertos. <br><span class="text-gradient-ai">Geolocalizacion y Digiturno.</span></h2>
-                    <p class="text-lg text-slate-400 mb-8 font-light font-inter leading-relaxed">
+                    <h2 class="text-3xl md:text-5xl font-black text-white mb-6 leading-tight"><span data-i18n="feat1_title1">Adios a los tiempos muertos.</span> <br><span class="text-gradient-ai" data-i18n="feat1_title2">Geolocalizacion y Digiturno.</span></h2>
+                    <p class="text-lg text-slate-400 mb-8 font-light font-inter leading-relaxed" data-i18n-html="feat1_desc">
                         No hagas perder el tiempo a tus clientes. El sistema sabe por GPS que estilistas estan fisicamente en la peluqueria. Nuestro <strong>fichero digital (Digiturno interno)</strong> organiza las colas con IA, asignando turnos de forma justa y equitativa para que todos tengan la misma oportunidad de trabajar.
                     </p>
                     <div class="flex items-center gap-4 bg-dark-950 p-4 rounded-2xl border border-slate-800 shadow-xl">
                         <div class="w-12 h-12 bg-ai-cyan/20 rounded-full flex items-center justify-center text-ai-cyan shrink-0"><i class="fa-solid fa-scale-balanced"></i></div>
                         <div>
-                            <h5 class="text-white font-bold text-sm">Equidad Laboral Garantizada</h5>
-                            <p class="text-xs text-slate-400 font-inter">El algoritmo prioriza a quien lleva mas tiempo esperando atender.</p>
+                            <h5 class="text-white font-bold text-sm" data-i18n="feat1_card_title">Equidad Laboral Garantizada</h5>
+                            <p class="text-xs text-slate-400 font-inter" data-i18n="feat1_card_desc">El algoritmo prioriza a quien lleva mas tiempo esperando atender.</p>
                         </div>
                     </div>
                 </div>
@@ -582,7 +591,7 @@
                     <div class="absolute inset-0 bg-gradient-to-tl from-ai-fuchsia/20 to-transparent rounded-full blur-3xl"></div>
                     <div class="glass-card rounded-3xl p-6 md:p-8 relative z-10 border border-ai-fuchsia/30">
                         <div class="flex justify-between items-center mb-6">
-                            <h4 class="text-white font-bold text-lg">Nomina & Rendimiento</h4>
+                            <h4 class="text-white font-bold text-lg" data-i18n="feat2_card_title">Nomina & Rendimiento</h4>
                             <span class="text-ai-fuchsiaLight text-xs font-semibold bg-ai-fuchsia/10 px-3 py-1 rounded-full"><i class="fa-solid fa-arrow-up"></i> Bonos Activos</span>
                         </div>
                         <div class="space-y-5">
@@ -599,29 +608,29 @@
                             <div class="bg-gradient-to-r from-ai-fuchsia/10 to-transparent border border-ai-fuchsia/20 p-4 rounded-xl flex gap-4 items-center">
                                 <i class="fa-solid fa-boxes-packing text-ai-fuchsiaLight text-2xl"></i>
                                 <div>
-                                    <p class="text-white text-sm font-bold mb-0.5">Alerta de Inventario IA</p>
-                                    <p class="text-xs text-slate-400 font-inter leading-relaxed">Tinte Rojo agotado. Confirmado pedido automatico al proveedor autorizado.</p>
+                                    <p class="text-white text-sm font-bold mb-0.5" data-i18n="feat2_alert_title">Alerta de Inventario IA</p>
+                                    <p class="text-xs text-slate-400 font-inter leading-relaxed" data-i18n="feat2_alert_desc">Tinte Rojo agotado. Confirmado pedido automatico al proveedor autorizado.</p>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
                 <div class="order-1 lg:order-2" data-aos="fade-left">
-                    <h2 class="text-3xl md:text-5xl font-black text-white mb-6 leading-tight">Stock Inteligente y <br><span class="text-gradient-ai">Nomina Flexible.</span></h2>
-                    <p class="text-lg text-slate-400 mb-8 font-light font-inter leading-relaxed">Tupelukeria simplifica dos areas criticas de tu negocio sin mezclarlas ni causar confusion:</p>
+                    <h2 class="text-3xl md:text-5xl font-black text-white mb-6 leading-tight"><span data-i18n="feat2_title1">Stock Inteligente y</span> <br><span class="text-gradient-ai" data-i18n="feat2_title2">Nomina Flexible.</span></h2>
+                    <p class="text-lg text-slate-400 mb-8 font-light font-inter leading-relaxed" data-i18n="feat2_desc">Tupelukeria simplifica dos areas criticas de tu negocio sin mezclarlas ni causar confusion:</p>
                     <ul class="space-y-6">
                         <li class="flex items-start gap-4">
                             <div class="w-12 h-12 rounded-xl bg-ai-fuchsia/10 flex items-center justify-center text-ai-fuchsiaLight shrink-0 border border-ai-fuchsia/20 shadow-lg"><i class="fa-solid fa-boxes-stacked text-xl"></i></div>
                             <div>
-                                <h5 class="text-white font-bold text-lg mb-1.5">Inventario Autonomo</h5>
-                                <p class="text-slate-400 text-sm font-inter leading-relaxed">Si un producto se termina, el sistema detecta la falta de stock y le avisa automaticamente a tu proveedor para reabastecer.</p>
+                                <h5 class="text-white font-bold text-lg mb-1.5" data-i18n="feat2_inv_title">Inventario Autonomo</h5>
+                                <p class="text-slate-400 text-sm font-inter leading-relaxed" data-i18n="feat2_inv_desc">Si un producto se termina, el sistema detecta la falta de stock y le avisa automaticamente a tu proveedor para reabastecer.</p>
                             </div>
                         </li>
                         <li class="flex items-start gap-4">
                             <div class="w-12 h-12 rounded-xl bg-ai-cyan/10 flex items-center justify-center text-ai-cyanLight shrink-0 border border-ai-cyan/20 shadow-lg"><i class="fa-solid fa-medal text-xl"></i></div>
                             <div>
-                                <h5 class="text-white font-bold text-lg mb-1.5">Nomina Inteligente</h5>
-                                <p class="text-slate-400 text-sm font-inter leading-relaxed">Maneja la nomina tradicional con el porcentaje que acuerdes con cada estilista. Y si quieres ir mas alla, activa la <strong class="text-white">nomina por meritos</strong>: el sistema premia automaticamente a quienes llegan puntuales y atienden mejor con bonificaciones extras.</p>
+                                <h5 class="text-white font-bold text-lg mb-1.5" data-i18n="feat2_pay_title">Nomina Inteligente</h5>
+                                <p class="text-slate-400 text-sm font-inter leading-relaxed" data-i18n-html="feat2_pay_desc">Maneja la nomina tradicional con el porcentaje que acuerdes con cada estilista. Y si quieres ir mas alla, activa la <strong class="text-white">nomina por meritos</strong>: el sistema premia automaticamente a quienes llegan puntuales y atienden mejor con bonificaciones extras.</p>
                             </div>
                         </li>
                     </ul>
@@ -635,8 +644,8 @@
         <div class="absolute right-0 top-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-ai-500/10 rounded-full blur-[120px] pointer-events-none"></div>
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
             <div class="text-center max-w-3xl mx-auto mb-16" data-aos="fade-up">
-                <h2 class="text-ai-cyanLight font-semibold tracking-widest uppercase text-xs mb-3">Historias Reales</h2>
-                <h3 class="text-3xl md:text-5xl font-black text-white mb-6 tracking-tight">Lo que dicen los duenos. <br/><span class="text-gradient-ai">Puro talento local.</span></h3>
+                <h2 class="text-ai-cyanLight font-semibold tracking-widest uppercase text-xs mb-3" data-i18n="test_subtitle">Historias Reales</h2>
+                <h3 class="text-3xl md:text-5xl font-black text-white mb-6 tracking-tight"><span data-i18n="test_title1">Lo que dicen los duenos.</span> <br/><span class="text-gradient-ai" data-i18n="test_title2">Puro talento local.</span></h3>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
                 <div class="glass-card p-8 rounded-3xl relative" data-aos="fade-up" data-aos-delay="100">
@@ -674,71 +683,72 @@
     <section id="precios" class="py-32 relative z-10 bg-dark-950 border-t border-slate-800/50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="text-center max-w-3xl mx-auto mb-20" data-aos="fade-up">
-                <h2 class="text-ai-500 font-semibold tracking-wide uppercase text-xs mb-3">Modelos de Inversion</h2>
-                <h3 class="text-3xl md:text-5xl font-black text-white mb-6 tracking-tight">Planes escalables. <br/><span class="text-gradient-ai">Empieza gratis.</span></h3>
-                <p class="text-slate-400 text-lg font-inter">Un modelo Freemium disenado para crecer contigo. Sin letras pequenas ni tarjetas de credito obligatorias para iniciar.</p>
+                <h2 class="text-ai-500 font-semibold tracking-wide uppercase text-xs mb-3" data-i18n="price_subtitle">Modelos de Inversion</h2>
+                <h3 class="text-3xl md:text-5xl font-black text-white mb-6 tracking-tight"><span data-i18n="price_title1">Planes escalables.</span> <br/><span class="text-gradient-ai" data-i18n="price_title2">Empieza gratis.</span></h3>
+                <p class="text-slate-400 text-lg font-inter" data-i18n="price_desc">Un modelo Freemium disenado para crecer contigo. Sin letras pequenas ni tarjetas de credito obligatorias para iniciar.</p>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-stretch max-w-7xl mx-auto">
                 <!-- Plan Gratis -->
                 <div class="glass-card p-8 rounded-[2rem] flex flex-col h-full border-slate-700/50" data-aos="fade-up" data-aos-delay="100">
-                    <h4 class="text-xl font-bold text-white mb-2">Gratis</h4>
-                    <p class="text-slate-500 text-sm mb-6 min-h-[40px] font-inter">Perfecto para independientes que quieren dar el primer paso digital.</p>
-                    <div class="mb-8 flex flex-col gap-1"><span class="text-5xl font-black text-white">$0</span><span class="text-slate-500 font-medium text-sm font-inter">COP / para siempre</span></div>
+                    <h4 class="text-xl font-bold text-white mb-2" data-i18n="plan_free">Gratis</h4>
+                    <p class="text-slate-500 text-sm mb-6 min-h-[40px] font-inter" data-i18n="plan_free_desc">Perfecto para independientes que quieren dar el primer paso digital.</p>
+                    <div class="mb-8 flex flex-col gap-1"><span class="text-5xl font-black text-white">$0</span><span class="text-slate-500 font-medium text-sm font-inter" data-i18n="plan_free_price">forever</span></div>
                     <ul class="flex-1 flex flex-col gap-4 mb-8 border-t border-slate-800 pt-6">
-                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-check text-slate-500 mt-0.5"></i> <span>Enlace de reservas web.</span></li>
-                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-check text-slate-500 mt-0.5"></i> <span>1 Perfil de Staff (Admin).</span></li>
-                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-check text-slate-500 mt-0.5"></i> <span>Agenda basica.</span></li>
-                        <li class="flex items-start gap-3 text-sm text-slate-500 font-inter"><i class="fa-solid fa-minus mt-0.5"></i> <span>Sin Agente IA.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-check text-slate-500 mt-0.5"></i> <span data-i18n="plan_free_f1">Enlace de reservas web.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-check text-slate-500 mt-0.5"></i> <span data-i18n="plan_free_f2">1 Perfil de Staff (Admin).</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-check text-slate-500 mt-0.5"></i> <span data-i18n="plan_free_f3">Agenda basica.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-500 font-inter"><i class="fa-solid fa-minus mt-0.5"></i> <span data-i18n="plan_free_f4">Sin Agente IA.</span></li>
                     </ul>
-                    <a href="https://app.tupelukeria.com/register-tenant" class="block w-full text-center py-3.5 rounded-full border border-slate-700 text-white font-bold hover:bg-dark-800 transition-colors">Comenzar Gratis</a>
+                    <a href="https://app.tupelukeria.com/register-tenant" class="block w-full text-center py-3.5 rounded-full border border-slate-700 text-white font-bold hover:bg-dark-800 transition-colors" data-i18n="plan_free_cta">Comenzar Gratis</a>
                 </div>
 
                 <!-- Plan Pro -->
                 <div class="glass-card p-8 rounded-[2rem] flex flex-col h-full border-slate-700/50" data-aos="fade-up" data-aos-delay="200">
                     <h4 class="text-xl font-bold text-white mb-2">Pro</h4>
-                    <p class="text-slate-500 text-sm mb-6 min-h-[40px] font-inter">Herramientas avanzadas para gestionar tu salon.</p>
-                    <div class="mb-8 flex flex-col gap-1"><span class="text-5xl font-black text-white">$29.900</span><span class="text-slate-500 font-medium text-sm font-inter">COP / mes</span></div>
+                    <p class="text-slate-500 text-sm mb-6 min-h-[40px] font-inter" data-i18n="plan_pro_desc">Herramientas avanzadas para gestionar tu salon.</p>
+                    <div class="mb-8 flex flex-col gap-1"><span class="text-5xl font-black text-white" data-i18n="plan_pro_price">$10</span><span class="text-slate-500 font-medium text-sm font-inter" data-i18n="plan_per_month">USD / mo</span></div>
                     <ul class="flex-1 flex flex-col gap-4 mb-8 border-t border-slate-800 pt-6">
-                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-bullhorn text-ai-600 mt-0.5"></i> <span>Campanas de recuperacion.</span></li>
-                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-location-dot text-ai-600 mt-0.5"></i> <span>Digiturno y Geolocalizacion.</span></li>
-                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-medal text-ai-600 mt-0.5"></i> <span>Inventario y Nomina.</span></li>
-                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-users text-ai-600 mt-0.5"></i> <span>Staff Ilimitado.</span></li>
-                        <li class="flex items-start gap-3 text-sm text-slate-500 font-inter"><i class="fa-solid fa-minus mt-0.5"></i> <span>Sin Asistente IA.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-bullhorn text-ai-600 mt-0.5"></i> <span data-i18n="plan_pro_f1">Campanas de recuperacion.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-location-dot text-ai-600 mt-0.5"></i> <span data-i18n="plan_pro_f2">Digiturno y Geolocalizacion.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-medal text-ai-600 mt-0.5"></i> <span data-i18n="plan_pro_f3">Inventario y Nomina.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-users text-ai-600 mt-0.5"></i> <span data-i18n="plan_pro_f4">Staff Ilimitado.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-500 font-inter"><i class="fa-solid fa-minus mt-0.5"></i> <span data-i18n="plan_pro_f5">Sin Asistente IA.</span></li>
                     </ul>
-                    <a href="https://wa.me/573000000000?text=Hola%2C%20quiero%20activar%20el%20plan%20Pro%20%28%2429.900%2Fmes%29%20para%20mi%20salon" target="_blank" class="block w-full text-center py-3.5 rounded-full border border-ai-500 text-ai-400 font-bold hover:bg-ai-500/10 transition-colors"><i class="fa-brands fa-whatsapp"></i> Activar por WhatsApp</a>
+                    <a href="https://app.tupelukeria.com/register-tenant?plan=pro" class="block w-full text-center py-3.5 rounded-full border border-ai-500 text-ai-400 font-bold hover:bg-ai-500/10 transition-colors"><i class="fa-solid fa-rocket"></i> <span data-i18n="plan_activate">Activar Plan</span></a>
                 </div>
 
                 <!-- Plan Business - RECOMENDADO -->
                 <div class="relative p-[2px] rounded-[2rem] bg-gradient-to-b from-ai-cyanLight via-ai-500 to-ai-fuchsia shadow-[0_0_40px_rgba(139,92,246,0.25)] flex flex-col h-full" data-aos="fade-up" data-aos-delay="300">
-                    <div class="absolute -top-4 left-1/2 transform -translate-x-1/2 bg-gradient-to-r from-ai-cyanLight to-ai-500 text-white px-5 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest shadow-lg whitespace-nowrap z-20">Recomendado</div>
+                    <div class="absolute -top-4 left-1/2 transform -translate-x-1/2 bg-gradient-to-r from-ai-cyanLight to-ai-500 text-white px-5 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest shadow-lg whitespace-nowrap z-20" data-i18n="plan_recommended">Recomendado</div>
                     <div class="bg-dark-950 rounded-[calc(2rem-2px)] p-8 h-full flex flex-col">
                         <h4 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-ai-cyanLight to-ai-fuchsiaLight mb-2">Business</h4>
-                        <p class="text-slate-400 text-sm mb-6 min-h-[40px] font-inter">Todo Pro + sitio web profesional para tu salon.</p>
-                        <div class="mb-8 flex flex-col gap-1"><span class="text-5xl font-black text-white">$49.900</span><span class="text-slate-500 font-medium text-sm font-inter">COP / mes</span></div>
+                        <p class="text-slate-400 text-sm mb-6 min-h-[40px] font-inter" data-i18n="plan_biz_desc">Todo Pro + sitio web profesional para tu salon.</p>
+                        <div class="mb-8 flex flex-col gap-1"><span class="text-5xl font-black text-white" data-i18n="plan_biz_price">$19</span><span class="text-slate-500 font-medium text-sm font-inter" data-i18n="plan_per_month">USD / mo</span></div>
                         <ul class="flex-1 flex flex-col gap-4 mb-8 border-t border-slate-800 pt-6">
-                            <li class="flex items-start gap-3 text-sm text-white font-semibold font-inter"><i class="fa-solid fa-bolt text-ai-cyanLight mt-0.5"></i> <span>Todo lo del plan Pro.</span></li>
-                            <li class="flex items-start gap-3 text-sm text-white font-semibold font-inter"><i class="fa-solid fa-robot text-ai-cyanLight mt-0.5"></i> <span>Asistente IA por WhatsApp.</span></li>
-                            <li class="flex items-start gap-3 text-sm text-white font-semibold font-inter"><i class="fa-solid fa-globe text-ai-cyanLight mt-0.5"></i> <span>Sitio web profesional incluido.</span></li>
-                            <li class="flex items-start gap-3 text-sm text-white font-semibold font-inter"><i class="fa-solid fa-user-shield text-ai-cyanLight mt-0.5"></i> <span>Panel Administrador avanzado.</span></li>
-                            <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-chart-line text-ai-600 mt-0.5"></i> <span>Reportes y analitica.</span></li>
+                            <li class="flex items-start gap-3 text-sm text-white font-semibold font-inter"><i class="fa-solid fa-bolt text-ai-cyanLight mt-0.5"></i> <span data-i18n="plan_biz_f1">Todo lo del plan Pro.</span></li>
+                            <li class="flex items-start gap-3 text-sm text-white font-semibold font-inter"><i class="fa-solid fa-robot text-ai-cyanLight mt-0.5"></i> <span data-i18n="plan_biz_f2">Asistente IA por WhatsApp.</span></li>
+                            <li class="flex items-start gap-3 text-sm text-white font-semibold font-inter"><i class="fa-solid fa-globe text-ai-cyanLight mt-0.5"></i> <span data-i18n="plan_biz_f3">Sitio web profesional incluido.</span></li>
+                            <li class="flex items-start gap-3 text-sm text-white font-semibold font-inter"><i class="fa-solid fa-user-shield text-ai-cyanLight mt-0.5"></i> <span data-i18n="plan_biz_f4">Panel Administrador avanzado.</span></li>
+                            <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-chart-line text-ai-600 mt-0.5"></i> <span data-i18n="plan_biz_f5">Reportes y analitica.</span></li>
                         </ul>
-                        <a href="https://wa.me/573000000000?text=Hola%2C%20quiero%20activar%20el%20plan%20Business%20%28%2449.900%2Fmes%29%20para%20mi%20salon" target="_blank" class="block w-full text-center py-4 rounded-full btn-primary text-white font-bold transition-transform hover:scale-105 shadow-lg"><i class="fa-brands fa-whatsapp"></i> Activar por WhatsApp</a>
+                        <a href="https://app.tupelukeria.com/register-tenant?plan=business" class="block w-full text-center py-4 rounded-full btn-primary text-white font-bold transition-transform hover:scale-105 shadow-lg"><i class="fa-solid fa-rocket"></i> <span data-i18n="plan_activate">Activar Plan</span></a>
                     </div>
                 </div>
 
                 <!-- Plan Enterprise -->
                 <div class="glass-card p-8 rounded-[2rem] flex flex-col h-full border-slate-700/50" data-aos="fade-up" data-aos-delay="400">
                     <h4 class="text-xl font-bold text-white mb-2">Enterprise</h4>
-                    <p class="text-slate-500 text-sm mb-6 min-h-[40px] font-inter">Control absoluto para cadenas y franquicias. Multisite.</p>
-                    <div class="mb-8 flex flex-col gap-1"><span class="text-5xl font-black text-white">$99.900</span><span class="text-slate-500 font-medium text-sm font-inter">COP / mes</span></div>
+                    <p class="text-slate-500 text-sm mb-6 min-h-[40px] font-inter" data-i18n="plan_ent_desc">Control absoluto para cadenas y franquicias. Multisite.</p>
+                    <div class="mb-8 flex flex-col gap-1"><span class="text-5xl font-black text-white" data-i18n="plan_ent_price">$34.90</span><span class="text-slate-500 font-medium text-sm font-inter" data-i18n="plan_per_month">USD / mo</span></div>
                     <ul class="flex-1 flex flex-col gap-4 mb-8 border-t border-slate-800 pt-6">
-                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-building text-ai-fuchsia mt-0.5"></i> <span>Todo lo del plan Business.</span></li>
-                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-sitemap text-ai-fuchsia mt-0.5"></i> <span>Multiples sucursales (Multisite).</span></li>
-                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-chart-pie text-ai-fuchsia mt-0.5"></i> <span>Analitica global avanzada.</span></li>
-                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-headset text-ai-fuchsia mt-0.5"></i> <span>Soporte VIP 24/7.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-building text-ai-fuchsia mt-0.5"></i> <span data-i18n="plan_ent_f1">Todo lo del plan Business.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-sitemap text-ai-fuchsia mt-0.5"></i> <span data-i18n="plan_ent_f2">Multiples sucursales (Multisite).</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-chart-pie text-ai-fuchsia mt-0.5"></i> <span data-i18n="plan_ent_f3">Analitica global avanzada.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-headset text-ai-fuchsia mt-0.5"></i> <span data-i18n="plan_ent_f4">Soporte VIP 24/7.</span></li>
+                        <li class="flex items-start gap-3 text-sm text-slate-300 font-inter"><i class="fa-solid fa-file-invoice text-ai-fuchsia mt-0.5"></i> <span data-i18n="plan_ent_f5">Facturación Electrónica.</span></li>
                     </ul>
-                    <a href="https://wa.me/573000000000?text=Hola%2C%20quiero%20activar%20el%20plan%20Enterprise%20%28%2499.900%2Fmes%29%20para%20mi%20salon" target="_blank" class="block w-full text-center py-3.5 rounded-full border border-slate-700 text-white font-bold hover:bg-dark-800 transition-colors"><i class="fa-brands fa-whatsapp"></i> Activar por WhatsApp</a>
+                    <a href="https://app.tupelukeria.com/register-tenant?plan=enterprise" class="block w-full text-center py-3.5 rounded-full border border-slate-700 text-white font-bold hover:bg-dark-800 transition-colors"><i class="fa-solid fa-rocket"></i> <span data-i18n="plan_activate">Activar Plan</span></a>
                 </div>
             </div>
         </div>
@@ -751,10 +761,10 @@
                 <div class="absolute top-0 right-0 -mr-20 -mt-20 w-64 h-64 bg-white/20 rounded-full blur-3xl"></div>
                 <div class="absolute bottom-0 left-0 -ml-20 -mb-20 w-64 h-64 bg-dark-950/40 rounded-full blur-3xl"></div>
                 <div class="relative z-10">
-                    <h2 class="text-3xl md:text-5xl font-extrabold text-white mb-6 tracking-tight">Tu competencia ya se esta actualizando</h2>
-                    <p class="text-ai-50 text-lg md:text-xl mb-10 max-w-2xl mx-auto font-medium font-inter">Deja de gestionar tu negocio con herramientas del pasado. Incorpora nuestro Agente Tupelukeria.com y mira como tu salon funciona y vende de forma autonoma.</p>
+                    <h2 class="text-3xl md:text-5xl font-extrabold text-white mb-6 tracking-tight" data-i18n="cta_title">Tu competencia ya se esta actualizando</h2>
+                    <p class="text-ai-50 text-lg md:text-xl mb-10 max-w-2xl mx-auto font-medium font-inter" data-i18n="cta_desc">Deja de gestionar tu negocio con herramientas del pasado. Incorpora nuestro Agente Tupelukeria.com y mira como tu salon funciona y vende de forma autonoma.</p>
                     <a href="https://app.tupelukeria.com/register-tenant" class="inline-flex items-center gap-3 px-10 py-5 rounded-full bg-dark-950 text-white font-extrabold text-lg hover:bg-dark-900 transition-all shadow-xl hover:-translate-y-1 hover:shadow-2xl hover:text-ai-cyanLight border border-dark-800">
-                        <i class="fa-solid fa-rocket"></i> Desplegar Sistema Tupelukeria
+                        <i class="fa-solid fa-rocket"></i> <span data-i18n="cta_button">Desplegar Sistema Tupelukeria</span>
                     </a>
                 </div>
             </div>
@@ -769,29 +779,29 @@
                     <div class="flex items-center gap-2 mb-4">
                         <img src="/logo-light.png" alt="Tupelukeria" class="h-8 drop-shadow-[0_0_8px_rgba(139,92,246,0.4)]">
                     </div>
-                    <p class="text-slate-500 text-sm mb-6 leading-relaxed font-inter">El primer sistema completop impulsado por IA y notas de voz para la industria de la belleza y bienestar.</p>
+                    <p class="text-slate-500 text-sm mb-6 leading-relaxed font-inter" data-i18n="footer_desc">El primer sistema completop impulsado por IA y notas de voz para la industria de la belleza y bienestar.</p>
                 </div>
                 <div>
-                    <h4 class="text-white font-bold mb-4 text-sm uppercase tracking-wider">Modulos</h4>
+                    <h4 class="text-white font-bold mb-4 text-sm uppercase tracking-wider" data-i18n="footer_modules">Modulos</h4>
                     <ul class="space-y-3 font-inter">
-                        <li><a href="#soluciones" class="text-slate-500 text-sm hover:text-ai-400 transition-colors">Digiturno & GPS</a></li>
+                        <li><a href="#soluciones" class="text-slate-500 text-sm hover:text-ai-400 transition-colors" data-i18n="footer_mod1">Digiturno & GPS</a></li>
                         <li><a href="#soluciones" class="text-slate-500 text-sm hover:text-ai-400 transition-colors">Agente Tupelukeria.com</a></li>
-                        <li><a href="#soluciones" class="text-slate-500 text-sm hover:text-ai-400 transition-colors">Inventario Inteligente</a></li>
+                        <li><a href="#soluciones" class="text-slate-500 text-sm hover:text-ai-400 transition-colors" data-i18n="footer_mod3">Inventario Inteligente</a></li>
                     </ul>
                 </div>
                 <div>
-                    <h4 class="text-white font-bold mb-4 text-sm uppercase tracking-wider">Integraciones</h4>
+                    <h4 class="text-white font-bold mb-4 text-sm uppercase tracking-wider" data-i18n="footer_integrations">Integraciones</h4>
                     <ul class="space-y-3 font-inter">
                         <li><a href="#" class="text-slate-500 text-sm hover:text-ai-400 transition-colors">WhatsApp API</a></li>
-                        <li><a href="#" class="text-slate-500 text-sm hover:text-ai-400 transition-colors">Proveedores L'Oreal</a></li>
-                        <li><a href="#" class="text-slate-500 text-sm hover:text-ai-400 transition-colors">Pagos Digitales</a></li>
+                        <li><a href="#" class="text-slate-500 text-sm hover:text-ai-400 transition-colors" data-i18n="footer_int2">Proveedores L'Oreal</a></li>
+                        <li><a href="#" class="text-slate-500 text-sm hover:text-ai-400 transition-colors" data-i18n="footer_int3">Pagos Digitales</a></li>
                     </ul>
                 </div>
                 <div>
-                    <h4 class="text-white font-bold mb-4 text-sm uppercase tracking-wider">Compania</h4>
+                    <h4 class="text-white font-bold mb-4 text-sm uppercase tracking-wider" data-i18n="footer_company">Compania</h4>
                     <ul class="space-y-3 font-inter">
-                        <li><a href="#" class="text-slate-500 text-sm hover:text-ai-400 transition-colors">Privacidad</a></li>
-                        <li><a href="#" class="text-slate-500 text-sm hover:text-ai-400 transition-colors">Terminos de Servicio</a></li>
+                        <li><a href="#" class="text-slate-500 text-sm hover:text-ai-400 transition-colors" data-i18n="footer_privacy">Privacidad</a></li>
+                        <li><a href="#" class="text-slate-500 text-sm hover:text-ai-400 transition-colors" data-i18n="footer_terms">Terminos de Servicio</a></li>
                     </ul>
                 </div>
             </div>
@@ -808,6 +818,302 @@
     <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
     <script>
         AOS.init({ once: true, offset: 50, duration: 800 });
+
+        // ========== Language Toggle (ES/EN) ==========
+        var translations = {
+            en: {
+                // Nav
+                nav_ecosystem: 'Ecosystem',
+                nav_modules: 'Smart Modules',
+                nav_plans: 'Plans',
+                nav_access: 'Login',
+                nav_access_users: 'User Login',
+                nav_start: 'Start System',
+                // Hero
+                hero_badge: 'Tupelukeria is all-in-one.',
+                hero_badge2: '100% voice-operated.',
+                hero_title1: 'Talk to your business.',
+                hero_title2: 'We manage it for you.',
+                hero_desc: 'An AI ecosystem integrated into WhatsApp. Send voice notes to schedule, retain clients or request metrics. <strong class="text-white font-medium">Geolocation, fair digital queue & autonomous inventory.</strong> The software that thinks for you.',
+                hero_cta1: 'Deploy AI in my Salon',
+                hero_cta2: 'View Modules',
+                // Carousel
+                carousel_text: 'Over 500 salons and barbershops in Colombia are already <span class="text-ai-cyanLight">all-in-one</span>',
+                // Ecosystem
+                eco_subtitle: 'Multi-Environment Architecture',
+                eco_title1: 'One Central Brain.',
+                eco_title2: 'Three Dedicated Experiences.',
+                eco_desc: 'Instead of a generic panel, we built specialized high-performance environments. <span class="text-white font-medium">The owner controls, the staff executes and the client books.</span> Everything synced in real time by the Tupelukeria.com Agent.',
+                eco_owner_title: 'For the Owner',
+                eco_owner_desc: 'Total control from your phone. Monitor your salon in real time without being physically there.',
+                eco_owner_f1: 'Precise metrics and instructions via <strong>voice notes</strong> to the Agent.',
+                eco_owner_f2: '100% automated recovery and retention campaigns.',
+                eco_owner_f3: 'Master inventory control with restock alerts.',
+                eco_stylist_title: 'Stylist App',
+                eco_stylist_desc: 'Empowerment tools so the team earns more, stays organized and works happy.',
+                eco_stylist_f1: '<strong>Digital Queue:</strong> Fair and equal opportunities for walk-in clients.',
+                eco_stylist_f2: '<strong>Auto Check-in:</strong> Activates you in the queue upon arrival via GPS.',
+                eco_stylist_f3: 'Real-time view of commissions, bonuses and daily earnings.',
+                eco_client_title: 'For the Client',
+                eco_client_desc: 'Zero annoying app downloads. Everything happens instantly where the client already spends their time.',
+                eco_client_f1: 'Book appointments by sending <strong>voice notes</strong> directly to the salon\'s WhatsApp.',
+                eco_client_f2: 'Receive automatic discounts and retention reminders.',
+                eco_client_f3: 'Self-service management (cancel or reschedule) without taking staff time.',
+                // Feature 1
+                feat1_title1: 'Say goodbye to dead time.',
+                feat1_title2: 'Geolocation and Digital Queue.',
+                feat1_desc: 'Don\'t waste your clients\' time. The system knows via GPS which stylists are physically at the salon. Our <strong>digital queue (internal Digiturno)</strong> organizes lines with AI, assigning turns fairly so everyone has an equal opportunity to work.',
+                feat1_card_title: 'Guaranteed Work Equity',
+                feat1_card_desc: 'The algorithm prioritizes whoever has been waiting the longest to serve.',
+                // Feature 2
+                feat2_title1: 'Smart Stock and',
+                feat2_title2: 'Flexible Payroll.',
+                feat2_desc: 'Tupelukeria simplifies two critical areas of your business without mixing them or causing confusion:',
+                feat2_inv_title: 'Autonomous Inventory',
+                feat2_inv_desc: 'If a product runs out, the system detects the shortage and automatically notifies your supplier to restock.',
+                feat2_pay_title: 'Smart Payroll',
+                feat2_pay_desc: 'Manage traditional payroll with the percentage you agree on with each stylist. And if you want to go further, activate <strong class="text-white">merit-based payroll</strong>: the system automatically rewards those who arrive on time and perform better with extra bonuses.',
+                feat2_card_title: 'Payroll & Performance',
+                feat2_alert_title: 'AI Inventory Alert',
+                feat2_alert_desc: 'Red Dye out of stock. Automatic order confirmed with authorized supplier.',
+                // Testimonials
+                test_subtitle: 'Real Stories',
+                test_title1: 'What owners say.',
+                test_title2: 'Pure local talent.',
+                // Pricing
+                price_subtitle: 'Investment Models',
+                price_title1: 'Scalable plans.',
+                price_title2: 'Start for free.',
+                price_desc: 'A Freemium model designed to grow with you. No fine print or mandatory credit cards to start.',
+                plan_free: 'Free',
+                plan_free_desc: 'Perfect for independents who want to take the first digital step.',
+                plan_free_price: 'forever',
+                plan_free_f1: 'Web booking link.',
+                plan_free_f2: '1 Staff Profile (Admin).',
+                plan_free_f3: 'Basic scheduling.',
+                plan_free_f4: 'No AI Agent.',
+                plan_free_cta: 'Start Free',
+                plan_pro_desc: 'Advanced tools to manage your salon.',
+                plan_pro_price: '$10',
+                plan_per_month: 'USD / mo',
+                plan_biz_price: '$19',
+                plan_ent_price: '$34.90',
+                plan_pro_f1: 'Recovery campaigns.',
+                plan_pro_f2: 'Digital Queue & Geolocation.',
+                plan_pro_f3: 'Inventory & Payroll.',
+                plan_pro_f4: 'Unlimited Staff.',
+                plan_pro_f5: 'No AI Assistant.',
+                plan_activate_wa: 'Activate via WhatsApp',
+                plan_recommended: 'Recommended',
+                plan_biz_desc: 'All Pro + professional website for your salon.',
+                plan_biz_f1: 'Everything in Pro plan.',
+                plan_biz_f2: 'AI Assistant via WhatsApp.',
+                plan_biz_f3: 'Professional website included.',
+                plan_biz_f4: 'Advanced Admin Panel.',
+                plan_biz_f5: 'Reports & analytics.',
+                plan_ent_desc: 'Absolute control for chains and franchises. Multisite.',
+                plan_ent_f1: 'Everything in Business plan.',
+                plan_ent_f2: 'Multiple locations (Multisite).',
+                plan_ent_f3: 'Advanced global analytics.',
+                plan_ent_f4: 'VIP Support 24/7.',
+                // CTA
+                cta_title: 'Your competition is already upgrading',
+                cta_desc: 'Stop managing your business with outdated tools. Deploy our Tupelukeria.com Agent and watch your salon run and sell autonomously.',
+                cta_button: 'Deploy Tupelukeria System',
+                // Footer
+                footer_desc: 'The first all-in-one system powered by AI and voice notes for the beauty and wellness industry.',
+                footer_modules: 'Modules',
+                footer_mod1: 'Digital Queue & GPS',
+                footer_mod3: 'Smart Inventory',
+                footer_integrations: 'Integrations',
+                footer_int2: "L'Oreal Suppliers",
+                footer_int3: 'Digital Payments',
+                footer_company: 'Company',
+                footer_privacy: 'Privacy',
+                footer_terms: 'Terms of Service',
+            },
+            es: {
+                nav_ecosystem: 'Ecosistema',
+                nav_modules: 'Modulos Inteligentes',
+                nav_plans: 'Planes',
+                nav_access: 'Acceso',
+                nav_access_users: 'Acceso Usuarios',
+                nav_start: 'Iniciar Sistema',
+                hero_badge: 'Tupelukeria es completop.',
+                hero_badge2: 'Operado 100% por voz.',
+                hero_title1: 'Habla con tu negocio.',
+                hero_title2: 'Nosotros lo administramos.',
+                hero_desc: 'Un ecosistema de IA integrado en WhatsApp. Envia notas de voz para agendar, retener clientes o pedir metricas. <strong class="text-white font-medium">Geolocalizacion, digiturno justo e inventario autonomo.</strong> El software que piensa por ti.',
+                hero_cta1: 'Desplegar IA en mi Salon',
+                hero_cta2: 'Ver Modulos',
+                carousel_text: 'Mas de 500 peluquerias y barberias en Colombia ya son <span class="text-ai-cyanLight">completop</span>',
+                eco_subtitle: 'Arquitectura Multi-Entorno',
+                eco_title1: 'Un Cerebro Central.',
+                eco_title2: 'Tres Experiencias Dedicadas.',
+                eco_desc: 'En lugar de un panel generico, desarrollamos entornos especializados de alto rendimiento. <span class="text-white font-medium">El dueno controla, el staff ejecuta y el cliente reserva.</span> Todo sincronizado en tiempo real por el Agente Tupelukeria.com.',
+                eco_owner_title: 'Para el Dueno',
+                eco_owner_desc: 'Control total desde tu celular. Supervisa tu salon en tiempo real sin tener que estar fisicamente alli.',
+                eco_owner_f1: 'Metricas e instrucciones precisas via <strong>notas de voz</strong> al Agente.',
+                eco_owner_f2: 'Campanas de recuperacion y retencion 100% automatizadas.',
+                eco_owner_f3: 'Control de inventario maestro con alertas de reabastecimiento.',
+                eco_stylist_title: 'App del Estilista',
+                eco_stylist_desc: 'Herramientas de empoderamiento para que el equipo gane mas, se organice mejor y trabaje feliz.',
+                eco_stylist_f1: '<strong>Fichero Digital:</strong> Justicia y oportunidades iguales para atender sin cita.',
+                eco_stylist_f2: '<strong>Check-in Automatico:</strong> Te activa en la fila de turnos al llegar via GPS.',
+                eco_stylist_f3: 'Visor de comisiones, bonos y ganancias diarias en tiempo real.',
+                eco_client_title: 'Para el Cliente',
+                eco_client_desc: 'Cero descargas de apps molestas. Todo ocurre instantaneamente donde el cliente ya pasa su tiempo.',
+                eco_client_f1: 'Reserva de citas enviando <strong>notas de voz</strong> directas al WhatsApp del local.',
+                eco_client_f2: 'Recibe descuentos automaticos y recordatorios de retencion.',
+                eco_client_f3: 'Gestion autonoma (cancelar o reagendar) sin quitarle tiempo al staff.',
+                feat1_title1: 'Adios a los tiempos muertos.',
+                feat1_title2: 'Geolocalizacion y Digiturno.',
+                feat1_desc: 'No hagas perder el tiempo a tus clientes. El sistema sabe por GPS que estilistas estan fisicamente en la peluqueria. Nuestro <strong>fichero digital (Digiturno interno)</strong> organiza las colas con IA, asignando turnos de forma justa y equitativa para que todos tengan la misma oportunidad de trabajar.',
+                feat1_card_title: 'Equidad Laboral Garantizada',
+                feat1_card_desc: 'El algoritmo prioriza a quien lleva mas tiempo esperando atender.',
+                feat2_title1: 'Stock Inteligente y',
+                feat2_title2: 'Nomina Flexible.',
+                feat2_desc: 'Tupelukeria simplifica dos areas criticas de tu negocio sin mezclarlas ni causar confusion:',
+                feat2_inv_title: 'Inventario Autonomo',
+                feat2_inv_desc: 'Si un producto se termina, el sistema detecta la falta de stock y le avisa automaticamente a tu proveedor para reabastecer.',
+                feat2_pay_title: 'Nomina Inteligente',
+                feat2_pay_desc: 'Maneja la nomina tradicional con el porcentaje que acuerdes con cada estilista. Y si quieres ir mas alla, activa la <strong class="text-white">nomina por meritos</strong>: el sistema premia automaticamente a quienes llegan puntuales y atienden mejor con bonificaciones extras.',
+                feat2_card_title: 'Nomina & Rendimiento',
+                feat2_alert_title: 'Alerta de Inventario IA',
+                feat2_alert_desc: 'Tinte Rojo agotado. Confirmado pedido automatico al proveedor autorizado.',
+                test_subtitle: 'Historias Reales',
+                test_title1: 'Lo que dicen los duenos.',
+                test_title2: 'Puro talento local.',
+                price_subtitle: 'Modelos de Inversion',
+                price_title1: 'Planes escalables.',
+                price_title2: 'Empieza gratis.',
+                price_desc: 'Un modelo Freemium disenado para crecer contigo. Sin letras pequenas ni tarjetas de credito obligatorias para iniciar.',
+                plan_free: 'Gratis',
+                plan_free_desc: 'Perfecto para independientes que quieren dar el primer paso digital.',
+                plan_free_price: 'para siempre',
+                plan_free_f1: 'Enlace de reservas web.',
+                plan_free_f2: '1 Perfil de Staff (Admin).',
+                plan_free_f3: 'Agenda basica.',
+                plan_free_f4: 'Sin Agente IA.',
+                plan_free_cta: 'Comenzar Gratis',
+                plan_pro_desc: 'Herramientas avanzadas para gestionar tu salon.',
+                plan_pro_price: '$10',
+                plan_per_month: '/ mes',
+                plan_biz_price: '$19',
+                plan_ent_price: '$34.90',
+                plan_pro_f1: 'Campanas de recuperacion.',
+                plan_pro_f2: 'Digiturno y Geolocalizacion.',
+                plan_pro_f3: 'Inventario y Nomina.',
+                plan_pro_f4: 'Staff Ilimitado.',
+                plan_pro_f5: 'Sin Asistente IA.',
+                plan_activate_wa: 'Activar por WhatsApp',
+                plan_recommended: 'Recomendado',
+                plan_biz_desc: 'Todo Pro + sitio web profesional para tu salon.',
+                plan_biz_f1: 'Todo lo del plan Pro.',
+                plan_biz_f2: 'Asistente IA por WhatsApp.',
+                plan_biz_f3: 'Sitio web profesional incluido.',
+                plan_biz_f4: 'Panel Administrador avanzado.',
+                plan_biz_f5: 'Reportes y analitica.',
+                plan_ent_desc: 'Control absoluto para cadenas y franquicias. Multisite.',
+                plan_ent_f1: 'Todo lo del plan Business.',
+                plan_ent_f2: 'Multiples sucursales (Multisite).',
+                plan_ent_f3: 'Analitica global avanzada.',
+                plan_ent_f4: 'Soporte VIP 24/7.',
+                cta_title: 'Tu competencia ya se esta actualizando',
+                cta_desc: 'Deja de gestionar tu negocio con herramientas del pasado. Incorpora nuestro Agente Tupelukeria.com y mira como tu salon funciona y vende de forma autonoma.',
+                cta_button: 'Desplegar Sistema Tupelukeria',
+                footer_desc: 'El primer sistema completop impulsado por IA y notas de voz para la industria de la belleza y bienestar.',
+                footer_modules: 'Modulos',
+                footer_mod1: 'Digiturno & GPS',
+                footer_mod3: 'Inventario Inteligente',
+                footer_integrations: 'Integraciones',
+                footer_int2: "Proveedores L'Oreal",
+                footer_int3: 'Pagos Digitales',
+                footer_company: 'Compania',
+                footer_privacy: 'Privacidad',
+                footer_terms: 'Terminos de Servicio',
+            }
+        };
+
+        var currentLang = localStorage.getItem('tpk_lang') || 'es';
+
+        // --- Fixed plan prices ---
+        var PLAN_PRICES_USD = { plan_pro_price: 10, plan_biz_price: 19, plan_ent_price: 34.90 };
+        var PLAN_PRICES_COP = { plan_pro_price: 29900, plan_biz_price: 49900, plan_ent_price: 129900 };
+
+        function formatCOP(n) {
+            return '$' + Math.round(n).toLocaleString('es-CO');
+        }
+
+        function applyPrices(lang) {
+            if (lang === 'es') {
+                Object.keys(PLAN_PRICES_COP).forEach(function(key) {
+                    var els = document.querySelectorAll('[data-i18n="' + key + '"]');
+                    els.forEach(function(el) { el.textContent = formatCOP(PLAN_PRICES_COP[key]); });
+                });
+                var perMonth = document.querySelectorAll('[data-i18n="plan_per_month"]');
+                perMonth.forEach(function(el) { el.textContent = 'COP / mes'; });
+            } else {
+                Object.keys(PLAN_PRICES_USD).forEach(function(key) {
+                    var els = document.querySelectorAll('[data-i18n="' + key + '"]');
+                    els.forEach(function(el) { el.textContent = '$' + PLAN_PRICES_USD[key]; });
+                });
+                var perMonth = document.querySelectorAll('[data-i18n="plan_per_month"]');
+                perMonth.forEach(function(el) { el.textContent = 'USD / mo'; });
+            }
+        }
+
+        function applyLanguage(lang) {
+            currentLang = lang;
+            localStorage.setItem('tpk_lang', lang);
+            document.documentElement.lang = lang;
+
+            // Update text-only elements
+            document.querySelectorAll('[data-i18n]').forEach(function(el) {
+                var key = el.getAttribute('data-i18n');
+                if (translations[lang] && translations[lang][key]) {
+                    el.textContent = translations[lang][key];
+                }
+            });
+
+            // Update HTML elements (those with inner HTML like <strong>)
+            document.querySelectorAll('[data-i18n-html]').forEach(function(el) {
+                var key = el.getAttribute('data-i18n-html');
+                if (translations[lang] && translations[lang][key]) {
+                    el.innerHTML = translations[lang][key];
+                }
+            });
+
+            // Convert plan prices with live exchange rate
+            applyPrices(lang);
+
+            // Update toggle buttons
+            var flag = lang === 'es' ? '\u{1F1EA}\u{1F1F8}' : '\u{1F1FA}\u{1F1F8}';
+            var label = lang === 'es' ? 'ES' : 'EN';
+            var mobileLabel = lang === 'es' ? 'Cambiar a English' : 'Switch to Espanol';
+
+            var langFlag = document.getElementById('lang-flag');
+            var langLabel = document.getElementById('lang-label');
+            var langFlagMobile = document.getElementById('lang-flag-mobile');
+            var langLabelMobile = document.getElementById('lang-label-mobile');
+
+            if (langFlag) langFlag.textContent = flag;
+            if (langLabel) langLabel.textContent = label;
+            if (langFlagMobile) langFlagMobile.textContent = flag;
+            if (langLabelMobile) langLabelMobile.textContent = mobileLabel;
+
+            // Update page title
+            document.title = lang === 'es'
+                ? 'Tupelukeria | El Primer Asistente IA para Salones'
+                : 'Tupelukeria | The First AI Assistant for Salons';
+        }
+
+        function toggleLanguage() {
+            applyLanguage(currentLang === 'es' ? 'en' : 'es');
+        }
+
+        // Apply saved language on load
+        applyLanguage(currentLang);
 
         var btnMenu = document.getElementById('mobile-menu-btn');
         var menuMobile = document.getElementById('mobile-menu');

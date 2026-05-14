@@ -1,6 +1,6 @@
 // src/pages/Authentication/TenantRegister.tsx
-import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState, useMemo } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Link } from 'react-router-dom';
 import { Spinner } from 'reactstrap';
 import * as Yup from 'yup';
@@ -15,15 +15,28 @@ import { setToken } from '../../services/auth';
 import logoLight from "../../assets/images/logo-light.png";
 
 import Swal from 'sweetalert2';
+import { useTranslation } from 'react-i18next';
 
 const TenantRegister = () => {
-  document.title = "Crear Cuenta | Tupelukeria";
+  const { t } = useTranslation();
+  document.title = `${t("create_account")} | Tupelukeria`;
 
   const navigate = useNavigate();
   const dispatch = useDispatch<any>();
+  const [searchParams] = useSearchParams();
 
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  const selectedPlan = useMemo(() => {
+    const planKey = searchParams.get('plan');
+    const plans: Record<string, { name: string; price: string; icon: string; color: string }> = {
+      pro: { name: 'Pro', price: '$29.900 COP/mes', icon: '🚀', color: '#7c3aed' },
+      business: { name: 'Business', price: '$49.900 COP/mes', icon: '🏢', color: '#06b6d4' },
+      enterprise: { name: 'Enterprise', price: '$99.900 COP/mes', icon: '🌐', color: '#f59e0b' },
+    };
+    return planKey && plans[planKey] ? { key: planKey, ...plans[planKey] } : null;
+  }, [searchParams]);
 
   const selectRegisterState = (state: any) => state.tenantRegister;
   const registerData = createSelector(
@@ -43,10 +56,10 @@ const TenantRegister = () => {
       adminPassword: '',
     },
     validationSchema: Yup.object({
-      tenantName: Yup.string().required("Ingresa el nombre de tu peluquería"),
-      adminFirstName: Yup.string().required("Ingresa tu nombre"),
-      adminEmail: Yup.string().required("Ingresa tu email").email("Email inválido"),
-      adminPassword: Yup.string().required("Ingresa una contraseña").min(6, "Mínimo 6 caracteres"),
+      tenantName: Yup.string().required(t("enter_salon_name")),
+      adminFirstName: Yup.string().required(t("enter_your_name")),
+      adminEmail: Yup.string().required(t("enter_email")).email(t("invalid_email")),
+      adminPassword: Yup.string().required(t("enter_password")).min(6, t("min_6_chars")),
     }),
     onSubmit: (values) => {
       const payload = {
@@ -78,8 +91,10 @@ const TenantRegister = () => {
 
       Swal.fire({
         icon: "success",
-        title: "Cuenta creada!",
-        text: "Vamos a configurar tu pelukeria...",
+        title: t("account_created"),
+        text: selectedPlan
+          ? `${t("setting_up_salon")} — Plan ${selectedPlan.name} seleccionado`
+          : t("setting_up_salon"),
         confirmButtonColor: "#7c3aed",
         background: "#0f172a",
         color: "#e2e8f0",
@@ -87,16 +102,20 @@ const TenantRegister = () => {
         showConfirmButton: false,
       }).then(() => {
         dispatch(resetTenantRegisterFlag());
-        navigate('/assistant');
+        if (selectedPlan) {
+          navigate(`/settings?tab=6&activate=${selectedPlan.key}`);
+        } else {
+          navigate('/assistant');
+        }
       });
     }
     if (error) {
       setIsLoading(false);
       Swal.fire({
         icon: "error",
-        title: "Error al registrar",
-        text: typeof error === 'string' ? error : "Ocurrió un error. Intenta de nuevo.",
-        confirmButtonText: "Entendido",
+        title: t("registration_error"),
+        text: typeof error === 'string' ? error : t("try_again"),
+        confirmButtonText: t("got_it"),
         confirmButtonColor: "#7c3aed",
         background: "#0f172a",
         color: "#e2e8f0",
@@ -192,7 +211,7 @@ const TenantRegister = () => {
             color: '#94a3b8',
             fontWeight: 400,
           }}>
-            Registra tu peluquería en segundos
+            {t("register_salon_tagline")}
           </p>
         </div>
 
@@ -223,7 +242,7 @@ const TenantRegister = () => {
             onMouseEnter={(e) => (e.currentTarget.style.color = '#a78bfa')}
             onMouseLeave={(e) => (e.currentTarget.style.color = '#64748b')}
           >
-            Iniciar Sesión
+            {t("sign_in")}
           </div>
           <div style={{
             flex: 1,
@@ -237,9 +256,33 @@ const TenantRegister = () => {
             cursor: 'default',
             boxShadow: '0 2px 10px rgba(139, 92, 246, 0.3)',
           }}>
-            Crear Cuenta
+            {t("create_account")}
           </div>
         </div>
+
+        {/* Plan seleccionado desde landing */}
+        {selectedPlan && (
+          <div style={{
+            background: `linear-gradient(135deg, ${selectedPlan.color}22, ${selectedPlan.color}11)`,
+            border: `1px solid ${selectedPlan.color}44`,
+            borderRadius: '16px',
+            padding: '16px 20px',
+            marginBottom: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+          }}>
+            <span style={{ fontSize: '28px' }}>{selectedPlan.icon}</span>
+            <div>
+              <div style={{ color: '#e2e8f0', fontWeight: 700, fontSize: '15px' }}>
+                Plan {selectedPlan.name}
+              </div>
+              <div style={{ color: '#94a3b8', fontSize: '13px' }}>
+                {selectedPlan.price} — {t("register_to_activate") || "Regístrate para activar tu plan"}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Card */}
         <div style={{
@@ -266,12 +309,12 @@ const TenantRegister = () => {
                 color: '#94a3b8',
                 marginBottom: '8px',
               }}>
-                Nombre de tu Peluquería
+                {t("salon_name")}
               </label>
               <input
                 name="tenantName"
                 type="text"
-                placeholder="Ej: Salón Glamour"
+                placeholder={t("enter_salon_name")}
                 onChange={validation.handleChange}
                 onBlur={validation.handleBlur}
                 value={validation.values.tenantName}
@@ -303,12 +346,12 @@ const TenantRegister = () => {
                 color: '#94a3b8',
                 marginBottom: '8px',
               }}>
-                Tu Nombre
+                {t("your_name")}
               </label>
               <input
                 name="adminFirstName"
                 type="text"
-                placeholder="Ej: Ana López"
+                placeholder={t("enter_your_name")}
                 onChange={validation.handleChange}
                 onBlur={validation.handleBlur}
                 value={validation.values.adminFirstName}
@@ -340,12 +383,12 @@ const TenantRegister = () => {
                 color: '#94a3b8',
                 marginBottom: '8px',
               }}>
-                Email
+                {t("email")}
               </label>
               <input
                 name="adminEmail"
                 type="email"
-                placeholder="tu@email.com"
+                placeholder={t("your_email")}
                 onChange={validation.handleChange}
                 onBlur={validation.handleBlur}
                 value={validation.values.adminEmail}
@@ -377,13 +420,13 @@ const TenantRegister = () => {
                 color: '#94a3b8',
                 marginBottom: '8px',
               }}>
-                Contraseña
+                {t("password")}
               </label>
               <div style={{ position: 'relative' }}>
                 <input
                   name="adminPassword"
                   type={showPassword ? "text" : "password"}
-                  placeholder="Mínimo 6 caracteres"
+                  placeholder={t("min_6_chars")}
                   onChange={validation.handleChange}
                   onBlur={validation.handleBlur}
                   value={validation.values.adminPassword}
@@ -452,7 +495,7 @@ const TenantRegister = () => {
               }}
             >
               {isLoading && <Spinner size="sm" />}
-              Crear mi cuenta
+              {t("create_my_account")}
             </button>
           </form>
         </div>

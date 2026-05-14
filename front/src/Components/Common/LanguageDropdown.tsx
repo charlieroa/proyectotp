@@ -1,66 +1,51 @@
 import React, { useEffect, useState } from 'react';
 import { Dropdown, DropdownItem, DropdownMenu, DropdownToggle } from 'reactstrap';
-import { get, map } from "lodash";
-
-//i18n
 import i18n from "../../i18n";
 import languages from "../../common/languages";
-
+import { useCurrency } from "../../contexts/CurrencyContext";
 
 const LanguageDropdown = () => {
-    // Declare a new state variable, which we'll call "menu"
-    const [selectedLang, setSelectedLang] = useState<any>("");
+    const [selectedLang, setSelectedLang] = useState<string>("");
+    const [isOpen, setIsOpen] = useState(false);
+    const { setCurrency } = useCurrency();
 
     useEffect(() => {
-        const currentLanguage = localStorage.getItem("I18N_LANGUAGE");
+        const currentLanguage = localStorage.getItem("I18N_LANGUAGE") || "sp";
         setSelectedLang(currentLanguage);
     }, []);
 
-    const changeLanguageAction = (lang : any) => {
-        //set language as i18n
+    const changeLanguageAction = (lang: string) => {
         i18n.changeLanguage(lang);
         localStorage.setItem("I18N_LANGUAGE", lang);
+        localStorage.setItem("I18N_V2", "1");
         setSelectedLang(lang);
+
+        // Auto-switch currency based on language
+        const langConfig = (languages as any)[lang];
+        if (langConfig?.currency) {
+            setCurrency(langConfig.currency as "COP" | "USD");
+        }
     };
 
-
-    const [isLanguageDropdown, setIsLanguageDropdown] = useState<boolean>(false);
-    const toggleLanguageDropdown = () => {
-        setIsLanguageDropdown(!isLanguageDropdown);
-    };
     return (
-        <React.Fragment>
-            <Dropdown isOpen={isLanguageDropdown} toggle={toggleLanguageDropdown} className="ms-1 topbar-head-dropdown header-item">
-                <DropdownToggle className="btn btn-icon btn-topbar btn-ghost-secondary rounded-circle shadow-none" tag="button">
-                    <img
-                        src={get(languages, `${selectedLang}.flag`)}
-                        alt="Header Language"
-                        height="20"
-                        className="rounded"
-                    />
-                </DropdownToggle>
-                <DropdownMenu className="notify-item language py-2">
-                    {map(Object.keys(languages), key => (
-                        <DropdownItem
-                            key={key}
-                            onClick={() => changeLanguageAction(key)}
-                            className={`notify-item ${selectedLang === key ? "active" : "none"
-                                }`}
-                        >
-                            <img
-                                src={get(languages, `${key}.flag`)}
-                                alt="Skote"
-                                className="me-2 rounded"
-                                height="18"
-                            />
-                            <span className="align-middle">
-                                {get(languages, `${key}.label`)}
-                            </span>
-                        </DropdownItem>
-                    ))}
-                </DropdownMenu>
-            </Dropdown>
-        </React.Fragment>
+        <Dropdown isOpen={isOpen} toggle={() => setIsOpen(!isOpen)} className="ms-1 topbar-head-dropdown header-item">
+            <DropdownToggle className="btn btn-topbar btn-ghost-secondary rounded-pill shadow-none d-flex align-items-center gap-1 px-2" tag="button">
+                <img src={languages[selectedLang]?.flag} alt="Lang" height="18" className="rounded" />
+            </DropdownToggle>
+            <DropdownMenu className="dropdown-menu-end py-2" style={{ minWidth: '200px' }}>
+                <h6 className="dropdown-header">{selectedLang === 'en' ? 'Language' : 'Idioma'}</h6>
+                {Object.keys(languages).map(key => (
+                    <DropdownItem
+                        key={key}
+                        onClick={() => changeLanguageAction(key)}
+                        className={selectedLang === key ? "active" : ""}
+                    >
+                        <img src={languages[key].flag} alt="" className="me-2 rounded" height="16" />
+                        <span className="align-middle">{languages[key].label}</span>
+                    </DropdownItem>
+                ))}
+            </DropdownMenu>
+        </Dropdown>
     );
 };
 
