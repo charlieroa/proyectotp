@@ -207,6 +207,7 @@ async function findAvailableStylists(tenantId, serviceName, dateStr, timeStr) {
                ))
           AND u.role_id = 3
           AND COALESCE(NULLIF(u.status,''),'active') = 'active'
+          AND COALESCE(u.rental_status, '') <> 'blocked'
           AND ss.service_id = $2::uuid
         ORDER BY
           ss.last_completed_at ASC NULLS FIRST,

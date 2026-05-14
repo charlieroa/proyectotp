@@ -41,7 +41,9 @@ const webPageRoutes = require('./routes/webPageRoutes'); // ✅ Web Pages (Plury
 const stripeRoutes = require('./routes/stripeRoutes'); // ✅ Stripe Checkout
 const ticketRoutes = require('./routes/ticketRoutes'); // ✅ Ticket Virtual
 const dashboardV2Routes = require('./routes/dashboardV2Routes'); // ✅ Dashboard V2
+const chairRentalRoutes = require('./routes/chairRentalRoutes'); // ✅ Arriendo de sillas (Connect)
 const { handleWebhook } = require('./controllers/stripeController'); // ✅ Stripe Webhook
+const { handleConnectWebhook } = require('./controllers/chairRentalController'); // ✅ Stripe Connect Webhook
 const { uploadTenantLogo, uploadTenantBrochure, deleteTenantBrochure } = require('./controllers/tenantController');
 
 // Inicialización de la aplicación Express
@@ -100,6 +102,7 @@ app.use(cors(corsOptions));
    💳 STRIPE WEBHOOK (raw body, ANTES de express.json)
 ======================================= */
 app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), handleWebhook);
+app.post('/api/chair-rentals/webhook', express.raw({ type: 'application/json' }), handleConnectWebhook);
 
 /* =======================================
    🚀 MIDDLEWARES ESENCIALES
@@ -170,6 +173,7 @@ app.use('/api/web-pages', webPageRoutes); // ✅ Web Pages (Plury)
 app.use('/api/stripe', stripeRoutes); // ✅ Stripe Checkout (rutas protegidas)
 app.use('/api/tickets', ticketRoutes); // ✅ Ticket Virtual
 app.use('/api/dashboard-v2', dashboardV2Routes); // ✅ Dashboard V2
+app.use('/api/chair-rentals', chairRentalRoutes); // ✅ Arriendo de sillas (Stripe Connect)
 app.post('/api/tenants/:tenantId/logo', upload.single('logo'), uploadTenantLogo);
 app.post('/api/tenants/:tenantId/brochure', brochureUpload.single('brochure'), uploadTenantBrochure);
 app.delete('/api/tenants/:tenantId/brochure', deleteTenantBrochure);

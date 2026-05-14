@@ -31,6 +31,7 @@ import DatosTenant, { DayKey, DayState, WorkingHoursPerDay } from "./datostenant
 import CategoryManagerModal from '../../../../Components/Common/CategoryManagerModal';
 
 import WhatsAppConfig from "./WhatsAppConfig";
+import ChairRentalTab from "./ChairRentalTab";
 
 // --- Tipos y Helpers ---
 type Tenant = {
@@ -385,9 +386,9 @@ const Settings: React.FC = () => {
   const { t: tr } = useTranslation();
   const { formatCurrency: fmtCurrency, formatFromUSD } = useCurrency();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState<"1" | "2" | "3" | "4" | "5" | "6">(() => {
+  const [activeTab, setActiveTab] = useState<"1" | "2" | "3" | "4" | "5" | "6" | "7">(() => {
     const t = searchParams.get("tab");
-    return (t && ["1","2","3","4","5","6"].includes(t)) ? t as any : "1";
+    return (t && ["1","2","3","4","5","6","7"].includes(t)) ? t as any : "1";
   });
 
   const [tenant, setTenant] = useState<Tenant | null>(null);
@@ -455,7 +456,7 @@ const Settings: React.FC = () => {
   const [staffCount, setStaffCount] = useState<number>(0);
   const [staffLoading, setStaffLoading] = useState<boolean>(false);
 
-  const tabChange = (tab: "1" | "2" | "3" | "4" | "5" | "6") => { if (activeTab !== tab) setActiveTab(tab); };
+  const tabChange = (tab: "1" | "2" | "3" | "4" | "5" | "6" | "7") => { if (activeTab !== tab) setActiveTab(tab); };
 
   const updateStateFromTenant = (tenantData: Tenant | null) => {
     if (!tenantData) return;
@@ -1119,6 +1120,16 @@ const Settings: React.FC = () => {
                         {tr('tab_plans')}
                       </NavLink>
                     </NavItem>
+                    <NavItem>
+                      <NavLink
+                        className={classnames({ active: activeTab === "7" })}
+                        onClick={() => tabChange("7")}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <i className="ri-armchair-line me-1"></i>
+                        Arriendo de sillas
+                      </NavLink>
+                    </NavItem>
                   </Nav>
                 </CardHeader>
 
@@ -1641,6 +1652,8 @@ const Settings: React.FC = () => {
                       })()}
                     </>
                   )}
+
+                  {activeTab === "7" && <ChairRentalTab />}
                 </CardBody>
               </Card>
             </Col>
