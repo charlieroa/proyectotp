@@ -71,7 +71,7 @@ exports.searchService = async (req, res) => {
             let allServices;
             if (stylistClean) {
                 allServices = await db.query(
-                    `SELECT DISTINCT s.id, s.name, s.price, s.duration_minutes,
+                    `SELECT DISTINCT s.id, s.name, s.price, s.duration_minutes, COALESCE(s.max_concurrent_stylists, 1) AS max_concurrent_stylists,
                             u.first_name || ' ' || COALESCE(u.last_name, '') AS stylist_name,
                             u.id AS stylist_id
                      FROM services s
@@ -88,7 +88,7 @@ exports.searchService = async (req, res) => {
                 );
             } else {
                 allServices = await db.query(
-                    `SELECT DISTINCT s.id, s.name, s.price, s.duration_minutes
+                    `SELECT DISTINCT s.id, s.name, s.price, s.duration_minutes, COALESCE(s.max_concurrent_stylists, 1) AS max_concurrent_stylists
                      FROM services s
                      INNER JOIN stylist_services ss ON s.id = ss.service_id
                      INNER JOIN users u ON ss.user_id = u.id
@@ -148,7 +148,8 @@ exports.searchService = async (req, res) => {
                         id: allServices.rows[0].id,
                         name: allServices.rows[0].name,
                         price: Number(allServices.rows[0].price) || 0,
-                        duration_minutes: Number(allServices.rows[0].duration_minutes) || 60
+                        duration_minutes: Number(allServices.rows[0].duration_minutes) || 60,
+                        max_concurrent_stylists: Number(allServices.rows[0].max_concurrent_stylists) || 1
                     },
                     ...stylistInfo,
                     stylists: stylistInfo.stylist ? [stylistInfo.stylist] : [],
@@ -378,7 +379,7 @@ exports.searchService = async (req, res) => {
             }
             
             result = await db.query(
-                `SELECT DISTINCT s.id, s.name, s.price, s.duration_minutes
+                `SELECT DISTINCT s.id, s.name, s.price, s.duration_minutes, COALESCE(s.max_concurrent_stylists, 1) AS max_concurrent_stylists
                  FROM services s
                  INNER JOIN stylist_services ss ON s.id = ss.service_id
                  INNER JOIN users u ON ss.user_id = u.id
@@ -472,19 +473,23 @@ exports.searchService = async (req, res) => {
                     console.log(`   📋 Estilistas que ofrecen "${exactMatch.name}":`, stylists.map(s => s.name).join(', '));
                 }
 
+                const mcs = Number(exactMatch.max_concurrent_stylists) || 1;
                 return res.status(200).json({
                     found: true,
                     service: {
                         id: exactMatch.id,
                         name: exactMatch.name,
                         price: Number(exactMatch.price) || 0,
-                        duration_minutes: Number(exactMatch.duration_minutes) || 60
+                        duration_minutes: Number(exactMatch.duration_minutes) || 60,
+                        max_concurrent_stylists: mcs
                     },
                     stylists,
                     message: date && time
                         ? `Estos estilistas están disponibles para "${exactMatch.name}" el ${date} a las ${time}:`
                         : `Estos estilistas ofrecen ${exactMatch.name}:`,
-                    hint: `IMPORTANTE: Solo muestra estos estilistas (${stylists.length}): ${stylists.map(s => s.name).join(', ')}. NO inventes estilistas que no estén en esta lista.`
+                    hint: mcs > 1
+                        ? `IMPORTANTE: Este servicio necesita ${mcs} estilistas simultáneos. El cliente debe elegir ${mcs} estilistas. Estilistas disponibles (${stylists.length}): ${stylists.map(s => s.name).join(', ')}. Dile al cliente que elija ${mcs}.`
+                        : `IMPORTANTE: Solo muestra estos estilistas (${stylists.length}): ${stylists.map(s => s.name).join(', ')}. NO inventes estilistas que no estén en esta lista.`
                 });
             }
 
@@ -1262,13 +1267,15 @@ exports.bookAppointment = async (req, res) => {
 
         console.log(`   ✅ No hay conflictos - procediendo a crear cita`);
 
+        const { batchId } = req.body;
         const appointment = await createAppointmentRecord(
             tenantId,
             clientId,
             finalStylistId,
             serviceId,
             startTime,
-            duration
+            duration,
+            batchId ? { batchId } : {}
         );
 
         console.log(`   ✅ Cita agendada exitosamente: ${appointment.id}`);

@@ -9,6 +9,7 @@ const { normalizeDateKeyword, normalizeHumanTimeToHHMM, BLOCKING_STATUSES } = re
 const { getGlobalOpenAIKey } = require('../services/openaiKeyService');
 const { trackUsage } = require('../services/tokenTracker');
 const { executeFunction: executeAdminFunction, ADMIN_TOOLS, ADMIN_SYSTEM_PROMPT } = require('./aiAdminChatController');
+const { executeFunction: executeStylistFunction, STYLIST_TOOLS, STYLIST_SYSTEM_PROMPT } = require('./whatsappStylistController');
 const bcrypt = require('bcryptjs');
 const { isPlanAtLeast, getTenantPlan } = require('../middleware/planMiddleware');
 const { isInHandoff, setHandoff } = require('../services/handoffCache');
@@ -23,9 +24,14 @@ const conversationCache = new Map();
 // Cache para datos de reserva en progreso
 const bookingContextCache = new Map();
 
+// Cache para datos pendientes del cliente antes de agendar
+const pendingClientDataCache = new Map(); // Key: "tenantId:chatId" → { step: 'name'|'email', bookingParams, collected: {} }
+
 // Cache para sesiones admin por WhatsApp
 const adminSessionCache = new Map();   // Key: "tenantId:chatId" → { userId, role_id, email, name, lastActivity, conversationHistory }
 const adminAuthStateCache = new Map(); // Key: "tenantId:chatId" → { step: 'email'|'password', email?, attempts, blockedUntil? }
+// Cache para estilistas (auth automático por número de WhatsApp, sin contraseña)
+const stylistSessionCache = new Map(); // Key: "tenantId:chatId" → { stylistId, stylistTenantId, name, lastActivity, conversationHistory }
 const ADMIN_SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutos
 const ADMIN_MAX_ATTEMPTS = 3;
 const ADMIN_BLOCK_TIME = 5 * 60 * 1000; // 5 minutos de bloqueo
@@ -91,8 +97,16 @@ setInterval(() => {
         }
     }
 
+    // Limpiar datos pendientes de cliente (máx 10 min)
+    for (const [key, pending] of pendingClientDataCache.entries()) {
+        if (pending.createdAt && (now - pending.createdAt > 10 * 60 * 1000)) {
+            pendingClientDataCache.delete(key);
+            cleaned++;
+        }
+    }
+
     if (cleaned > 0) {
-        console.log(`🧹 [CACHE] Limpieza: ${cleaned} entradas eliminadas. Sizes: conv=${conversationCache.size}, booking=${bookingContextCache.size}, adminSess=${adminSessionCache.size}, authState=${adminAuthStateCache.size}`);
+        console.log(`🧹 [CACHE] Limpieza: ${cleaned} entradas eliminadas. Sizes: conv=${conversationCache.size}, booking=${bookingContextCache.size}, adminSess=${adminSessionCache.size}, authState=${adminAuthStateCache.size}, pendingData=${pendingClientDataCache.size}`);
     }
 }, CACHE_CLEANUP_INTERVAL);
 
@@ -517,6 +531,113 @@ exports.handleWahaWebhook = async (req, res) => {
                 } catch (voiceError) {
                     console.error('❌ Error transcribiendo audio:', voiceError.message);
                     await wahaService.sendMessage(tenantId, chatId, '😅 Hubo un problema con tu nota de voz. ¿Puedes escribirme?');
+                    return res.status(200).send('OK');
+                }
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            // ══════  INTERCEPTOR: ESTILISTA POR WHATSAPP  ═════════════
+            // ═══════════════════════════════════════════════════════════
+            // Auth automático por número: si el phone matchea un user role_id=3
+            // de este tenant (o de una sucursal hija/padre), entrar en modo estilista.
+            if (userMessage && typeof userMessage === 'string') {
+                const stylistCacheKey = `${tenantId}:${chatId}`;
+                let stylistSession = stylistSessionCache.get(stylistCacheKey);
+
+                // Si no hay sesión, intentar identificar al estilista por su teléfono
+                if (!stylistSession) {
+                    try {
+                        const stylistRows = await prisma.$queryRawUnsafe(
+                            `SELECT u.id, u.tenant_id, u.first_name, u.last_name
+                             FROM users u
+                             JOIN tenants t_user ON t_user.id = u.tenant_id
+                             JOIN tenants t_wa   ON t_wa.id   = $1::uuid
+                             WHERE u.phone = $2
+                               AND u.role_id = 3
+                               AND COALESCE(u.status, 'active') = 'active'
+                               AND (
+                                   u.tenant_id = $1::uuid
+                                   OR t_user.parent_tenant_id = $1::uuid
+                                   OR t_wa.parent_tenant_id = u.tenant_id
+                                   OR (t_user.parent_tenant_id IS NOT NULL
+                                       AND t_user.parent_tenant_id = t_wa.parent_tenant_id)
+                               )
+                             LIMIT 1`,
+                            tenantId, phoneNumber
+                        );
+                        if (stylistRows.length > 0) {
+                            const s = stylistRows[0];
+                            stylistSession = {
+                                stylistId: s.id,
+                                stylistTenantId: s.tenant_id,
+                                name: `${s.first_name || ''} ${s.last_name || ''}`.trim() || 'Estilista',
+                                lastActivity: Date.now(),
+                                conversationHistory: []
+                            };
+                            stylistSessionCache.set(stylistCacheKey, stylistSession);
+                            console.log(`💇 [STYLIST WA] Estilista identificado: ${stylistSession.name} (id=${s.id}, tenant=${s.tenant_id})`);
+                            // Saludo de bienvenida en la PRIMERA interacción
+                            await wahaService.sendMessage(tenantId, chatId,
+                                `Hola ${stylistSession.name.split(' ')[0]} 💇 Soy tu asistente.\n\n` +
+                                `*🧾 ARMAR TICKETS:*\n` +
+                                `• "abre un ticket a María González"\n` +
+                                `• "crea un cliente Pedro 3001234567" (si es nuevo)\n` +
+                                `• "agrega un corte al ticket"\n` +
+                                `• "agrega un shampoo al ticket"\n` +
+                                `• "muéstrame mi ticket actual"\n\n` +
+                                `*📊 CONSULTAS:*\n` +
+                                `• "mi agenda hoy"\n` +
+                                `• "cuánto llevo ganado hoy"\n` +
+                                `• "mis comisiones del mes"\n` +
+                                `• "mi fichero" / "mis anticipos" / "mis préstamos"\n` +
+                                `• "resumen" → todo en uno\n\n` +
+                                `_El cobro lo hace el cajero, tú solo armas el ticket._`
+                            );
+                            return res.status(200).send('OK');
+                        }
+                    } catch (stylErr) {
+                        console.error('[STYLIST WA] Error identificando estilista:', stylErr.message);
+                    }
+                }
+
+                // Si hay sesión activa, procesar con IA del estilista
+                if (stylistSession) {
+                    const msgTrimmed = userMessage.trim();
+                    if (/^(salir|cerrar\s*sesion|cerrar\s*sesión|exit|logout)$/i.test(msgTrimmed)) {
+                        stylistSessionCache.delete(stylistCacheKey);
+                        await wahaService.sendMessage(tenantId, chatId, '👋 Sesión cerrada. Cuando me escribas otra vez te identifico de nuevo.');
+                        return res.status(200).send('OK');
+                    }
+                    // Comando ayuda / menu — re-muestra las opciones
+                    if (/^(ayuda|menu|menú|opciones|help|comandos|qu[eé]\s*puedes\s*hacer)$/i.test(msgTrimmed)) {
+                        await wahaService.sendMessage(tenantId, chatId,
+                            `Estos son los comandos que entiendo:\n\n` +
+                            `*🧾 ARMAR TICKETS:*\n` +
+                            `• "abre un ticket a [nombre del cliente]"\n` +
+                            `• "crea un cliente [nombre] [teléfono]" (si es nuevo)\n` +
+                            `• "busca el ticket de [nombre]" (sumarte a uno existente)\n` +
+                            `• "agrega [servicio] al ticket"\n` +
+                            `• "agrega [producto] al ticket"\n` +
+                            `• "muéstrame mi ticket actual"\n` +
+                            `• "cambia el precio del corte a 25000, [motivo]"\n\n` +
+                            `*📊 CONSULTAS:*\n` +
+                            `• "mi agenda hoy" / "qué tengo mañana"\n` +
+                            `• "cuánto llevo hoy" / "mis ganancias"\n` +
+                            `• "mis comisiones del mes"\n` +
+                            `• "mi fichero" / "mis anticipos" / "mis préstamos"\n` +
+                            `• "mis sucursales" / "cámbiame a [nombre]"\n` +
+                            `• "resumen"`
+                        );
+                        return res.status(200).send('OK');
+                    }
+                    stylistSession.lastActivity = Date.now();
+                    try {
+                        const stylistReply = await processWithStylistAI(stylistSession, msgTrimmed, isVoiceMessage);
+                        await wahaService.sendMessage(tenantId, chatId, stylistReply);
+                    } catch (stylAIErr) {
+                        console.error('[STYLIST WA] Error procesando con IA:', stylAIErr.message);
+                        await wahaService.sendMessage(tenantId, chatId, '😅 No pude procesar tu pregunta. Intenta de nuevo.');
+                    }
                     return res.status(200).send('OK');
                 }
             }
@@ -996,6 +1117,8 @@ exports.handleWahaWebhook = async (req, res) => {
             let clientId = null;
             let senderName = notifyName || 'Cliente';
             let hasNameInDB = false; // 🔧 Flag para saber si el usuario tiene nombre guardado en BD
+            let hasValidEmail = false; // Flag para email real (no @whatsapp.temp)
+            let hasValidPhone = false; // Flag para teléfono real
             const parsedName = parseFullName(notifyName);
             
             console.log(`   📋 Nombre de display recibido: "${notifyName}" ${notifyName ? '(válido)' : '(vacío - usando "Cliente")'}`);
@@ -1004,7 +1127,7 @@ exports.handleWahaWebhook = async (req, res) => {
             try {
                 // 🔧 MEJORADO: Buscar cliente por teléfono O por nombre (si tenemos display name válido)
                 let existingClientRows = await prisma.$queryRawUnsafe(
-                    `SELECT id, first_name, last_name, phone FROM users
+                    `SELECT id, first_name, last_name, phone, email FROM users
                      WHERE tenant_id = $1::uuid AND phone = $2 AND role_id = 4`,
                     tenantId, phoneNumber
                 );
@@ -1088,7 +1211,12 @@ exports.handleWahaWebhook = async (req, res) => {
                         console.log(`   ℹ️ Usando display name para senderName: "${senderName}" (no está en BD aún)`);
                         // hasNameInDB permanece false para que el bot pregunte el nombre
                     }
-                    console.log(`   ✅ Cliente existente identificado: ${senderName} (ID: ${clientId}, teléfono: ${phoneNumber}, tieneNombreEnBD: ${hasNameInDB})`);
+                    // Validar email y teléfono
+                    const savedEmail = existingClientRows[0].email || '';
+                    const savedPhone = existingClientRows[0].phone || '';
+                    hasValidEmail = savedEmail && !savedEmail.endsWith('@whatsapp.temp') && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(savedEmail);
+                    hasValidPhone = savedPhone && savedPhone.length >= 7 && !/^\d{1,3}$/.test(savedPhone);
+                    console.log(`   ✅ Cliente existente identificado: ${senderName} (ID: ${clientId}, teléfono: ${phoneNumber}, tieneNombreEnBD: ${hasNameInDB}, emailValido: ${hasValidEmail}, telValido: ${hasValidPhone})`);
                 } else {
                     // ✅ SOLUCIÓN: Omitir el campo id y dejar que PostgreSQL lo genere automáticamente
                     try {
@@ -1126,7 +1254,9 @@ exports.handleWahaWebhook = async (req, res) => {
                                 hasNameInDB = true; // ✅ Tiene nombre válido desde el inicio
                             }
                             
-                            console.log(`   🆕 Nuevo cliente creado: ${senderName} (ID: ${clientId}, teléfono: ${phoneNumber}, tieneNombreEnBD: ${hasNameInDB})`);
+                            hasValidPhone = true; // Teléfono siempre válido desde WhatsApp
+                            hasValidEmail = false; // Email es placeholder @whatsapp.temp
+                            console.log(`   🆕 Nuevo cliente creado: ${senderName} (ID: ${clientId}, teléfono: ${phoneNumber}, tieneNombreEnBD: ${hasNameInDB}, emailValido: ${hasValidEmail})`);
                         }
                     } catch (insertError) {
                         // Si falla por duplicado (puede haber un race condition), intentar buscar de nuevo
@@ -1284,7 +1414,81 @@ exports.handleWahaWebhook = async (req, res) => {
                 bookingContext = {};
                 conversationCache.set(cacheKey, conversationHistory);
                 bookingContextCache.set(cacheKey, bookingContext);
+                pendingClientDataCache.delete(cacheKey);
             }
+
+            // ═══════════════════ INTERCEPTOR: RECOLECCIÓN DE DATOS DEL CLIENTE ═══════════════════
+            const pendingData = pendingClientDataCache.get(cacheKey);
+            if (pendingData && clientId) {
+                const msg = userMessage.trim();
+
+                if (pendingData.step === 'name') {
+                    // Esperamos nombre completo (2+ palabras)
+                    const namePattern = /^([A-Za-zÁÉÍÓÚáéíóúÑñüÜ]{2,})\s+([A-Za-zÁÉÍÓÚáéíóúÑñüÜ\s]{2,})$/;
+                    const match = msg.match(namePattern);
+                    if (match) {
+                        const firstName = match[1];
+                        const lastName = match[2].trim();
+                        await db.query(
+                            `UPDATE users SET first_name = $1, last_name = $2, updated_at = NOW() WHERE id = $3::uuid`,
+                            [firstName, lastName, clientId]
+                        );
+                        senderName = `${firstName} ${lastName}`;
+                        hasNameInDB = true;
+                        console.log(`   ✅ [DATOS] Nombre capturado: ${senderName}`);
+
+                        // Si también falta email, pedir email
+                        if (!hasValidEmail) {
+                            pendingData.step = 'email';
+                            pendingData.collected.name = senderName;
+                            pendingClientDataCache.set(cacheKey, pendingData);
+                            await wahaService.sendMessage(tenantId, chatId, `Gracias ${firstName}. Ahora necesito tu correo electrónico para enviarte la confirmación de tu cita.`);
+                            return res.status(200).send('OK');
+                        }
+
+                        // Tiene todo, proceder a agendar
+                        pendingClientDataCache.delete(cacheKey);
+                        console.log(`   ✅ [DATOS] Datos completos, procediendo a agendar...`);
+                        const bookResult = await callBookAppointmentMulti(tenantId, clientId, pendingData.bookingParams);
+                        if (bookResult.booked) {
+                            const bp = pendingData.bookingParams;
+                            await wahaService.sendMessage(tenantId, chatId, `Listo ${firstName}, tu cita quedó agendada. Te esperamos.`);
+                        } else {
+                            await wahaService.sendMessage(tenantId, chatId, bookResult.error || 'No se pudo agendar la cita, intenta de nuevo.');
+                        }
+                        return res.status(200).send('OK');
+                    } else {
+                        await wahaService.sendMessage(tenantId, chatId, 'Necesito tu nombre completo (nombre y apellido). Por ejemplo: María García');
+                        return res.status(200).send('OK');
+                    }
+                }
+
+                if (pendingData.step === 'email') {
+                    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                    if (emailPattern.test(msg)) {
+                        await db.query(
+                            `UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2::uuid`,
+                            [msg.toLowerCase(), clientId]
+                        );
+                        hasValidEmail = true;
+                        console.log(`   ✅ [DATOS] Email capturado: ${msg}`);
+
+                        // Datos completos, agendar
+                        pendingClientDataCache.delete(cacheKey);
+                        const bookResult = await callBookAppointmentMulti(tenantId, clientId, pendingData.bookingParams);
+                        if (bookResult.booked) {
+                            await wahaService.sendMessage(tenantId, chatId, `Perfecto, tu cita quedó agendada. Te enviamos la confirmación a ${msg}`);
+                        } else {
+                            await wahaService.sendMessage(tenantId, chatId, bookResult.error || 'No se pudo agendar la cita, intenta de nuevo.');
+                        }
+                        return res.status(200).send('OK');
+                    } else {
+                        await wahaService.sendMessage(tenantId, chatId, 'Necesito un correo electrónico válido. Por ejemplo: tucorreo@gmail.com');
+                        return res.status(200).send('OK');
+                    }
+                }
+            }
+            // ═══════════════════ FIN INTERCEPTOR DATOS CLIENTE ═══════════════════
 
             // Extraer fecha/hora del mensaje
             const extractedDateTime = extractDateTimeFromMessage(userMessage);
@@ -1401,7 +1605,8 @@ if (shouldAutoCheck) {
                     tenantName,
                     extractedDateTime,
                     upcomingAppointments,
-                    brochureUrl
+                    brochureUrl,
+                    { hasNameInDB, hasValidEmail, hasValidPhone, cacheKey }
                 );
 
                 if (result.updatedContext) {
@@ -1494,7 +1699,8 @@ if (shouldAutoCheck) {
 /* ==============   PROCESAR CON IA (OPENAI)   ======================= */
 /* =================================================================== */
 
-async function processWithAI(apiKey, tenantId, clientId, userMessage, conversationHistory, bookingContext, senderName, tenantName, extractedDateTime = { date: null, time: null }, upcomingAppointments = [], brochureUrl = null) {
+async function processWithAI(apiKey, tenantId, clientId, userMessage, conversationHistory, bookingContext, senderName, tenantName, extractedDateTime = { date: null, time: null }, upcomingAppointments = [], brochureUrl = null, clientFlags = {}) {
+    const { hasNameInDB = true, hasValidEmail = true, hasValidPhone = true, cacheKey = '' } = clientFlags;
     const hoyStr = formatInTimeZone(new Date(), TIME_ZONE, "EEEE d 'de' MMMM 'de' yyyy", { locale: require('date-fns/locale/es') });
 
     let contextInfo = '';
@@ -1625,6 +1831,15 @@ PASO 3: VERIFICAR DISPONIBILIDAD
 - ⚠️ Usa formato de 12 horas (AM/PM). Si el resultado tiene "slots_12h", úsalo.
 - 🆕 Muestra TODOS los horarios en lista numerada.
 
+PASO 3.5: SERVICIOS MULTI-ESTILISTA
+- Si buscar_servicio devuelve un servicio con max_concurrent_stylists > 1, ese servicio requiere VARIOS estilistas simultáneos.
+- Ejemplo: un masaje a 4 manos necesita 2 estilistas.
+- Debes presentar al cliente los estilistas disponibles y decirle cuántos necesita:
+  "Este servicio necesita [N] estilistas. Tenemos disponibles: 1. Carlos, 2. Dario, 3. María. ¿Con cuáles prefieres?"
+- El cliente puede elegir estilistas o dejar que tú elijas.
+- Al agendar, usa stylistIds (array de UUIDs) y stylistNames (array de nombres) en agendar_cita.
+- Si el servicio tiene max_concurrent_stylists = 1 (o no tiene el campo), funciona normal con un solo estilista.
+
 PASO 4: CONFIRMAR Y AGENDAR
 - Usuario elige hora → confirmar
 - Usuario dice "sí" → agendar_cita con la hora correcta
@@ -1639,11 +1854,33 @@ PASO 5: SALUDO INICIAL
 - Si el cliente saluda Y pide algo → atiende directo SIN mencionar citas existentes.
 - NUNCA inventes citas. SOLO menciona si aparecen en "CITAS PRÓXIMAS DEL CLIENTE".
 
-PASO 6: CITAS DEL CLIENTE (ver / cancelar / modificar)
+PASO 6: CITAS DEL CLIENTE (ver / cancelar / modificar / REAGENDAR IMPLÍCITO)
 - Si pide "ver mis citas" → ver_mis_agendas
 - Si pide cancelar → cancelar_cita con el appointmentId
 - Si pide modificar → modificar_cita con appointmentId, nueva fecha y hora
 - DESPUÉS de cancelar: "Listo, cita cancelada. Quieres que te busque otro dia?"
+
+⚠️ DETECCIÓN DE REAGENDAMIENTO IMPLÍCITO (MUY IMPORTANTE):
+Cuando el cliente dice frases como:
+  - "no alcanzo a llegar", "no voy a poder ir", "no puedo asistir"
+  - "se me presentó algo", "me surgió un inconveniente", "tengo un imprevisto"
+  - "me podrían atender antes", "hay algo más temprano", "pueden adelantar mi cita"
+  - "voy a llegar tarde", "estoy retrasado/a", "llego en X minutos"
+  - "puedo ir otro día", "será que hay para mañana", "mejor otro horario"
+  - "tengo que cancelar", "no creo que llegue", "no me va a dar tiempo"
+  - Cualquier variación que implique que NO puede cumplir con su cita actual
+
+→ NUNCA pierdas el contexto. El cliente está hablando de su CITA EXISTENTE.
+→ Paso 1: Llama ver_mis_agendas para ver sus citas próximas.
+→ Paso 2: Identifica la cita más cercana en el tiempo (o la que el cliente mencione).
+→ Paso 3: Sé empático y ofrece soluciones:
+  - Si quiere reagendar: "No te preocupes ${senderName}, ¿para qué día y hora te queda mejor?"
+  - Si quiere antes: "Déjame revisar si hay un horario más temprano..." → verificar_disponibilidad con fecha de hoy
+  - Si va tarde: "Tranquilo/a, ¿a qué hora podrías llegar? Reviso si podemos ajustarte."
+→ Paso 4: Cuando el cliente dé nueva fecha/hora → modificar_cita con el appointmentId
+→ NUNCA respondas solo "entendido" sin ofrecer ayuda concreta.
+→ NUNCA dejes la conversación sin resolver: SIEMPRE guía a reagendar o cancelar.
+→ Si el cliente no especifica nueva fecha → SUGIERE opciones disponibles para los próximos días.
 
 REGLA ESPECIAL - SALÓN NO CONFIGURADO:
 - Si buscar_servicio devuelve "not_configured: true", responde EXACTAMENTE con el mensaje devuelto. NO intentes buscar más.
@@ -1655,7 +1892,19 @@ REGLA DE ORO:
 - Si tienes servicio + estilista + fecha en contexto → LLAMA verificar_disponibilidad AUTOMÁTICAMENTE
 - SIEMPRE di el resultado directamente, NO digas "Voy a verificar" ni "Un momento"
 - ⚠️ NO muestres listas de estilistas si el usuario ya especificó qué estilista quiere
-- SIEMPRE intenta cerrar la venta: guía al cliente a agendar, sugiere complementos, genera urgencia amable`
+- SIEMPRE intenta cerrar la venta: guía al cliente a agendar, sugiere complementos, genera urgencia amable
+- ⚠️ CONTEXTO DE CITAS: Si el cliente tiene citas próximas y dice algo que sugiere problema con su cita (no puede ir, llega tarde, quiere cambiar, surgió algo) → SIEMPRE relaciona con su cita existente y ofrece reagendar. NUNCA pierdas este contexto.
+- 🔄 RETENCIÓN: Tu objetivo es NO perder al cliente. Si quiere cancelar → ofrece reagendar primero. Si no puede hoy → busca otro día. SIEMPRE intenta mantener la cita.
+
+═══════════════════════════════════════════════════════════════
+⛔ LÍMITE DE ALCANCE - NO RESPONDAS FUERA DE TEMA
+═══════════════════════════════════════════════════════════════
+- SOLO puedes hablar de temas relacionados con el salón: servicios, citas, estilistas, horarios, ubicación, precios.
+- Si el usuario pregunta algo que NO tiene relación con el salón (política, deportes, recetas, tareas, matemáticas, chistes, consejos personales, noticias, clima, etc.):
+  → Responde brevemente: "${senderName}, solo puedo ayudarte con temas del salón. ¿Te busco un servicio o agendamos una cita?"
+  → NUNCA respondas la pregunta fuera de tema, ni siquiera parcialmente.
+  → NUNCA digas "no sé" y luego intentes responder.
+- Excepciones permitidas: consejos básicos de cuidado de cabello/uñas/piel SI están relacionados con los servicios del salón.`
     + (brochureUrl ? '\n\nNOTA: Este salón tiene un brochure de servicios disponible. Si el cliente pregunta por servicios o precios, puedes decirle: "¿Te gustaría ver nuestro brochure de servicios?" El sistema enviará la imagen automáticamente.' : '');
 
     const FUNCTIONS = [
@@ -1696,13 +1945,15 @@ REGLA DE ORO:
             type: "function",
             function: {
                 name: "agendar_cita",
-                description: "Agenda la cita cuando el usuario confirma.",
+                description: "Agenda la cita cuando el usuario confirma. Para servicios multi-estilista, usa stylistIds (array) con todos los estilistas necesarios.",
                 parameters: {
                     type: "object",
                     properties: {
                         serviceId: { type: "string", description: "UUID del servicio" },
-                        stylistId: { type: "string", description: "UUID del estilista" },
+                        stylistId: { type: "string", description: "UUID del estilista (para servicio con 1 estilista)" },
                         stylistName: { type: "string", description: "Nombre del estilista" },
+                        stylistIds: { type: "array", items: { type: "string" }, description: "Array de UUIDs de estilistas (para servicios multi-estilista)" },
+                        stylistNames: { type: "array", items: { type: "string" }, description: "Array de nombres de estilistas (para servicios multi-estilista)" },
                         date: { type: "string", description: "Fecha YYYY-MM-DD" },
                         time: { type: "string", description: "Hora HH:mm" }
                     },
@@ -1947,6 +2198,12 @@ REGLA DE ORO:
         }
         else if (functionName === 'agendar_cita') {
             const _uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+            // Soporte multi-estilista
+            const multiStylistIds = functionArgs.stylistIds || [];
+            const multiStylistNames = functionArgs.stylistNames || [];
+            const isMultiStylist = multiStylistIds.length > 1 || multiStylistNames.length > 1;
+
             const bookParams = {
                 serviceId: (_uuid.test(functionArgs.serviceId) ? functionArgs.serviceId : null) || bookingContext.service_id,
                 stylistId: (_uuid.test(functionArgs.stylistId) ? functionArgs.stylistId : null) || bookingContext.stylist_id,
@@ -1955,9 +2212,10 @@ REGLA DE ORO:
                 time: functionArgs.time || bookingContext.time
             };
 
-            console.log(`\n📝 [AGENDAR CITA] Preparando reserva`);
+            console.log(`\n📝 [AGENDAR CITA] Preparando reserva ${isMultiStylist ? '(MULTI-ESTILISTA)' : ''}`);
             console.log(`   ClientId: ${clientId}`);
             console.log(`   Params finales:`, JSON.stringify(bookParams, null, 2));
+            if (isMultiStylist) console.log(`   Multi-stylist IDs: ${multiStylistIds.join(', ')}, Names: ${multiStylistNames.join(', ')}`);
 
             if (!clientId) {
                 console.log(`   ❌ Error: clientId es null o undefined`);
@@ -1966,7 +2224,64 @@ REGLA DE ORO:
                     error: 'No se pudo identificar tu número de teléfono. Por favor, asegúrate de que tu número esté registrado en nuestro sistema o contacta directamente con el salón.'
                 };
             } else {
-                functionResult = await callBookAppointment(tenantId, clientId, bookParams);
+                // 🔧 Validar datos del cliente antes de agendar
+                const missingData = [];
+                if (!hasNameInDB) missingData.push('nombre');
+                if (!hasValidEmail) missingData.push('email');
+
+                if (missingData.length > 0) {
+                    console.log(`   ⏸️ Datos incompletos del cliente: faltan [${missingData.join(', ')}]. Pausando agendamiento.`);
+                    const firstStep = missingData[0] === 'nombre' ? 'name' : 'email';
+                    pendingClientDataCache.set(cacheKey, {
+                        step: firstStep,
+                        bookingParams: isMultiStylist ? { ...bookParams, stylistIds: multiStylistIds, stylistNames: multiStylistNames, isMultiStylist: true } : bookParams,
+                        collected: {},
+                        createdAt: Date.now()
+                    });
+                    functionResult = {
+                        booked: false,
+                        needs_client_data: true,
+                        missing: missingData,
+                        message: missingData.includes('nombre')
+                            ? 'Antes de confirmar tu cita necesito unos datos. ¿Cuál es tu nombre completo (nombre y apellido)?'
+                            : 'Antes de confirmar tu cita necesito tu correo electrónico para enviarte la confirmación.'
+                    };
+                } else if (isMultiStylist) {
+                    // Multi-stylist booking: crear múltiples citas con mismo batch_id
+                    const { v4: uuidv4 } = require('uuid');
+                    const batchId = uuidv4();
+                    const results = [];
+                    let allBooked = true;
+
+                    for (let i = 0; i < Math.max(multiStylistIds.length, multiStylistNames.length); i++) {
+                        const singleParams = {
+                            ...bookParams,
+                            stylistId: multiStylistIds[i] || null,
+                            stylistName: multiStylistNames[i] || null,
+                            batchId
+                        };
+                        const result = await callBookAppointment(tenantId, clientId, singleParams);
+                        results.push(result);
+                        if (!result.booked) allBooked = false;
+                    }
+
+                    if (allBooked) {
+                        const stylistNamesList = results.map(r => r.appointment?.stylist).filter(Boolean).join(' y ');
+                        functionResult = {
+                            booked: true,
+                            multi_stylist: true,
+                            appointments: results.map(r => r.appointment),
+                            message: `¡Listo! Tu cita quedó agendada con ${stylistNamesList} para el ${results[0].appointment?.date} a las ${results[0].appointment?.time_12h || results[0].appointment?.time}.`
+                        };
+                    } else {
+                        functionResult = {
+                            booked: false,
+                            error: 'No se pudieron agendar todos los estilistas. ' + results.filter(r => !r.booked).map(r => r.error || r.message).join('. ')
+                        };
+                    }
+                } else {
+                    functionResult = await callBookAppointment(tenantId, clientId, bookParams);
+                }
             }
 
             if (functionResult.booked) {
@@ -2256,6 +2571,116 @@ async function processWithAdminAI(tenantId, adminSession, userMessage, isVoiceMe
     return finalContent;
 }
 
+// ═════════════════════════════════════════════════════════════════════
+// ══════════   IA del estilista (auth automático por phone)   ═════════
+// ═════════════════════════════════════════════════════════════════════
+async function processWithStylistAI(stylistSession, userMessage, isVoiceMessage = false) {
+    const apiKey = await getGlobalOpenAIKey();
+    if (!apiKey) throw new Error('No hay API key de OpenAI configurada.');
+
+    const now = formatInTimeZone(new Date(), TIME_ZONE, 'yyyy-MM-dd hh:mm a');
+    let systemPrompt = `${STYLIST_SYSTEM_PROMPT}\n\nFecha/hora actual: ${now}\nEstilista: ${stylistSession.name}`;
+
+    if (isVoiceMessage) {
+        systemPrompt += `\n\n⚠️ RESPUESTA POR VOZ: tu respuesta será convertida a audio (TTS).\n` +
+            `- Formatea números de forma HABLADA: "trescientos mil pesos", no "$300.000"\n` +
+            `- Sé conversacional y natural, sin emojis ni asteriscos.`;
+    }
+
+    const history = stylistSession.conversationHistory || [];
+    const messages = [
+        { role: 'system', content: systemPrompt },
+        ...history.slice(-10),
+        { role: 'user', content: userMessage }
+    ];
+
+    console.log(`\n🤖 [STYLIST WA] Request para ${stylistSession.name}: "${userMessage.slice(0, 60)}"`);
+
+    const firstResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages,
+            tools: STYLIST_TOOLS,
+            tool_choice: 'auto',
+            temperature: 0.5,
+            max_tokens: 500
+        })
+    });
+
+    if (!firstResponse.ok) {
+        const errBody = await firstResponse.text();
+        console.error('[STYLIST WA] OpenAI error:', errBody);
+        throw new Error('Error al comunicarse con OpenAI.');
+    }
+
+    const firstData = await firstResponse.json();
+    const assistantMessage = firstData.choices[0].message;
+
+    if (firstData.usage) {
+        trackUsage(stylistSession.stylistTenantId, 'stylist_chat_whatsapp', firstData.model || 'gpt-4o-mini',
+            firstData.usage.prompt_tokens, firstData.usage.completion_tokens).catch(() => {});
+    }
+
+    if (!assistantMessage.tool_calls || assistantMessage.tool_calls.length === 0) {
+        const reply = assistantMessage.content || 'No tengo respuesta en este momento.';
+        history.push({ role: 'user', content: userMessage });
+        history.push({ role: 'assistant', content: reply });
+        stylistSession.conversationHistory = history.slice(-20);
+        return reply;
+    }
+
+    const toolResults = await Promise.all(
+        assistantMessage.tool_calls.map(async (toolCall) => {
+            const fnName = toolCall.function.name;
+            const fnArgs = JSON.parse(toolCall.function.arguments || '{}');
+            let result;
+            try {
+                console.log(`   🔧 [STYLIST WA] Ejecutando: ${fnName}(${JSON.stringify(fnArgs)})`);
+                result = await executeStylistFunction(fnName, fnArgs, stylistSession.stylistId, stylistSession.stylistTenantId, stylistSession);
+            } catch (err) {
+                console.error(`   ❌ [STYLIST WA] Error en ${fnName}:`, err.message);
+                result = { error: `Error ejecutando ${fnName}: ${err.message}` };
+            }
+            return { role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify(result) };
+        })
+    );
+
+    const followUpMessages = [...messages, assistantMessage, ...toolResults];
+    const secondResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: followUpMessages,
+            temperature: 0.5,
+            max_tokens: 500
+        })
+    });
+
+    if (!secondResponse.ok) {
+        const errBody = await secondResponse.text();
+        console.error('[STYLIST WA] OpenAI follow-up error:', errBody);
+        throw new Error('Error al procesar la respuesta de las funciones.');
+    }
+
+    const secondData = await secondResponse.json();
+    if (secondData.usage) {
+        trackUsage(stylistSession.stylistTenantId, 'stylist_chat_whatsapp', secondData.model || 'gpt-4o-mini',
+            secondData.usage.prompt_tokens, secondData.usage.completion_tokens).catch(() => {});
+    }
+
+    const finalContent = secondData.choices[0].message.content || 'No pude generar una respuesta.';
+    history.push({ role: 'user', content: userMessage });
+    history.push({ role: 'assistant', content: finalContent });
+    stylistSession.conversationHistory = history.slice(-20);
+
+    const executedFns = assistantMessage.tool_calls.map(tc => tc.function.name).join(', ');
+    console.log(`   ✅ [STYLIST WA] Funciones ejecutadas: ${executedFns}`);
+    return finalContent;
+}
+
 /* =================================================================== */
 /* ==============   LLAMADAS A LOS ENDPOINTS   ======================= */
 /* =================================================================== */
@@ -2328,6 +2753,34 @@ async function callBookAppointment(tenantId, clientId, params) {
         console.error('❌ Error en callBookAppointment:', error);
         return { booked: false, error: 'Error interno: ' + error.message };
     }
+}
+
+// Wrapper multi-estilista para callBookAppointment (pendingData recovery)
+async function callBookAppointmentMulti(tenantId, clientId, params) {
+    if (params.isMultiStylist && params.stylistIds && params.stylistIds.length > 1) {
+        const { v4: uuidv4 } = require('uuid');
+        const batchId = uuidv4();
+        const results = [];
+        for (let i = 0; i < Math.max(params.stylistIds.length, (params.stylistNames || []).length); i++) {
+            const singleParams = {
+                serviceId: params.serviceId,
+                date: params.date,
+                time: params.time,
+                stylistId: params.stylistIds[i] || null,
+                stylistName: (params.stylistNames || [])[i] || null,
+                batchId
+            };
+            const result = await callBookAppointment(tenantId, clientId, singleParams);
+            results.push(result);
+        }
+        const allBooked = results.every(r => r.booked);
+        if (allBooked) {
+            const names = results.map(r => r.appointment?.stylist).filter(Boolean).join(' y ');
+            return { booked: true, multi_stylist: true, appointments: results.map(r => r.appointment), message: `¡Cita agendada con ${names}!` };
+        }
+        return { booked: false, error: results.filter(r => !r.booked).map(r => r.error).join('. ') };
+    }
+    return callBookAppointment(tenantId, clientId, params);
 }
 
 async function callVerMisAgendas(tenantId, clientId) {
