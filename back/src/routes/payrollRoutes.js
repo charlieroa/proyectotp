@@ -13,8 +13,14 @@ router.use(authMiddleware);
 // --- RUTA PRINCIPAL ---
 // GET /api/payrolls/detailed-preview -> Para la vista previa que usa el frontend.
 router.get(
-    '/detailed-preview', 
+    '/detailed-preview',
     payrollController.getPayrollDetailedPreview
+);
+
+// GET /api/payrolls/export-excel -> Descargar nómina en formato Excel.
+router.get(
+    '/export-excel',
+    payrollController.exportPayrollExcel
 );
 
 // --- OTRAS RUTAS ---
@@ -25,9 +31,21 @@ router.post(
     payrollController.createPayroll
 );
 
+// DELETE /api/payrolls/period -> Eliminar todas las nóminas de un periodo (revertir deducciones).
+router.delete(
+    '/period',
+    payrollController.deletePayrollPeriod
+);
+
+// DELETE /api/payrolls/:id -> Eliminar una nómina individual (revertir deducciones).
+router.delete(
+    '/:id',
+    payrollController.deletePayroll
+);
+
 // GET /api/payrolls -> Obtener todos los registros de nómina ya guardados para el historial.
 router.get(
-    '/', 
+    '/',
     payrollController.getPayrollsByTenant
 );
 
