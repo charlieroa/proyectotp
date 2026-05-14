@@ -1,4 +1,6 @@
 const prisma = require('../config/prisma');
+const { getIO } = require('../socket');
+const { sendToUser } = require('../services/pushNotificationService');
 
 // GET /api/fichero/tenant/:tenantId - Cola actual por categoria de servicio
 exports.getQueues = async (req, res) => {
@@ -78,6 +80,8 @@ exports.getNextStylist = async (req, res) => {
   const { tenant_id } = req.user;
   const { categoryId } = req.params;
   const targetTenantId = req.body.tenant_id || tenant_id;
+  // skip_geofence = true lets admins/recepción asignar aunque el estilista no haya fichado por geocerca
+  const skipGeofence = req.body.skip_geofence === true;
 
   try {
     const canView = await canAccessTenant(tenant_id, targetTenantId);
@@ -86,14 +90,17 @@ exports.getNextStylist = async (req, res) => {
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      // Get the first active stylist inside geofence
+      const whereClause = {
+        tenant_id: targetTenantId,
+        category_id: categoryId,
+        is_active: true,
+      };
+      if (!skipGeofence) {
+        whereClause.users = { is_inside_geofence: true };
+      }
+
       const nextStylist = await tx.stylist_queues.findFirst({
-        where: {
-          tenant_id: targetTenantId,
-          category_id: categoryId,
-          is_active: true,
-          users: { is_inside_geofence: true }
-        },
+        where: whereClause,
         include: {
           users: {
             select: { id: true, first_name: true, last_name: true }
@@ -108,11 +115,23 @@ exports.getNextStylist = async (req, res) => {
     });
 
     if (!result) {
-      return res.status(404).json({ message: 'No hay estilistas disponibles dentro de la geocerca para esta cola.' });
+      return res.status(404).json({
+        message: skipGeofence
+          ? 'No hay estilistas activos en esta cola.'
+          : 'No hay estilistas disponibles dentro de la geocerca para esta cola.'
+      });
     }
 
     // Rotate: move this stylist to the end
     await rotateToEnd(targetTenantId, categoryId, result.id);
+
+    // Notify the NEW first-in-line stylist that their turn is ready
+    notifyNextInLine(targetTenantId, categoryId);
+
+    // Emit socket event so all fichero UIs refresh
+    try {
+      getIO().to(`tenant:${targetTenantId}`).emit('fichero:updated', { category_id: categoryId });
+    } catch (e) { /* ignore */ }
 
     return res.status(200).json({
       stylist_id: result.stylist_id,
@@ -194,6 +213,8 @@ exports.resetQueues = async (req, res) => {
       }
     });
 
+    try { getIO().to(`tenant:${tenantId}`).emit('fichero:updated', { reset: true }); } catch (e) { /* ignore */ }
+
     return res.status(200).json({ message: 'Colas reseteadas exitosamente.' });
   } catch (error) {
     console.error('Error resetting queues:', error);
@@ -212,6 +233,8 @@ exports.activateStylist = async (req, res) => {
       data: { is_active: true, updated_at: new Date() }
     });
 
+    try { getIO().to(`tenant:${tenantId}`).emit('fichero:updated', { stylist_id: stylistId, active: true }); } catch (e) { /* ignore */ }
+
     return res.status(200).json({ message: 'Estilista activado en cola.' });
   } catch (error) {
     console.error('Error activating stylist:', error);
@@ -229,6 +252,8 @@ exports.deactivateStylist = async (req, res) => {
       where: { stylist_id: stylistId, tenant_id: tenantId },
       data: { is_active: false, updated_at: new Date() }
     });
+
+    try { getIO().to(`tenant:${tenantId}`).emit('fichero:updated', { stylist_id: stylistId, active: false }); } catch (e) { /* ignore */ }
 
     return res.status(200).json({ message: 'Estilista desactivado en cola.' });
   } catch (error) {
@@ -296,6 +321,34 @@ async function canAccessTenant(userTenantId, targetTenantId) {
   }
 
   return false;
+}
+
+// --- Helper: notify the stylist who is now position 1 in a category queue ---
+async function notifyNextInLine(tenantId, categoryId) {
+  try {
+    const next = await prisma.stylist_queues.findFirst({
+      where: {
+        tenant_id: tenantId,
+        category_id: categoryId,
+        is_active: true,
+        position: 1,
+        users: { is_inside_geofence: true }
+      },
+      include: {
+        service_categories: { select: { name: true } }
+      }
+    });
+
+    if (!next) return;
+
+    const catName = next.service_categories?.name || 'tu categoría';
+    sendToUser(next.stylist_id, '¡Es tu turno!', `Eres el siguiente en ${catName}`, {
+      type: 'fichero:turn_ready',
+      categoryId: categoryId,
+    });
+  } catch (e) {
+    console.log('⚠️ notifyNextInLine error:', e.message);
+  }
 }
 
 exports.canAccessTenant = canAccessTenant;

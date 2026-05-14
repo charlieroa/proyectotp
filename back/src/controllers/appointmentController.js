@@ -2,12 +2,43 @@
 'use strict';
 
 const prisma = require('../config/prisma');
+const { randomUUID } = require('crypto');
 const { getIO } = require('../socket');
 const { formatInTimeZone } = require('date-fns-tz');
+const { notifyStylist } = require('../services/pushNotificationService');
+const { openTicketForAppointmentCheckin } = require('./ticketController');
 
 function emitSocket(tenantId, event, data) {
   try { getIO().to(`tenant:${tenantId}`).emit(event, data); }
   catch (e) { console.log('⚠️ Socket emit error:', e.message); }
+
+  // Fire-and-forget push notification to stylist
+  if (data?.stylist_id && (event === 'appointment:created' || event === 'appointment:updated')) {
+    const pushEvent = event === 'appointment:created' ? 'created'
+      : data?.status === 'cancelled' ? 'cancelled'
+      : data?.status === 'rescheduled' ? 'rescheduled'
+      : 'updated';
+
+    (async () => {
+      try {
+        const rows = await prisma.$queryRawUnsafe(
+          `SELECT a.id, a.start_time, a.stylist_id,
+                  s.name as service_name,
+                  COALESCE(u.first_name || ' ' || u.last_name, 'Cliente') as client_name
+           FROM appointments a
+           LEFT JOIN services s ON a.service_id = s.id
+           LEFT JOIN users u ON a.client_id = u.id
+           WHERE a.id = $1::uuid`,
+          data.id
+        );
+        if (rows.length > 0) {
+          notifyStylist(data.stylist_id, pushEvent, rows[0]);
+        }
+      } catch (e) {
+        console.log('⚠️ Push notification error:', e.message);
+      }
+    })();
+  }
 }
 const {
   TIME_ZONE,
@@ -823,7 +854,7 @@ exports.createAppointment = async (req, res) => {
 };
 
 exports.createAppointmentsBatch = async (req, res) => {
-  const { appointments, client_id: clientIdFromRequest } = req.body;
+  const { appointments, client_id: clientIdFromRequest, is_walk_in } = req.body;
   const { tenant_id, id: clientIdFromToken } = req.user;
 
   const final_client_id = clientIdFromRequest || clientIdFromToken;
@@ -835,6 +866,9 @@ exports.createAppointmentsBatch = async (req, res) => {
   }
 
   try {
+    // Si hay más de 1 cita, generar un batch_id para agruparlas
+    const batchId = appointments.length > 1 ? randomUUID() : null;
+
     const createdAppointments = await prisma.$transaction(async (tx) => {
       const created = [];
 
@@ -860,19 +894,23 @@ exports.createAppointmentsBatch = async (req, res) => {
         const stylistName = `${stylistUser.first_name} ${stylistUser.last_name || ''}`;
         console.log(`[createAppointmentsBatch] Estilista: ${stylistName}, tenant_id del estilista: ${stylistTenantId}, tenant_id del usuario dashboard: ${tenant_id}`);
 
-        // Permitir/denegar pasado según tenant del estilista
-        await validatePastAppointment(stylistTenantId, startTimeDate);
+        // Permitir/denegar pasado según tenant del estilista (walk-in siempre puede)
+        if (!is_walk_in) {
+          await validatePastAppointment(stylistTenantId, startTimeDate);
+        }
 
-        const offersService = await checkStylistOffersService(stylist_id, service_id);
-        if (!offersService) {
-          throw new Error('El estilista no está cualificado para uno de los servicios.');
+        if (!is_walk_in) {
+          const offersService = await checkStylistOffersService(stylist_id, service_id);
+          if (!offersService) {
+            throw new Error('El estilista no está cualificado para uno de los servicios.');
+          }
         }
 
         const duration = await getServiceDurationMinutes(service_id, 60);
 
         // Usar el tenant_id del estilista, no el del usuario del dashboard
-        console.log(`[createAppointmentsBatch] Creando cita con tenant_id: ${stylistTenantId} (del estilista)`);
-        const appointment = await createAppointmentRecord(stylistTenantId, final_client_id, stylist_id, service_id, startTimeDate, duration);
+        console.log(`[createAppointmentsBatch] Creando cita con tenant_id: ${stylistTenantId} (del estilista)${is_walk_in ? ' [WALK-IN]' : ''}`);
+        const appointment = await createAppointmentRecord(stylistTenantId, final_client_id, stylist_id, service_id, startTimeDate, duration, { skipOverlapCheck: !!is_walk_in, batchId });
         console.log(`[createAppointmentsBatch] Cita creada exitosamente: ${appointment.id}, fecha: ${startTimeDate.toISOString()}`);
         created.push(appointment);
       }
@@ -979,7 +1017,7 @@ exports.getAppointmentsByTenant = async (req, res) => {
 
   try {
     const rows = await prisma.$queryRawUnsafe(
-      `SELECT a.id, a.start_time, a.end_time, a.status, a.service_id, a.stylist_id, a.client_id,
+      `SELECT a.id, a.start_time, a.end_time, a.status, a.service_id, a.stylist_id, a.client_id, a.batch_id,
              s.name as service_name, s.price,
              client.first_name as client_first_name, client.last_name as client_last_name,
              stylist.first_name as stylist_first_name, stylist.last_name as stylist_last_name
@@ -1169,7 +1207,23 @@ exports.handleCheckIn = async (req, res) => {
         message: 'Cita no encontrada o en un estado no válido para hacer check-in.'
       });
     }
-    return res.status(200).json(rows[0]);
+    const appt = rows[0];
+
+    // Al confirmar (check-in) por parte del estilista/peluquería, si el tenant
+    // tiene ticket_virtual activo, convertimos la cita en ticket virtual con la
+    // línea del servicio ya cargada. Idempotente (no duplica si ya existe).
+    let ticket_id = null;
+    try {
+      ticket_id = await openTicketForAppointmentCheckin({
+        tenant_id: appt.tenant_id,
+        appointment_id: appt.id,
+        user_id: req.user?.id,
+      });
+    } catch (err) {
+      console.error('[handleCheckIn] auto-ticket falló (no bloqueante):', err.message);
+    }
+
+    return res.status(200).json({ ...appt, ticket_id });
   } catch (error) {
     console.error('Error al hacer check-in:', error);
     return res.status(500).json({ error: 'Error interno del servidor' });
@@ -1328,11 +1382,13 @@ exports.getTenantSlots = async (req, res) => {
   try {
     const tenant = await prisma.tenants.findUnique({
       where: { id: tenant_id },
-      select: { working_hours: true }
+      select: { working_hours: true, allow_past_appointments: true }
     });
     if (!tenant) {
       return res.status(404).json({ error: 'Tenant no encontrado.' });
     }
+
+    const allowPast = tenant.allow_past_appointments ?? false;
 
     const tenantWorking = tenant.working_hours || {};
     const tenantRanges = getDayRangesFromWorkingHours(tenantWorking, date);
@@ -1351,8 +1407,8 @@ exports.getTenantSlots = async (req, res) => {
 
     const slots = buildSlotsFromRanges(date, tenantRanges, step);
 
-    // FILTRAR HORARIOS PASADOS
-    const filteredSlots = filterPastSlots(slots, date);
+    // FILTRAR HORARIOS PASADOS (solo si NO permite citas pasadas)
+    const filteredSlots = allowPast ? slots : filterPastSlots(slots, date);
 
     if (filteredSlots.length === 0) {
       const isPastDay = slots.length > 0 && filteredSlots.length === 0;
@@ -2376,6 +2432,7 @@ exports.aiOrchestrator = async (req, res) => {
 exports.getDigiturnoQueue = async (req, res) => {
   try {
     const { tenantId } = req.params;
+    const includeAbsent = req.query.include_absent === 'true';
 
     if (!tenantId || !UUID_RE.test(tenantId)) {
       return res.status(400).json({ error: 'tenantId inválido (UUID).' });
@@ -2394,26 +2451,34 @@ exports.getDigiturnoQueue = async (req, res) => {
 
     // Para cada servicio, obtener la cola ordenada
     for (const service of servicesList) {
+      const geofenceClause = includeAbsent
+        ? ''
+        : 'AND COALESCE(u.is_inside_geofence, false) = true';
+
       const stylistRows = await prisma.$queryRawUnsafe(
         `SELECT
           u.id as stylist_id,
           u.first_name,
           u.last_name,
+          COALESCE(u.is_inside_geofence, false) as is_inside_geofence,
           ss.last_completed_at,
           ss.total_completed,
-          ROW_NUMBER() OVER (
+          CAST(ROW_NUMBER() OVER (
             ORDER BY
+              COALESCE(u.is_inside_geofence, false) DESC,
               ss.last_completed_at NULLS FIRST,
               ss.total_completed ASC,
               u.created_at ASC
-          ) as queue_position
+          ) AS integer) as queue_position
         FROM users u
         INNER JOIN stylist_services ss ON u.id = ss.user_id
         WHERE u.tenant_id = $1::uuid
           AND u.role_id = 3
           AND COALESCE(NULLIF(u.status,''),'active') = 'active'
+          ${geofenceClause}
           AND ss.service_id = $2::uuid
         ORDER BY
+          COALESCE(u.is_inside_geofence, false) DESC,
           ss.last_completed_at NULLS FIRST,
           ss.total_completed ASC,
           u.created_at ASC`,
@@ -2427,6 +2492,7 @@ exports.getDigiturnoQueue = async (req, res) => {
           service_name: service.name,
           stylist_id: row.stylist_id,
           stylist_name: `${row.first_name} ${row.last_name || ''}`.trim(),
+          is_inside_geofence: !!row.is_inside_geofence,
           order: row.queue_position,
           last_completed_at: row.last_completed_at,
           total_completed: row.total_completed || 0

@@ -442,7 +442,7 @@ async function getAvailableSlotsForStylist(tenantId, stylistId, serviceId, date,
  * IMPORTANTE: La actualizacion de la cola (last_completed_at) se hace en el CHECKOUT,
  * NO en la creacion de la cita.
  */
-async function createAppointmentRecord(tenantId, clientId, stylistId, serviceId, startTime, duration) {
+async function createAppointmentRecord(tenantId, clientId, stylistId, serviceId, startTime, duration, { skipOverlapCheck = false, batchId = null } = {}) {
   const endTime = new Date(startTime.getTime() + duration * 60000);
 
   console.log('\n' + '📝'.repeat(40));
@@ -453,32 +453,36 @@ async function createAppointmentRecord(tenantId, clientId, stylistId, serviceId,
   console.log('   Servicio:', serviceId.substring(0, 8) + '...');
   console.log('   Inicio:', startTime.toISOString());
   console.log('   Fin:', endTime.toISOString());
+  if (skipOverlapCheck) console.log('   ⚡ WALK-IN: Saltando verificación de conflictos');
 
-  // 1. Verificar conflictos
-  const overlap = await prisma.$queryRawUnsafe(
-    `SELECT id FROM appointments
-      WHERE stylist_id=$1::uuid AND status=ANY($4) AND (start_time, end_time) OVERLAPS ($2,$3)`,
-    stylistId, startTime, endTime, BLOCKING_STATUSES
-  );
+  // 1. Verificar conflictos (skip para walk-in / agenda rápida)
+  if (!skipOverlapCheck) {
+    const overlap = await prisma.$queryRawUnsafe(
+      `SELECT id FROM appointments
+        WHERE stylist_id=$1::uuid AND status=ANY($4) AND (start_time, end_time) OVERLAPS ($2,$3)`,
+      stylistId, startTime, endTime, BLOCKING_STATUSES
+    );
 
-  if (overlap.length > 0) {
-    console.log('❌ [DIGITURNO] Conflicto de horario detectado');
-    console.log('📝'.repeat(40) + '\n');
-    throw new Error('Conflicto de horario');
+    if (overlap.length > 0) {
+      console.log('❌ [DIGITURNO] Conflicto de horario detectado');
+      console.log('📝'.repeat(40) + '\n');
+      throw new Error('Conflicto de horario');
+    }
   }
 
   // 2. Crear la cita
-  const appointment = await prisma.appointments.create({
-    data: {
-      tenant_id: tenantId,
-      client_id: clientId,
-      stylist_id: stylistId,
-      service_id: serviceId,
-      start_time: startTime,
-      end_time: endTime,
-      status: 'scheduled',
-    },
-  });
+  const data = {
+    tenant_id: tenantId,
+    client_id: clientId,
+    stylist_id: stylistId,
+    service_id: serviceId,
+    start_time: startTime,
+    end_time: endTime,
+    status: 'scheduled',
+  };
+  if (batchId) data.batch_id = batchId;
+
+  const appointment = await prisma.appointments.create({ data });
 
   console.log('✅ [DIGITURNO] Cita creada exitosamente:', appointment.id);
 
