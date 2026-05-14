@@ -40,6 +40,7 @@ exports.searchServices = async (req, res) => {
         description: true,
         category_id: true,
         commission_percent: true,
+        max_concurrent_stylists: true,
       },
       orderBy: { name: 'asc' },
       take: 10,
@@ -62,7 +63,7 @@ exports.searchServices = async (req, res) => {
 // Crear un nuevo Servicio
 exports.createService = async (req, res) => {
   const { tenant_id } = req.user;
-  const { name, description, price, duration_minutes, category_id, commission_percent } = req.body;
+  const { name, description, price, duration_minutes, category_id, commission_percent, max_concurrent_stylists } = req.body;
 
   if (!name || price == null || duration_minutes == null) {
     return res.status(400).json({ error: 'Campos obligatorios: name, price, duration_minutes.' });
@@ -85,6 +86,7 @@ exports.createService = async (req, res) => {
         duration_minutes,
         category_id: category_id ?? null,
         commission_percent: pct,
+        max_concurrent_stylists: max_concurrent_stylists ? Math.max(1, parseInt(max_concurrent_stylists)) : 1,
       },
     });
     res.status(201).json(service);
@@ -96,7 +98,8 @@ exports.createService = async (req, res) => {
 
 // Obtener todos los servicios del tenant (con filtro por categoría)
 exports.getServicesByTenant = async (req, res) => {
-  const { tenant_id } = req.user;
+  // Use URL param tenantId if provided (cross-branch), fallback to JWT tenant_id
+  const tenant_id = req.params.tenantId || req.user.tenant_id;
   const { category_id } = req.query;
 
   try {
@@ -137,7 +140,7 @@ exports.getServiceById = async (req, res) => {
 exports.updateService = async (req, res) => {
   const { id } = req.params;
   const { tenant_id } = req.user;
-  const { name, description, price, duration_minutes, category_id, commission_percent } = req.body;
+  const { name, description, price, duration_minutes, category_id, commission_percent, max_concurrent_stylists } = req.body;
 
   let pct = undefined;
   try {
@@ -163,6 +166,7 @@ exports.updateService = async (req, res) => {
         duration_minutes: duration_minutes ?? current.duration_minutes,
         category_id: category_id ?? current.category_id,
         commission_percent: pct === undefined ? current.commission_percent : pct,
+        max_concurrent_stylists: max_concurrent_stylists !== undefined ? Math.max(1, parseInt(max_concurrent_stylists)) : current.max_concurrent_stylists,
         updated_at: new Date(),
       },
     });

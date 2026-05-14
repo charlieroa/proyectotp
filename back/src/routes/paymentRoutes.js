@@ -15,6 +15,9 @@ router.use(authMiddleware);
 // POST /api/payments
 router.post('/', paymentController.createInvoiceAndPayments);
 
+// POST /api/payments/send-invoice — Enviar factura electrónica por email
+router.post('/send-invoice', paymentController.sendElectronicInvoice);
+
 // RUTA LEGACY para obtener pagos antiguos. La mantenemos para no romper nada,
 // pero en el futuro crearemos una nueva ruta para obtener facturas.
 // GET /api/payments/tenant/:tenantId

@@ -1,6 +1,9 @@
 import React from 'react';
 import { Toaster } from 'sileo';
 
+// i18n initialization
+import './i18n';
+
 //import Scss
 import './assets/scss/themes.scss';
 

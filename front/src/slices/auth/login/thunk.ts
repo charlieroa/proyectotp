@@ -89,11 +89,11 @@ export const loginUser =
         if (roleId === 5) {
           navigate("/super-admin"); // Super Admin va a su panel
         } else if (roleId === 2 || roleId === 6) {
-          navigate("/dashboard"); // Cajeros y recepcionistas siempre al dashboard
+          navigate("/dashboard-v2"); // Cajeros y recepcionistas siempre al dashboard
         } else if (setup_complete === false) {
           navigate("/assistant"); // Si la configuración no está completa, va al Asistente
         } else {
-          navigate("/dashboard"); // Si está completa, va al Dashboard
+          navigate("/dashboard-v2"); // Si está completa, va al Dashboard
         }
       }
 
@@ -135,7 +135,7 @@ export const socialLogin =
         const response = await fireBaseBackend.socialLoginUser(type);
         sessionStorage.setItem("authUser", JSON.stringify(response));
         dispatch(loginSuccess(response));
-        navigate ? navigate("/dashboard") : (window.location.href = "/dashboard");
+        navigate ? navigate("/dashboard-v2") : (window.location.href = "/dashboard-v2");
       } else {
         throw new Error("Social login no está configurado en este entorno.");
       }

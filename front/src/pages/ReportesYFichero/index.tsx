@@ -4,7 +4,7 @@ import {
 } from 'reactstrap';
 import { useDispatch, useSelector } from 'react-redux';
 import { getCalendarData, fetchAvailableStylists } from '../../slices/thunks';
-import axios from 'axios';
+import { api } from '../../services/api';
 
 // =================================================================================
 // 1. TARJETAS VISUALES
@@ -83,15 +83,20 @@ const BusyStylistCard = ({ stylist, currentServiceId }: { stylist: any, currentS
 };
 
 const NextAvailableCard = ({ stylist, index, isNext }: { stylist: any, index: number, isNext: boolean }) => {
+    const isInsideGeofence = stylist.is_inside_geofence === true;
+    const queueLabel = stylist.queueOrder && stylist.queueOrder < 900 ? stylist.queueOrder : index + 1;
+
     return (
         <div
             className={`d-flex align-items-center p-2 mb-2 rounded position-relative shadow-sm ${isNext
                 ? 'bg-success bg-opacity-10 border border-success'
+                : !isInsideGeofence
+                    ? 'bg-light border border-secondary-subtle'
                 : 'bg-white border border-success-subtle'
                 }`}
         >
             <div
-                className={`position-absolute start-0 top-0 bottom-0 ${isNext ? 'bg-warning' : 'bg-success'}`}
+                className={`position-absolute start-0 top-0 bottom-0 ${isNext ? 'bg-warning' : isInsideGeofence ? 'bg-success' : 'bg-secondary'}`}
                 style={{ width: isNext ? '4px' : '3px' }}
             ></div>
 
@@ -100,10 +105,12 @@ const NextAvailableCard = ({ stylist, index, isNext }: { stylist: any, index: nu
                     <span
                         className={`avatar-title rounded-circle fw-bold fs-12 border ${isNext
                             ? 'bg-warning text-dark border-warning'
+                            : !isInsideGeofence
+                                ? 'bg-light text-muted border-secondary'
                             : 'bg-success-subtle text-success border-success'
                             }`}
                     >
-                        {index + 1}
+                        {queueLabel}
                     </span>
                 </div>
             </div>
@@ -121,7 +128,7 @@ const NextAvailableCard = ({ stylist, index, isNext }: { stylist: any, index: nu
                     )}
                 </div>
                 <small className="text-muted fs-11">
-                    <i className={`ri-history-line me-1 ${isNext ? 'text-warning' : 'text-success'}`}></i>
+                    <i className={`ri-history-line me-1 ${isNext ? 'text-warning' : isInsideGeofence ? 'text-success' : 'text-muted'}`}></i>
                     {stylist.timeSinceLastService === "1er turno"
                         ? "Sin atender hoy"
                         : `Esperando: ${stylist.timeSinceLastService}`
@@ -138,6 +145,8 @@ const NextAvailableCard = ({ stylist, index, isNext }: { stylist: any, index: nu
                             </span>
                         </div>
                     </div>
+                ) : !isInsideGeofence ? (
+                    <Badge color="secondary" pill className="fs-10 px-2">Fuera</Badge>
                 ) : (
                     <Badge color="success" pill className="fs-10 px-2">Listo</Badge>
                 )}
@@ -158,7 +167,7 @@ const ServiceLane = ({ serviceId, serviceName, onRemove, events, stylists, servi
         return () => clearInterval(timer);
     }, []);
 
-    const { busyStylists, availableStylists } = useMemo(() => {
+    const { busyStylists, availableStylists, nextEligibleId } = useMemo(() => {
         const now = currentTime;
 
         const serviceStylistsMap = new Map<string, any>();
@@ -171,6 +180,7 @@ const ServiceLane = ({ serviceId, serviceName, onRemove, events, stylists, servi
                 name: item.stylist_name || 'Estilista',
                 last_completed_at: item.last_completed_at,
                 total_completed: item.total_completed || 0,
+                is_inside_geofence: item.is_inside_geofence === true,
                 order: item.order || 999,
                 source: 'digiturno'
             });
@@ -185,6 +195,7 @@ const ServiceLane = ({ serviceId, serviceName, onRemove, events, stylists, servi
                     name: name,
                     last_completed_at: item.last_completed_at,
                     total_completed: item.total_completed || 0,
+                    is_inside_geofence: item.is_inside_geofence === true,
                     order: 999,
                     source: 'apiQueue'
                 });
@@ -203,6 +214,7 @@ const ServiceLane = ({ serviceId, serviceName, onRemove, events, stylists, servi
                     name: name,
                     last_completed_at: null,
                     total_completed: 0,
+                    is_inside_geofence: false,
                     order: 999,
                     source: 'event-fallback'
                 });
@@ -297,6 +309,11 @@ const ServiceLane = ({ serviceId, serviceName, onRemove, events, stylists, servi
         const available = Array.from(serviceStylistsMap.values())
             .filter((s: any) => !busyIds.has(s.id))
             .sort((a: any, b: any) => {
+                // Primero: dentro de geocerca arriba, fuera abajo
+                const aGeo = a.is_inside_geofence === true ? 1 : 0;
+                const bGeo = b.is_inside_geofence === true ? 1 : 0;
+                if (aGeo !== bGeo) return bGeo - aGeo;
+
                 if (!a.last_completed_at && b.last_completed_at) return -1;
                 if (a.last_completed_at && !b.last_completed_at) return 1;
 
@@ -323,14 +340,19 @@ const ServiceLane = ({ serviceId, serviceName, onRemove, events, stylists, servi
                 return {
                     id: s.id,
                     name: s.name,
+                    queueOrder: s.order || 999,
+                    is_inside_geofence: s.is_inside_geofence !== false,
                     timeSinceLastService: timeSince,
                     total_completed: s.total_completed
                 };
             });
 
+        const nextEligibleId = available.find((s: any) => s.is_inside_geofence === true)?.id || null;
+
         return {
             busyStylists: busyArray,
-            availableStylists: available
+            availableStylists: available,
+            nextEligibleId
         };
     }, [digiturnoQueue, apiQueue, events, services, currentTime, serviceId]);
 
@@ -364,7 +386,7 @@ const ServiceLane = ({ serviceId, serviceName, onRemove, events, stylists, servi
                                     key={s.id}
                                     stylist={s}
                                     index={idx}
-                                    isNext={idx === 0}
+                                    isNext={s.id === nextEligibleId}
                                 />
                             ))
                         ) : (
@@ -456,10 +478,31 @@ const SmartQueueDashboard = () => {
     const [loadingQueue, setLoadingQueue] = useState(false);
     const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
 
+    const serviceOptions = useMemo(() => {
+        const catalogServices = Array.isArray(services) ? services : [];
+        if (catalogServices.length > 0) {
+            return catalogServices;
+        }
+
+        const seen = new Set<string>();
+        return (digiturnoQueue || []).reduce((acc: any[], item: any) => {
+            const id = String(item.service_id || "");
+            if (!id || seen.has(id)) return acc;
+            seen.add(id);
+            acc.push({
+                id,
+                name: item.service_name || "Servicio"
+            });
+            return acc;
+        }, []);
+    }, [services, digiturnoQueue]);
+
     const fetchDigiturnoQueue = useCallback(async () => {
         if (!tenantId) return;
         try {
-            const response = await axios.get(`/api/appointments/digiturno/queue/${tenantId}`);
+            const response = await api.get(`/appointments/digiturno/queue/${tenantId}`, {
+                params: { include_absent: true }
+            });
             setDigiturnoQueue(response.data.queue || []);
         } catch (err) {
             console.error('❌ [Digiturno Queue] Error:', err);
@@ -561,7 +604,7 @@ const SmartQueueDashboard = () => {
                                         onChange={(e) => handleAdd(e.target.value)}
                                     >
                                         <option value="">+ Añadir Servicio...</option>
-                                        {(services || []).map((s: any) => (
+                                        {serviceOptions.map((s: any) => (
                                             <option
                                                 key={s.id}
                                                 value={s.id}
@@ -610,9 +653,9 @@ const SmartQueueDashboard = () => {
                                 </div>
                                 <h5>Selecciona un servicio</h5>
                                 <p className="text-muted mb-3">Elige uno o más servicios para ver sus colas</p>
-                                {services && services.length > 0 && (
+                                {serviceOptions.length > 0 && (
                                     <div>
-                                        {services.slice(0, 5).map((s: any) => (
+                                        {serviceOptions.slice(0, 5).map((s: any) => (
                                             <Badge
                                                 key={s.id}
                                                 color="soft-primary"
@@ -623,8 +666,8 @@ const SmartQueueDashboard = () => {
                                                 {s.name}
                                             </Badge>
                                         ))}
-                                        {services.length > 5 && (
-                                            <small className="text-muted d-block mt-2">+{services.length - 5} más</small>
+                                        {serviceOptions.length > 5 && (
+                                            <small className="text-muted d-block mt-2">+{serviceOptions.length - 5} más</small>
                                         )}
                                     </div>
                                 )}
@@ -632,7 +675,7 @@ const SmartQueueDashboard = () => {
                         </Col>
                     ) : (
                         selectedServiceIds.map(sid => {
-                            const sName = services?.find((s: any) => String(s.id) === String(sid))?.name || "Servicio";
+                            const sName = serviceOptions.find((s: any) => String(s.id) === String(sid))?.name || "Servicio";
                             return (
                                 <Col key={sid} xs={12} md={6} lg={4} xl={3} className="h-100 px-2" style={{ minWidth: '320px' }}>
                                     <ServiceLane

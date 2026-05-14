@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Container, Nav, NavItem, NavLink, TabContent, TabPane } from 'reactstrap';
 import { Navigate, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import classnames from 'classnames';
 import Swal from 'sweetalert2';
 import { useSelector } from 'react-redux';
@@ -11,6 +12,7 @@ import Calendar from '../Calendar';
 import Geolocalizacion from '../Geolocalizacion';
 import ReportesYFichero from '../ReportesYFichero';
 import SuperCalendar from './SuperCalendar';
+import MovimientosCaja from './MovimientosCaja';
 import { getRoleFromToken, getIsPrimaryBranch } from '../../services/auth';
 import { api } from '../../services/api';
 import { selectTenantPlan, isPlanAtLeast } from '../../slices/Settings/settingsSlice';
@@ -19,15 +21,12 @@ import { selectTenantPlan, isPlanAtLeast } from '../../slices/Settings/settingsS
 interface IProps { }
 
 const DashboardPrincipal: React.FC<IProps> = () => {
-    document.title = "Dashboard | Sistema de Peluquerías";
+    const { t } = useTranslation();
+    document.title = t("menu_dashboard") + " | " + t("page_title");
     const navigate = useNavigate();
 
     // Estado para controlar qué pestaña está activa
-    const [activeTab, setActiveTab] = useState<string>(() => {
-        const r = getRoleFromToken();
-        if (r === 2 || r === 6) return '2';
-        return '1';
-    });
+    const [activeTab, setActiveTab] = useState<string>('2'); // Calendar por defecto. Tab 1 (asistente IA) removido — ahora en el header.
     const [hasBranches, setHasBranches] = useState<boolean>(false);
     const tenantPlan = useSelector(selectTenantPlan);
     const canAccessAdvanced = isPlanAtLeast(tenantPlan, 'pro');
@@ -40,12 +39,12 @@ const DashboardPrincipal: React.FC<IProps> = () => {
 
     const handleLockedTab = () => {
         Swal.fire({
-            title: 'Disponible en plan Pro',
-            text: 'Esta pestaña requiere el plan Pro ($29.900/mes) o superior. Ve a Configuración → Planes para actualizar.',
+            title: t("available_in_plan", { plan: "Pro" }),
+            text: t("requires_plan", { plan: "Pro" }),
             icon: 'info',
-            confirmButtonText: 'Ver planes',
+            confirmButtonText: t("view_plans"),
             showCancelButton: true,
-            cancelButtonText: 'Cerrar',
+            cancelButtonText: t("close"),
             confirmButtonColor: '#438eff'
         }).then((result) => {
             if (result.isConfirmed) {
@@ -84,17 +83,7 @@ const DashboardPrincipal: React.FC<IProps> = () => {
                 <Container fluid>
                     {/* El sistema de Pestañas (Tabs) */}
                     <Nav tabs className="nav-tabs-custom nav-success mb-3">
-                        {!isRestricted && (
-                            <NavItem>
-                                <NavLink
-                                    style={{ cursor: "pointer" }}
-                                    className={classnames({ active: activeTab === '1' })}
-                                    onClick={() => { toggleTab('1'); }}
-                                >
-                                    <i className="ri-sparkling-line me-1"></i> Asistente IA
-                                </NavLink>
-                            </NavItem>
-                        )}
+                        {/* Asistente IA movido al header → botón "Hablar con IA" abre offcanvas */}
                         {hasBranches && !isRestricted && isPrimary && (
                             <NavItem>
                                 <NavLink
@@ -102,7 +91,7 @@ const DashboardPrincipal: React.FC<IProps> = () => {
                                     className={classnames({ active: activeTab === '5' })}
                                     onClick={() => { toggleTab('5'); }}
                                 >
-                                    <i className="ri-calendar-todo-line me-1"></i> Supercalendario
+                                    <i className="ri-calendar-todo-line me-1"></i> {t("tab_super_calendar")}
                                 </NavLink>
                             </NavItem>
                         )}
@@ -112,7 +101,16 @@ const DashboardPrincipal: React.FC<IProps> = () => {
                                 className={classnames({ active: activeTab === '2' })}
                                 onClick={() => { toggleTab('2'); }}
                             >
-                                <i className="ri-calendar-2-line me-1"></i> {isRecepcionista ? 'Calendario' : 'Calendario y Caja'}
+                                <i className="ri-calendar-2-line me-1"></i> {t("tab_calendar_cash")}
+                            </NavLink>
+                        </NavItem>
+                        <NavItem>
+                            <NavLink
+                                style={{ cursor: "pointer" }}
+                                className={classnames({ active: activeTab === '6' })}
+                                onClick={() => { toggleTab('6'); }}
+                            >
+                                <i className="ri-money-dollar-box-line me-1"></i> {t("tab_cash_movements")}
                             </NavLink>
                         </NavItem>
                         {!isRestricted && (
@@ -123,7 +121,7 @@ const DashboardPrincipal: React.FC<IProps> = () => {
                                     onClick={() => { canAccessAdvanced ? toggleTab('3') : handleLockedTab(); }}
                                 >
                                     {!canAccessAdvanced && <i className="ri-lock-line text-muted me-1"></i>}
-                                    <i className="ri-map-pin-user-line me-1"></i> Geolocalización
+                                    <i className="ri-map-pin-user-line me-1"></i> {t("tab_geolocation")}
                                     {!canAccessAdvanced && <span className="badge bg-warning-subtle text-warning rounded-pill ms-1">Pro</span>}
                                 </NavLink>
                             </NavItem>
@@ -136,7 +134,7 @@ const DashboardPrincipal: React.FC<IProps> = () => {
                                     onClick={() => { canAccessAdvanced ? toggleTab('4') : handleLockedTab(); }}
                                 >
                                     {!canAccessAdvanced && <i className="ri-lock-line text-muted me-1"></i>}
-                                    <i className="ri-file-list-3-line me-1"></i> Reportes y Fichero
+                                    <i className="ri-file-list-3-line me-1"></i> {t("tab_reports_file")}
                                     {!canAccessAdvanced && <span className="badge bg-warning-subtle text-warning rounded-pill ms-1">Pro</span>}
                                 </NavLink>
                             </NavItem>
@@ -145,11 +143,7 @@ const DashboardPrincipal: React.FC<IProps> = () => {
 
                     {/* El contenido de las pestañas */}
                     <TabContent activeTab={activeTab} className="text-muted">
-                        {!isRestricted && (
-                            <TabPane tabId="1">
-                                <AIAssistant />
-                            </TabPane>
-                        )}
+                        {/* TabPane "1" del asistente IA removido — ahora vive en el header */}
                         {hasBranches && !isRestricted && isPrimary && (
                             <TabPane tabId="5">
                                 <SuperCalendar />
@@ -157,6 +151,9 @@ const DashboardPrincipal: React.FC<IProps> = () => {
                         )}
                         <TabPane tabId="2">
                             <Calendar />
+                        </TabPane>
+                        <TabPane tabId="6">
+                            <MovimientosCaja />
                         </TabPane>
                         {canAccessAdvanced && !isRestricted && (
                             <TabPane tabId="3">

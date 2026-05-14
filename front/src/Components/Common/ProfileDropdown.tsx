@@ -1,23 +1,21 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Dropdown, DropdownItem, DropdownMenu, DropdownToggle, Spinner } from 'reactstrap';
+import { useTranslation } from 'react-i18next';
 
 // Importamos nuestros helpers de autenticación
-import { getDecodedToken, logout } from '../../services/auth';
+import { getDecodedToken, logout, getRoleFromToken } from '../../services/auth';
 import api, { getUploadsBaseUrl } from '../../services/api';
+import { useCurrency } from '../../contexts/CurrencyContext';
 
 // Imagen de fallback
 import avatar1 from "../../assets/images/users/avatar-1.jpg";
 
-const roleMap: { [key: number]: string } = {
-    1: "Administrador",
-    2: "Cajero",
-    3: "Estilista",
-    5: "Super Admin"
-};
-
-const ProfileDropdown = () => {
+const ProfileDropdown = ({ onChangeLayoutMode, layoutModeType, startTour }: any) => {
     const navigate = useNavigate();
+    const { t } = useTranslation();
+    const { formatCurrency } = useCurrency();
+    const userRoleId = getRoleFromToken();
 
     const [user, setUser] = useState<any | null>(null);
     const [tenantLogo, setTenantLogo] = useState<string>(avatar1);
@@ -25,7 +23,13 @@ const ProfileDropdown = () => {
     const [loading, setLoading] = useState<boolean>(true);
     const [isProfileDropdown, setIsProfileDropdown] = useState<boolean>(false);
 
-    // --- MODIFICADO: Función de carga de datos más robusta ---
+    const roleMap: { [key: number]: string } = {
+        1: t("role_admin"),
+        2: t("role_cashier"),
+        3: t("role_stylist"),
+        5: t("role_super_admin")
+    };
+
     const fetchProfileData = async () => {
         setLoading(true);
         const decodedToken = getDecodedToken();
@@ -34,11 +38,9 @@ const ProfileDropdown = () => {
 
         if (userId) {
             try {
-                // Fetch user data always
                 const userRes = await api.get(`/users/${userId}`);
                 setUser(userRes.data);
 
-                // Tenant-specific data only if tenant exists
                 if (tenantId) {
                     const [tenantRes, cashRes] = await Promise.all([
                         api.get(`/tenants/${tenantId}`),
@@ -54,42 +56,30 @@ const ProfileDropdown = () => {
                     setCashSession(cashRes.data);
                 }
             } catch (error) {
-                console.error("Error al cargar datos para el perfil:", error);
+                console.error("Error loading profile data:", error);
             }
         }
         setLoading(false);
     };
-    
-    // --- MODIFICADO: useEffect ahora también escucha eventos ---
+
     useEffect(() => {
-        // Carga los datos la primera vez que el componente aparece
         fetchProfileData();
 
-        // Escucha el "anuncio" que envían los modales de caja
-        const handleCashSessionChange = () => {
-            console.log("Evento 'cashSessionChanged' detectado. Recargando datos...");
-            fetchProfileData();
-        };
-
-        // Escucha cambios de perfil/logo
-        const handleProfileUpdated = () => {
-            fetchProfileData();
-        };
+        const handleCashSessionChange = () => { fetchProfileData(); };
+        const handleProfileUpdated = () => { fetchProfileData(); };
 
         window.addEventListener('cashSessionChanged', handleCashSessionChange);
         window.addEventListener('profileUpdated', handleProfileUpdated);
 
-        // Limpia el listener cuando el componente se desmonta
         return () => {
             window.removeEventListener('cashSessionChanged', handleCashSessionChange);
             window.removeEventListener('profileUpdated', handleProfileUpdated);
         };
     }, []);
 
-    // --- Lógica de visualización (sin cambios) ---
-    const userName = useMemo(() => user?.first_name || "Usuario", [user]);
+    const userName = useMemo(() => user?.first_name || t("user"), [user, t]);
     const userRole = useMemo(() => user?.role_id, [user]);
-    const roleName = useMemo(() => userRole ? roleMap[userRole] || "Usuario" : "Usuario", [userRole]);
+    const roleName = useMemo(() => userRole ? roleMap[userRole] || t("user") : t("user"), [userRole, t]);
     const sessionBalance = useMemo(() => {
         if (!cashSession || !cashSession.summary?.incomes_by_payment_method) {
             return 0;
@@ -99,6 +89,8 @@ const ProfileDropdown = () => {
 
     const toggleProfileDropdown = () => { setIsProfileDropdown(!isProfileDropdown); };
     const handleLogout = () => { logout(); navigate("/login"); };
+
+    const isDark = layoutModeType === "dark";
 
     return (
         <React.Fragment>
@@ -113,30 +105,47 @@ const ProfileDropdown = () => {
                     </span>
                 </DropdownToggle>
                 <DropdownMenu className="dropdown-menu-end">
-                    <h6 className="dropdown-header">¡Hola, {userName}!</h6>
+                    <h6 className="dropdown-header">{t("hello")}, {userName}!</h6>
                     <DropdownItem href="/Settings">
                         <i className="mdi mdi-account-circle text-muted fs-16 align-middle me-1"></i>
-                        <span className="align-middle">Mi Perfil</span>
+                        <span className="align-middle">{t("my_profile")}</span>
                     </DropdownItem>
                     <DropdownItem href="/Settings">
                         <i className="mdi mdi-cog-outline text-muted fs-16 align-middle me-1"></i>
-                        <span className="align-middle">Configuración</span>
+                        <span className="align-middle">{t("settings")}</span>
                     </DropdownItem>
+
+                    {/* Dark/Light Mode */}
+                    {onChangeLayoutMode && (
+                        <DropdownItem onClick={() => onChangeLayoutMode(isDark ? "light" : "dark")}>
+                            <i className={`mdi ${isDark ? 'mdi-weather-sunny' : 'mdi-weather-night'} text-muted fs-16 align-middle me-1`}></i>
+                            <span className="align-middle">{isDark ? t("light_mode") : t("dark_mode")}</span>
+                        </DropdownItem>
+                    )}
+
+                    {/* Tour — admin only */}
+                    {userRoleId === 1 && startTour && (
+                        <DropdownItem onClick={startTour}>
+                            <i className="mdi mdi-help-circle-outline text-muted fs-16 align-middle me-1"></i>
+                            <span className="align-middle">{t("show_tour")}</span>
+                        </DropdownItem>
+                    )}
+
                     <div className="dropdown-divider"></div>
                     <DropdownItem href="#">
                         <i className="mdi mdi-wallet text-muted fs-16 align-middle me-1"></i>
                         <span className="align-middle">
-                            Balance: <b>
+                            {t("balance")}: <b>
                                 {loading ? <Spinner size="sm" /> :
-                                 cashSession ? new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP' }).format(sessionBalance)
-                                             : "Caja Cerrada"
+                                 cashSession ? formatCurrency(sessionBalance)
+                                             : t("cash_closed")
                                 }
                             </b>
                         </span>
                     </DropdownItem>
                     <DropdownItem onClick={handleLogout}>
                         <i className="mdi mdi-logout text-muted fs-16 align-middle me-1"></i>
-                        <span className="align-middle" data-key="t-logout">Cerrar Sesión</span>
+                        <span className="align-middle">{t("logout")}</span>
                     </DropdownItem>
                 </DropdownMenu>
             </Dropdown>

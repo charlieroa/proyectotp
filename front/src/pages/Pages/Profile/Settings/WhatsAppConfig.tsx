@@ -4,6 +4,7 @@ import {
     Nav, NavItem, NavLink, TabContent, TabPane
 } from 'reactstrap';
 import classnames from 'classnames';
+import { useTranslation } from 'react-i18next';
 import { getToken } from '../../../../services/auth';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000/api';
@@ -17,7 +18,7 @@ const authHeaders = () => {
 const BACKEND_BASE = (process.env.REACT_APP_API_URL || 'http://localhost:3000/api').replace(/\/api$/, '');
 const GREETING_MAX = 500;
 
-const GREETING_PLACEHOLDER = 'Ej: "Hola! Bienvenido/a a [tu negocio]. Soy tu asistente virtual, puedo ayudarte a agendar citas, ver servicios y mas. En que te puedo ayudar?"';
+// GREETING_PLACEHOLDER is set dynamically via t() inside the component render
 
 const STATUS_BG_COLORS = [
     '#000000', '#1d3557', '#264653', '#2a9d8f',
@@ -29,6 +30,7 @@ interface Props {
 }
 
 const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
+    const { t } = useTranslation();
     const [activeTab, setActiveTab] = useState('1');
 
     // Connection
@@ -76,18 +78,18 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
             if (data.status === 'CONNECTED') { setIsConnected(true); setQrCode(null); }
             else if (data.status === 'QR_READY' && data.qr) { setIsConnected(false); setQrCode(data.qr); }
             else { setIsConnected(false); }
-        } catch { if (!isAutoRefresh) setErrorMsg('No se pudo conectar con el servidor.'); }
+        } catch { if (!isAutoRefresh) setErrorMsg(t('wa_connection_error')); }
         finally { if (!isAutoRefresh) setLoading(false); }
     }, [tenantId]);
 
     const handleDisconnect = async () => {
-        if (!window.confirm('Desconectar WhatsApp?\nEl bot dejara de responder.')) return;
+        if (!window.confirm(t('wa_disconnect_confirm'))) return;
         setLoading(true);
         try {
             await fetch(`${API_BASE_URL}/whatsapp/disconnect`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tenantId }) });
-            setIsConnected(false); setQrCode(null); flash('WhatsApp desconectado');
+            setIsConnected(false); setQrCode(null); flash(t('wa_disconnected'));
             setTimeout(() => checkConnection(), 1500);
-        } catch { flash('No se pudo desconectar.', 'error'); }
+        } catch { flash(t('wa_disconnect_error'), 'error'); }
         finally { setLoading(false); }
     };
 
@@ -96,15 +98,15 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
         try {
             const res = await fetch(`${API_BASE_URL}/tenants/${tenantId}`, { headers: authHeaders() });
             if (res.ok) { const d = await res.json(); setGreetingMessage(d.greeting_message || ''); setBrochureUrl(d.brochure_url || null); }
-        } catch (err) { console.error('Error cargando datos del tenant:', err); }
+        } catch (err) { console.error('Error loading tenant data:', err); }
     };
 
     const handleSaveGreeting = async () => {
         setSavingGreeting(true);
         try {
             const res = await fetch(`${API_BASE_URL}/tenants/${tenantId}`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ greeting_message: greetingMessage }) });
-            flash(res.ok ? 'Saludo guardado' : 'Error al guardar', res.ok ? 'success' : 'error');
-        } catch { flash('Error de conexion', 'error'); }
+            flash(res.ok ? t('wa_greeting_saved') : t('wa_save_error'), res.ok ? 'success' : 'error');
+        } catch { flash(t('wa_network_error'), 'error'); }
         finally { setSavingGreeting(false); }
     };
 
@@ -116,18 +118,18 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
             const formData = new FormData(); formData.append('brochure', brochureFile);
             const token = getToken();
             const res = await fetch(`${API_BASE_URL}/tenants/${tenantId}/brochure`, { method: 'POST', headers: token ? { 'Authorization': `Bearer ${token}` } : {}, body: formData });
-            if (res.ok) { const d = await res.json(); setBrochureUrl(d.url); setBrochureFile(null); setBrochurePreview(null); flash('Brochure subido'); }
-            else flash('Error al subir', 'error');
-        } catch { flash('Error de conexion', 'error'); }
+            if (res.ok) { const d = await res.json(); setBrochureUrl(d.url); setBrochureFile(null); setBrochurePreview(null); flash(t('wa_brochure_uploaded')); }
+            else flash(t('wa_upload_error'), 'error');
+        } catch { flash(t('wa_network_error'), 'error'); }
         finally { setUploadingBrochure(false); }
     };
 
     const handleDeleteBrochure = async () => {
-        if (!window.confirm('Eliminar brochure?')) return;
+        if (!window.confirm(t('wa_delete_brochure_confirm'))) return;
         try {
             const res = await fetch(`${API_BASE_URL}/tenants/${tenantId}/brochure`, { method: 'DELETE', headers: authHeaders() });
-            if (res.ok) { setBrochureUrl(null); flash('Brochure eliminado'); }
-        } catch { flash('Error de conexion', 'error'); }
+            if (res.ok) { setBrochureUrl(null); flash(t('wa_brochure_deleted')); }
+        } catch { flash(t('wa_network_error'), 'error'); }
     };
 
     const processFile = (file: File | null) => {
@@ -139,8 +141,8 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
 
     // ---- Stories ----
     const handlePublishStory = async () => {
-        if (storyType === 'text' && !storyText.trim()) return flash('Escribe un texto para la historia', 'error');
-        if (storyType === 'image' && !storyImageFile) return flash('Selecciona una imagen', 'error');
+        if (storyType === 'text' && !storyText.trim()) return flash(t('wa_story_text_required'), 'error');
+        if (storyType === 'image' && !storyImageFile) return flash(t('wa_story_image_required'), 'error');
         setPublishingStory(true);
         try {
             let content = storyText;
@@ -157,13 +159,13 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
                 body: JSON.stringify({ tenantId, type: storyType, content, caption: storyCaption, backgroundColor: storyBgColor })
             });
             if (res.ok) {
-                flash('Historia publicada!');
+                flash(t('wa_story_published'));
                 setStoryText(''); setStoryCaption(''); setStoryImageFile(null); setStoryImagePreview(null);
             } else {
                 const d = await res.json().catch(() => ({}));
-                flash(d.error || 'Error al publicar', 'error');
+                flash(d.error || t('wa_publish_error'), 'error');
             }
-        } catch { flash('Error de conexion', 'error'); }
+        } catch { flash(t('wa_network_error'), 'error'); }
         finally { setPublishingStory(false); }
     };
 
@@ -210,10 +212,10 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
                             </div>
                             <div>
                                 <h6 className="fw-semibold mb-1">
-                                    {loading ? 'Verificando...' : isConnected ? 'WhatsApp Conectado' : 'WhatsApp Desconectado'}
+                                    {loading ? t('wa_verifying') : isConnected ? t('wa_connected') : t('wa_disconnected_title')}
                                 </h6>
                                 <span className="text-muted fs-13">
-                                    {isConnected ? 'Bot activo respondiendo mensajes' : 'Escanea el codigo QR para activar el bot'}
+                                    {isConnected ? t('wa_bot_active_msg') : t('wa_scan_qr')}
                                 </span>
                             </div>
                         </div>
@@ -223,7 +225,7 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
                             </Badge>
                             {isConnected && (
                                 <Button color="soft-danger" size="sm" onClick={handleDisconnect}>
-                                    <i className="ri-link-unlink-m me-1"></i>Desconectar
+                                    <i className="ri-link-unlink-m me-1"></i>{t('wa_disconnect')}
                                 </Button>
                             )}
                         </div>
@@ -237,14 +239,14 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
                     <CardHeader className="bg-success-subtle">
                         <h6 className="card-title mb-0 d-flex align-items-center gap-2">
                             <i className="ri-smartphone-line text-success"></i>
-                            Vincular WhatsApp
+                            {t('wa_link_whatsapp')}
                         </h6>
                     </CardHeader>
                     <CardBody>
                         {loading && (
                             <div className="text-center py-4">
                                 <Spinner color="success" />
-                                <p className="text-muted mt-2 mb-0">Conectando con WhatsApp...</p>
+                                <p className="text-muted mt-2 mb-0">{t('wa_connecting')}</p>
                             </div>
                         )}
                         {!loading && qrCode && (
@@ -255,17 +257,17 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
                                     </div>
                                     <div className="mt-2">
                                         <button className="btn btn-sm btn-soft-primary" onClick={() => checkConnection(false)}>
-                                            <i className="ri-refresh-line me-1"></i>Recargar
+                                            <i className="ri-refresh-line me-1"></i>{t('wa_reload')}
                                         </button>
                                     </div>
                                 </Col>
                                 <Col md={5}>
-                                    <h6 className="fw-semibold mb-3">Instrucciones</h6>
+                                    <h6 className="fw-semibold mb-3">{t('wa_instructions')}</h6>
                                     <ol className="text-muted fs-13 ps-3 vstack gap-2 mb-0">
-                                        <li>Abre <strong>WhatsApp</strong> en tu telefono</li>
-                                        <li>Ve a <strong>Dispositivos vinculados</strong></li>
-                                        <li>Toca <strong>"Vincular un dispositivo"</strong></li>
-                                        <li>Apunta la camara al <strong>codigo QR</strong></li>
+                                        <li dangerouslySetInnerHTML={{ __html: t('wa_step1') }} />
+                                        <li dangerouslySetInnerHTML={{ __html: t('wa_step2') }} />
+                                        <li dangerouslySetInnerHTML={{ __html: t('wa_step3') }} />
+                                        <li dangerouslySetInnerHTML={{ __html: t('wa_step4') }} />
                                     </ol>
                                 </Col>
                             </Row>
@@ -273,7 +275,7 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
                         {!loading && !qrCode && !errorMsg && (
                             <div className="text-center py-4">
                                 <Spinner size="sm" color="secondary" className="me-2" />
-                                <span className="text-muted">Iniciando motor de WhatsApp...</span>
+                                <span className="text-muted">{t('wa_starting_engine')}</span>
                             </div>
                         )}
                     </CardBody>
@@ -291,7 +293,7 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
                                     className={classnames({ active: activeTab === '1' })}
                                     onClick={() => setActiveTab('1')}
                                 >
-                                    <i className="ri-robot-line me-1"></i> Configurar Bot
+                                    <i className="ri-robot-line me-1"></i> {t('wa_configure_bot')}
                                 </NavLink>
                             </NavItem>
                             <NavItem>
@@ -300,8 +302,8 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
                                     className={classnames({ active: activeTab === '2' })}
                                     onClick={() => setActiveTab('2')}
                                 >
-                                    <i className="ri-contrast-2-line me-1"></i> Historias
-                                    <Badge color="info" className="ms-1 align-middle">Nuevo</Badge>
+                                    <i className="ri-contrast-2-line me-1"></i> {t('wa_stories')}
+                                    <Badge color="info" className="ms-1 align-middle">{t('New')}</Badge>
                                 </NavLink>
                             </NavItem>
                         </Nav>
@@ -314,15 +316,15 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
                                 <div className="mb-4">
                                     <h6 className="fw-semibold mb-3 d-flex align-items-center gap-2">
                                         <i className="ri-chat-smile-2-line text-primary"></i>
-                                        Saludo Inicial
+                                        {t('wa_initial_greeting')}
                                     </h6>
                                     <p className="text-muted fs-13 mb-3">
-                                        Primer mensaje que el bot envia cuando un cliente nuevo escribe. Puedes poner un saludo, una promo, tus horarios, o lo que quieras.
+                                        {t('wa_greeting_description')}
                                     </p>
                                     <Input
                                         type="textarea"
                                         rows={4}
-                                        placeholder={GREETING_PLACEHOLDER}
+                                        placeholder={t('wa_greeting_placeholder')}
                                         value={greetingMessage}
                                         onChange={(e) => setGreetingMessage(e.target.value)}
                                         maxLength={GREETING_MAX}
@@ -334,13 +336,13 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
                                     </div>
                                     <div className="mt-3">
                                         <Button color="primary" size="sm" onClick={handleSaveGreeting} disabled={savingGreeting}>
-                                            {savingGreeting ? <><Spinner size="sm" className="me-1" /> Guardando...</> : <><i className="ri-save-line me-1"></i>Guardar saludo</>}
+                                            {savingGreeting ? <><Spinner size="sm" className="me-1" /> {t('saving')}</> : <><i className="ri-save-line me-1"></i>{t('wa_save_greeting')}</>}
                                         </Button>
                                     </div>
                                     {!greetingMessage && (
                                         <div className="alert alert-warning mt-3 mb-0 fs-13">
                                             <i className="ri-lightbulb-line me-1"></i>
-                                            Sin saludo configurado, la IA generara uno automatico.
+                                            {t('wa_no_greeting_warning')}
                                         </div>
                                     )}
                                 </div>
@@ -351,11 +353,11 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
                                 <div>
                                     <h6 className="fw-semibold mb-3 d-flex align-items-center gap-2">
                                         <i className="ri-image-line text-success"></i>
-                                        Brochure de Servicios
-                                        {brochureUrl && <Badge color="success" className="align-middle">Activo</Badge>}
+                                        {t('wa_service_brochure')}
+                                        {brochureUrl && <Badge color="success" className="align-middle">{t('active')}</Badge>}
                                     </h6>
                                     <p className="text-muted fs-13 mb-3">
-                                        Imagen que el bot envia automaticamente cuando un cliente pregunta por los servicios disponibles.
+                                        {t('wa_brochure_description')}
                                     </p>
 
                                     {/* Current brochure */}
@@ -384,7 +386,7 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
                                             onClick={() => fileInputRef.current?.click()}
                                         >
                                             <i className="ri-upload-cloud-2-line fs-22 text-muted d-block mb-1"></i>
-                                            <span className="text-muted fs-13">{brochureUrl ? 'Clic para reemplazar' : 'Arrastra o haz clic para subir'}</span>
+                                            <span className="text-muted fs-13">{brochureUrl ? t('wa_click_replace') : t('wa_drag_or_click')}</span>
                                             <div className="d-flex gap-1 justify-content-center mt-2">
                                                 {['JPG', 'PNG', 'WEBP'].map(f => <span key={f} className="badge bg-light text-muted border fs-11">{f}</span>)}
                                             </div>
@@ -395,9 +397,9 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
                                     {brochureFile && (
                                         <div className="hstack gap-2">
                                             <Button color="success" size="sm" onClick={handleBrochureUpload} disabled={uploadingBrochure}>
-                                                {uploadingBrochure ? <Spinner size="sm" /> : <><i className="ri-upload-cloud-line me-1"></i>Subir</>}
+                                                {uploadingBrochure ? <Spinner size="sm" /> : <><i className="ri-upload-cloud-line me-1"></i>{t('wa_upload')}</>}
                                             </Button>
-                                            <Button color="light" size="sm" onClick={() => { setBrochureFile(null); setBrochurePreview(null); }}>Cancelar</Button>
+                                            <Button color="light" size="sm" onClick={() => { setBrochureFile(null); setBrochurePreview(null); }}>{t('cancel')}</Button>
                                         </div>
                                     )}
                                 </div>
@@ -406,7 +408,7 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
                             {/* ---- TAB 2: Stories ---- */}
                             <TabPane tabId="2">
                                 <p className="text-muted fs-13 mb-3">
-                                    Publica estados/historias de WhatsApp visibles por 24 horas para todos tus contactos.
+                                    {t('wa_stories_description')}
                                 </p>
 
                                 {/* Type selector */}
@@ -416,14 +418,14 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
                                         size="sm"
                                         onClick={() => setStoryType('image')}
                                     >
-                                        <i className="ri-image-line me-1"></i>Foto
+                                        <i className="ri-image-line me-1"></i>{t('wa_photo')}
                                     </Button>
                                     <Button
                                         color={storyType === 'text' ? 'primary' : 'soft-primary'}
                                         size="sm"
                                         onClick={() => setStoryType('text')}
                                     >
-                                        <i className="ri-font-size me-1"></i>Texto
+                                        <i className="ri-font-size me-1"></i>{t('wa_text')}
                                     </Button>
                                 </div>
 
@@ -446,7 +448,7 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
                                                         onClick={() => storyFileInputRef.current?.click()}
                                                     >
                                                         <i className="ri-camera-line fs-22 text-muted d-block mb-2"></i>
-                                                        <span className="text-muted fs-13">Arrastra una imagen o haz clic para seleccionar</span>
+                                                        <span className="text-muted fs-13">{t('wa_drag_image_or_click')}</span>
                                                         <div className="d-flex gap-1 justify-content-center mt-2">
                                                             {['JPG', 'PNG', 'WEBP'].map(f => <span key={f} className="badge bg-light text-muted border fs-11">{f}</span>)}
                                                         </div>
@@ -454,19 +456,19 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
                                                 )}
                                                 <input ref={storyFileInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => handleStoryImage(e.target.files?.[0] || null)} className="d-none" />
                                                 <div>
-                                                    <Label className="form-label fs-13">Pie de foto (opcional)</Label>
-                                                    <Input type="text" placeholder="Agrega un texto a tu foto..." value={storyCaption} onChange={(e) => setStoryCaption(e.target.value)} maxLength={200} />
+                                                    <Label className="form-label fs-13">{t('wa_caption_optional')}</Label>
+                                                    <Input type="text" placeholder={t('wa_caption_placeholder')} value={storyCaption} onChange={(e) => setStoryCaption(e.target.value)} maxLength={200} />
                                                 </div>
                                             </>
                                         ) : (
                                             <>
                                                 <div className="mb-3">
-                                                    <Label className="form-label fs-13">Texto de la historia</Label>
-                                                    <Input type="textarea" rows={4} placeholder="Escribe el texto de tu historia..." value={storyText} onChange={(e) => setStoryText(e.target.value)} maxLength={700} style={{ resize: 'none' }} />
+                                                    <Label className="form-label fs-13">{t('wa_story_text_label')}</Label>
+                                                    <Input type="textarea" rows={4} placeholder={t('wa_story_text_placeholder')} value={storyText} onChange={(e) => setStoryText(e.target.value)} maxLength={700} style={{ resize: 'none' }} />
                                                     <span className="text-muted fs-12">{storyText.length}/700</span>
                                                 </div>
                                                 <div>
-                                                    <Label className="form-label fs-13">Color de fondo</Label>
+                                                    <Label className="form-label fs-13">{t('wa_bg_color')}</Label>
                                                     <div className="d-flex gap-2 flex-wrap">
                                                         {STATUS_BG_COLORS.map((c) => (
                                                             <button
@@ -491,7 +493,7 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
 
                                     {/* Preview */}
                                     <Col lg={5}>
-                                        <Label className="form-label fs-13 text-muted">Vista previa</Label>
+                                        <Label className="form-label fs-13 text-muted">{t('wa_preview')}</Label>
                                         <div className="rounded overflow-hidden position-relative" style={{
                                             background: storyType === 'text' ? storyBgColor : '#1a1a1a',
                                             minHeight: 280,
@@ -509,20 +511,20 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
                                             ) : storyType === 'text' ? (
                                                 <div className="p-4 text-center">
                                                     <p className="text-white mb-0 fw-medium" style={{ fontSize: storyText.length > 200 ? 14 : storyText.length > 100 ? 16 : 20 }}>
-                                                        {storyText || 'Tu texto aparecera aqui'}
+                                                        {storyText || t('wa_text_preview_placeholder')}
                                                     </p>
                                                 </div>
                                             ) : (
                                                 <div className="text-center p-4">
                                                     <i className="ri-image-add-line fs-22" style={{ color: 'rgba(255,255,255,0.3)' }}></i>
-                                                    <p className="mb-0 fs-13" style={{ color: 'rgba(255,255,255,0.4)' }}>Sin imagen</p>
+                                                    <p className="mb-0 fs-13" style={{ color: 'rgba(255,255,255,0.4)' }}>{t('wa_no_image')}</p>
                                                 </div>
                                             )}
                                             {/* Status bar */}
                                             <div className="position-absolute top-0 start-0 end-0 p-2 d-flex align-items-center gap-2" style={{ background: 'rgba(0,0,0,0.2)' }}>
                                                 <div className="rounded-circle" style={{ width: 24, height: 24, border: '2px solid #25D366', background: 'rgba(255,255,255,0.9)' }}></div>
-                                                <span className="text-white fs-12 fw-medium">Mi estado</span>
-                                                <span className="text-white fs-11 ms-auto" style={{ opacity: 0.6 }}>Ahora</span>
+                                                <span className="text-white fs-12 fw-medium">{t('wa_my_status')}</span>
+                                                <span className="text-white fs-11 ms-auto" style={{ opacity: 0.6 }}>{t('wa_now')}</span>
                                             </div>
                                         </div>
                                     </Col>
@@ -530,7 +532,7 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
 
                                 <div className="border-top mt-4 pt-3 d-flex align-items-center justify-content-between">
                                     <span className="text-muted fs-13">
-                                        <i className="ri-information-line me-1"></i>Visible por 24 horas para todos tus contactos.
+                                        <i className="ri-information-line me-1"></i>{t('wa_visible_24h')}
                                     </span>
                                     <Button
                                         color="primary"
@@ -538,8 +540,8 @@ const WhatsAppConfig: React.FC<Props> = ({ tenantId }) => {
                                         disabled={publishingStory || (storyType === 'text' && !storyText.trim()) || (storyType === 'image' && !storyImageFile)}
                                     >
                                         {publishingStory
-                                            ? <><Spinner size="sm" className="me-1" />Publicando...</>
-                                            : <><i className="ri-send-plane-line me-1"></i>Publicar</>
+                                            ? <><Spinner size="sm" className="me-1" />{t('wa_publishing')}</>
+                                            : <><i className="ri-send-plane-line me-1"></i>{t('wa_publish')}</>
                                         }
                                     </Button>
                                 </div>

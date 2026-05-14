@@ -3,18 +3,20 @@ import { Link } from "react-router-dom";
 import {
   Container, Row, Col, Card, CardBody, CardHeader, Table, Badge, Button, Spinner
 } from "reactstrap";
+import { useTranslation } from 'react-i18next';
 import { api } from "../../services/api";
 
-const statusConfig: Record<string, { color: string; label: string }> = {
-  draft: { color: "info", label: "Borrador" },
-  sending: { color: "warning", label: "Enviando" },
-  completed: { color: "success", label: "Completada" },
-  paused: { color: "secondary", label: "Pausada" },
-};
-
 const Campaigns = ({ embedded }: { embedded?: boolean }) => {
+  const { t } = useTranslation();
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const statusConfig: Record<string, { color: string; label: string }> = {
+    draft: { color: "info", label: t("draft") },
+    sending: { color: "warning", label: t("sending") },
+    completed: { color: "success", label: t("status_completed") },
+    paused: { color: "secondary", label: t("paused") },
+  };
 
   const fetchCampaigns = async () => {
     try {
@@ -28,12 +30,12 @@ const Campaigns = ({ embedded }: { embedded?: boolean }) => {
   };
 
   useEffect(() => {
-    document.title = "Campañas | Tupelukeria";
+    document.title = `${t("campaigns")} | Tupelukeria`;
     fetchCampaigns();
   }, []);
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("¿Estás seguro de eliminar esta campaña?")) return;
+    if (!window.confirm(t("delete_campaign_confirm"))) return;
     try {
       await api.delete(`/campaigns/${id}`);
       setCampaigns((prev) => prev.filter((c) => c.id !== id));
@@ -47,10 +49,10 @@ const Campaigns = ({ embedded }: { embedded?: boolean }) => {
           <Col>
             {!embedded && (
               <div className="d-flex align-items-center mb-3">
-                <h4 className="mb-0 flex-grow-1">Campañas</h4>
+                <h4 className="mb-0 flex-grow-1">{t("campaigns")}</h4>
                 <Link to="/campaigns/new">
                   <Button color="success">
-                    <i className="ri-add-line me-1"></i> Nueva Campaña
+                    <i className="ri-add-line me-1"></i> {t("new_campaign")}
                   </Button>
                 </Link>
               </div>
@@ -58,7 +60,7 @@ const Campaigns = ({ embedded }: { embedded?: boolean }) => {
 
             <Card>
               <CardHeader>
-                <h5 className="card-title mb-0">Todas las campañas</h5>
+                <h5 className="card-title mb-0">{t("all_campaigns")}</h5>
               </CardHeader>
               <CardBody>
                 {loading ? (
@@ -66,21 +68,21 @@ const Campaigns = ({ embedded }: { embedded?: boolean }) => {
                 ) : campaigns.length === 0 ? (
                   <div className="text-center py-4 text-muted">
                     <i className="ri-mail-send-line display-4 d-block mb-3"></i>
-                    <p>No hay campañas aún. Crea tu primera campaña para re-enganchar clientes inactivos.</p>
+                    <p>{t("no_campaigns")}</p>
                   </div>
                 ) : (
                   <div className="table-responsive">
                     <Table className="table-hover align-middle mb-0">
                       <thead className="table-light">
                         <tr>
-                          <th>Nombre</th>
-                          <th>Asunto</th>
-                          <th>Estado</th>
-                          <th>Destinatarios</th>
-                          <th>Enviados</th>
-                          <th>Fallidos</th>
-                          <th>Creada</th>
-                          <th>Acciones</th>
+                          <th>{t("name")}</th>
+                          <th>{t("subject")}</th>
+                          <th>{t("status")}</th>
+                          <th>{t("recipients")}</th>
+                          <th>{t("sent")}</th>
+                          <th>{t("failed")}</th>
+                          <th>{t("created")}</th>
+                          <th>{t("actions")}</th>
                         </tr>
                       </thead>
                       <tbody>

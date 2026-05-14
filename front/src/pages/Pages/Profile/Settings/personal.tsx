@@ -5,6 +5,7 @@ import 'sweetalert2/dist/sweetalert2.min.css';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Modal, ModalHeader, ModalBody, ModalFooter } from "reactstrap";
 import { jwtDecode } from "jwt-decode";
+import { useTranslation } from 'react-i18next';
 import { api } from "../../../../services/api";
 import { getToken } from "../../../../services/auth";
 
@@ -100,19 +101,19 @@ const defaultWeek = (): WeekState => ({
     jueves: { ...DEFAULT_DAY }, viernes: { ...DEFAULT_DAY }, sabado: { ...DEFAULT_DAY }, domingo: { ...DEFAULT_DAY },
 });
 
-const DAYS_UI: { key: DayKey; label: string }[] = [
-    { key: "lunes", label: "Lunes" }, { key: "martes", label: "Martes" }, { key: "miercoles", label: "Miércoles" },
-    { key: "jueves", label: "Jueves" }, { key: "viernes", label: "Viernes" }, { key: "sabado", label: "Sábado" }, { key: "domingo", label: "Domingo" },
+const DAYS_UI: { key: DayKey; labelKey: string }[] = [
+    { key: "lunes", labelKey: "staff_monday" }, { key: "martes", labelKey: "staff_tuesday" }, { key: "miercoles", labelKey: "staff_wednesday" },
+    { key: "jueves", labelKey: "staff_thursday" }, { key: "viernes", labelKey: "staff_friday" }, { key: "sabado", labelKey: "staff_saturday" }, { key: "domingo", labelKey: "staff_sunday" },
 ];
 
-const validateWeek = (week: WeekState): string | null => {
-    for (const { key, label } of DAYS_UI) {
+const validateWeek = (week: WeekState, t: (key: string, opts?: any) => string): string | null => {
+    for (const { key, labelKey } of DAYS_UI) {
         const d = week[key];
         if (d.active) {
             const [sh, sm] = toTime(d.open).split(":").map(Number);
             const [eh, em] = toTime(d.close).split(":").map(Number);
             if (eh * 60 + em <= sh * 60 + sm) {
-                return `El horario de ${label} es inválido: fin debe ser mayor que inicio.`;
+                return t("staff_invalid_schedule_day", { day: t(labelKey) });
             }
         }
     }
@@ -128,6 +129,7 @@ const ServiceMultiSelect: React.FC<{
     catFilter: string | "all";
     onCatFilter: (id: string | "all") => void;
 }> = ({ services, categories, selectedIds, onToggle, catFilter, onCatFilter }) => {
+    const { t } = useTranslation();
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState("");
     const searchRef = useRef<HTMLInputElement | null>(null);
@@ -160,7 +162,7 @@ const ServiceMultiSelect: React.FC<{
             className={`btn btn-sm rounded-pill ${catFilter === "all" ? 'btn-primary' : 'btn-light'}`}
             onClick={() => onCatFilter("all")}
           >
-            Todas
+            {t("staff_all_categories")}
           </button>
           {categories.map(c => (
             <button
@@ -180,19 +182,19 @@ const ServiceMultiSelect: React.FC<{
             onClick={() => setOpen(v => !v)}
             className="form-select text-start"
           >
-            {selectedCount === 0 ? "Selecciona servicios…" : selectedCount === 1 ? "1 servicio seleccionado" : `${selectedCount} servicios seleccionados`}
+            {selectedCount === 0 ? t("staff_select_services") : t("staff_services_selected", { count: selectedCount })}
           </button>
           {open && (
             <div className="position-absolute w-100 mt-1 border rounded bg-white shadow" style={{ zIndex: 10, maxHeight: 360, overflowY: 'auto' }}>
               <div className="p-2">
                 <input
                   ref={searchRef}
-                  placeholder="Buscar servicios…"
+                  placeholder={t("staff_search_services")}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   className="form-control form-control-sm mb-2"
                 />
-                {filtered.length === 0 && <div className="text-muted small px-2 py-1">Sin resultados</div>}
+                {filtered.length === 0 && <div className="text-muted small px-2 py-1">{t("no_results")}</div>}
                 {filtered.map(s => {
                   const checked = selectedIds.includes(s.id);
                   const catName = categories.find(c => c.id === s.category_id)?.name || "—";
@@ -220,7 +222,7 @@ const ServiceMultiSelect: React.FC<{
         </div>
 
         <div className="mt-2">
-          {selectedIds.length === 0 && <span className="text-muted small">No hay servicios seleccionados.</span>}
+          {selectedIds.length === 0 && <span className="text-muted small">{t("staff_no_services_selected")}</span>}
           {selectedIds.map(id => {
             const s = services.find(x => x.id === id);
             if (!s) return null;
@@ -229,7 +231,7 @@ const ServiceMultiSelect: React.FC<{
                 key={id}
                 className="badge bg-primary-subtle text-primary rounded-pill me-1 mb-1"
                 style={{ cursor: 'pointer' }}
-                title="Quitar"
+                title={t("staff_remove")}
                 onClick={() => onToggle(id)}
               >
                 {s.name} <i className="ri-close-line ms-1" />
@@ -251,6 +253,7 @@ const StaffModal: React.FC<{
     categories: Category[];
     edit?: Staff | null;
 }> = ({ isOpen, onClose, onSaved, tenantId, services, categories, edit }) => {
+    const { t } = useTranslation();
     const [saving, setSaving] = useState(false);
     const [tab, setTab] = useState<"services" | "hours" | "branches">("services");
     const [roleId, setRoleId] = useState<number>(3);
@@ -374,7 +377,7 @@ const StaffModal: React.FC<{
 
     const buildWorkingHoursPayload = (): any | null => {
       if (inheritTenant) return null;
-      const err = validateWeek(week);
+      const err = validateWeek(week, t);
       if (err) throw new Error(err);
       const keyMapToEnglish: Record<DayKey, string> = { lunes: "monday", martes: "tuesday", miercoles: "wednesday", jueves: "thursday", viernes: "friday", sabado: "saturday", domingo: "sunday" };
       const out: any = {};
@@ -395,12 +398,12 @@ const StaffModal: React.FC<{
 
     const save = async () => {
         if (!firstName.trim()) {
-            Swal.fire({ icon: 'warning', title: 'Campo requerido', text: 'El nombre es obligatorio.' });
+            Swal.fire({ icon: 'warning', title: t("required_field"), text: t("staff_name_required") });
             return;
         }
 
         if (roleId === 3 && !commissionValue.trim()) {
-            Swal.fire({ icon: 'warning', title: 'Campo requerido', text: 'El porcentaje de comisión es requerido.' });
+            Swal.fire({ icon: 'warning', title: t("required_field"), text: t("staff_commission_required") });
             return;
         }
 
@@ -410,7 +413,7 @@ const StaffModal: React.FC<{
             try {
                 working_hours = buildWorkingHoursPayload();
             } catch (e: any) {
-                Swal.fire({ icon: 'error', title: 'Horario Inválido', text: e?.message || "Por favor revisa los horarios." });
+                Swal.fire({ icon: 'error', title: t("staff_invalid_schedule"), text: e?.message || t("staff_check_schedules") });
                 return;
             }
         }
@@ -436,7 +439,7 @@ const StaffModal: React.FC<{
                 if (isStylist) await saveAssignments(edit.id);
             } else {
                 if (!password.trim()) {
-                    Swal.fire({ icon: 'warning', title: 'Campo requerido', text: 'La contraseña es obligatoria para crear personal.' });
+                    Swal.fire({ icon: 'warning', title: t("required_field"), text: t("staff_password_required") });
                     setSaving(false);
                     return;
                 }
@@ -447,71 +450,71 @@ const StaffModal: React.FC<{
                 // Mostrar credenciales al admin
                 await Swal.fire({
                     icon: 'success',
-                    title: '¡Personal creado!',
+                    title: t("staff_created"),
                     html: `<div style="text-align:left">
-                        <p><b>Email:</b> ${(email.trim() || '').toLowerCase()}</p>
-                        <p><b>Contraseña:</b> <code>${password.trim()}</code></p>
+                        <p><b>${t("email")}:</b> ${(email.trim() || '').toLowerCase()}</p>
+                        <p><b>${t("password")}:</b> <code>${password.trim()}</code></p>
                         <hr/>
-                        <small class="text-muted">Comparte estas credenciales con el nuevo personal para que pueda iniciar sesión.</small>
+                        <small class="text-muted">${t("staff_share_credentials")}</small>
                     </div>`,
-                    confirmButtonText: 'Entendido',
+                    confirmButtonText: t("got_it"),
                 });
             }
 
             if (edit) {
-                Swal.fire({ icon: 'success', title: '¡Personal actualizado!', showConfirmButton: false, timer: 1500 });
+                Swal.fire({ icon: 'success', title: t("staff_updated"), showConfirmButton: false, timer: 1500 });
             }
             onSaved();
             onClose();
         } catch (e:any) {
-            Swal.fire({ icon: 'error', title: 'Error al guardar', text: e?.response?.data?.message || e?.response?.data?.error || e?.message || 'No se pudo guardar el personal' });
+            Swal.fire({ icon: 'error', title: t("staff_save_error"), text: e?.response?.data?.message || e?.response?.data?.error || e?.message || t("staff_could_not_save") });
         } finally {
             setSaving(false);
         }
     };
 
-    const roleName = roleId === 2 ? "Cajero" : roleId === 6 ? "Recepcionista" : "Estilista";
+    const roleName = roleId === 2 ? t("staff_cashier") : roleId === 6 ? t("staff_receptionist") : t("staff_stylist");
 
     return (
         <Modal isOpen={isOpen} toggle={onClose} size="lg" centered>
-            <ModalHeader toggle={onClose}>{edit ? `Editar ${roleName}` : `Nuevo Personal`}</ModalHeader>
+            <ModalHeader toggle={onClose}>{edit ? `${t("edit")} ${roleName}` : t("staff_new_staff")}</ModalHeader>
             <ModalBody>
                 <div className="row g-3">
                     {!edit && (
                         <div className="col-12">
-                            <label className="form-label">Tipo de Personal</label>
+                            <label className="form-label">{t("staff_type")}</label>
                             <select
                                 className="form-select"
                                 value={roleId}
                                 onChange={(e) => setRoleId(Number(e.target.value))}
                             >
-                                <option value={3}>Estilista</option>
-                                <option value={2}>Cajero</option>
-                                <option value={6}>Recepcionista</option>
+                                <option value={3}>{t("staff_stylist")}</option>
+                                <option value={2}>{t("staff_cashier")}</option>
+                                <option value={6}>{t("staff_receptionist")}</option>
                             </select>
                         </div>
                     )}
 
                     <div className="col-md-6">
-                        <label className="form-label">Nombre</label>
+                        <label className="form-label">{t("name")}</label>
                         <input
                             className="form-control"
                             value={firstName}
                             onChange={(e) => setFirstName(e.target.value)}
-                            placeholder="Ej: Marcos"
+                            placeholder={t("staff_name_placeholder")}
                         />
                     </div>
                     <div className="col-md-6">
-                        <label className="form-label">Apellido</label>
+                        <label className="form-label">{t("last_name")}</label>
                         <input
                             className="form-control"
                             value={lastName}
                             onChange={(e) => setLastName(e.target.value)}
-                            placeholder="Ej: Barbero"
+                            placeholder={t("staff_last_name_placeholder")}
                         />
                     </div>
                     <div className="col-md-6">
-                        <label className="form-label">Email</label>
+                        <label className="form-label">{t("email")}</label>
                         <input
                             type="email"
                             className="form-control"
@@ -524,8 +527,8 @@ const StaffModal: React.FC<{
 
                     <div className="col-md-6">
                         <label className="form-label">
-                            Contraseña
-                            {edit && <small className="d-block text-muted fw-normal">(dejar vacío para no cambiar)</small>}
+                            {t("password")}
+                            {edit && <small className="d-block text-muted fw-normal">{t("staff_leave_empty")}</small>}
                         </label>
                         <div className="input-group">
                             <input
@@ -533,13 +536,13 @@ const StaffModal: React.FC<{
                                 className="form-control"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
-                                placeholder={edit ? "Dejar vacío para no cambiar" : "••••••••"}
+                                placeholder={edit ? t("staff_leave_empty") : "••••••••"}
                             />
                             <button
                                 type="button"
                                 onClick={() => setShowPass(v => !v)}
                                 className="btn btn-light border"
-                                title={showPass ? "Ocultar" : "Mostrar"}
+                                title={showPass ? t("staff_hide") : t("staff_show")}
                             >
                                 <i className={showPass ? "ri-eye-off-line" : "ri-eye-line"} />
                             </button>
@@ -548,7 +551,7 @@ const StaffModal: React.FC<{
 
                     {roleId === 3 && (
                         <div className="col-md-6">
-                            <label className="form-label">Comisión (%)</label>
+                            <label className="form-label">{t("staff_commission_pct")}</label>
                             <input
                                 type="number"
                                 min={0}
@@ -557,9 +560,9 @@ const StaffModal: React.FC<{
                                 className="form-control"
                                 value={commissionValue}
                                 onChange={(e) => setCommissionValue(e.target.value)}
-                                placeholder="Ej: 55"
+                                placeholder={t("staff_commission_placeholder")}
                             />
-                            <small className="text-muted">Porcentaje que recibe por servicio</small>
+                            <small className="text-muted">{t("staff_commission_hint")}</small>
                         </div>
                     )}
 
@@ -569,20 +572,20 @@ const StaffModal: React.FC<{
                                 <li className="nav-item">
                                     <button type="button" onClick={() => setTab("services")}
                                         className={`nav-link ${tab === "services" ? 'active' : ''}`}>
-                                        <i className="ri-scissors-2-line me-1" /> Servicios
+                                        <i className="ri-scissors-2-line me-1" /> {t("services")}
                                     </button>
                                 </li>
                                 <li className="nav-item">
                                     <button type="button" onClick={() => setTab("hours")}
                                         className={`nav-link ${tab === "hours" ? 'active' : ''}`}>
-                                        <i className="ri-time-line me-1" /> Horarios
+                                        <i className="ri-time-line me-1" /> {t("staff_schedules")}
                                     </button>
                                 </li>
                                 {sharedStylistsEnabled && branches.length > 1 && (
                                     <li className="nav-item">
                                         <button type="button" onClick={() => setTab("branches")}
                                             className={`nav-link ${tab === "branches" ? 'active' : ''}`}>
-                                            <i className="ri-building-2-line me-1" /> Sedes
+                                            <i className="ri-building-2-line me-1" /> {t("staff_branches")}
                                         </button>
                                     </li>
                                 )}
@@ -604,12 +607,12 @@ const StaffModal: React.FC<{
                                             onChange={() => setInheritTenant(v => !v)}
                                         />
                                         <label className="form-check-label small" htmlFor="inheritTenantSwitch">
-                                            Usar el mismo horario del negocio. Si desmarcas, puedes elegir su propio horario.
+                                            {t("staff_inherit_schedule")}
                                         </label>
                                     </div>
                                     {!inheritTenant && (
                                         <>
-                                            {DAYS_UI.map(({ key, label }) => {
+                                            {DAYS_UI.map(({ key, labelKey }) => {
                                                 const d = week[key];
                                                 const isMonday = key === "lunes";
                                                 return (
@@ -626,11 +629,11 @@ const StaffModal: React.FC<{
                                                                     />
                                                                 </div>
                                                                 <span className="fw-semibold small">
-                                                                    {label} {d.active ? <span className="text-success">(Abierto)</span> : <span className="text-muted">(Cerrado)</span>}
+                                                                    {t(labelKey)} {d.active ? <span className="text-success">({t("staff_open")})</span> : <span className="text-muted">({t("staff_closed")})</span>}
                                                                 </span>
                                                             </div>
                                                             <div className="d-flex align-items-center gap-2">
-                                                                <label className="small text-muted mb-0" htmlFor={`open-${key}`}>Inicio</label>
+                                                                <label className="small text-muted mb-0" htmlFor={`open-${key}`}>{t("staff_start")}</label>
                                                                 <input
                                                                     id={`open-${key}`}
                                                                     type="time"
@@ -640,7 +643,7 @@ const StaffModal: React.FC<{
                                                                     className="form-control form-control-sm"
                                                                     style={{ width: 120 }}
                                                                 />
-                                                                <label className="small text-muted mb-0" htmlFor={`close-${key}`}>Fin</label>
+                                                                <label className="small text-muted mb-0" htmlFor={`close-${key}`}>{t("staff_end")}</label>
                                                                 <input
                                                                     id={`close-${key}`}
                                                                     type="time"
@@ -656,7 +659,7 @@ const StaffModal: React.FC<{
                                                                         onClick={applyMondayToAll}
                                                                         className="btn btn-soft-primary btn-sm ms-1"
                                                                     >
-                                                                        Aplicar a todos
+                                                                        {t("staff_apply_to_all")}
                                                                     </button>
                                                                 )}
                                                             </div>
@@ -671,7 +674,7 @@ const StaffModal: React.FC<{
 
                             {tab === "branches" && sharedStylistsEnabled && branches.length > 1 && (
                                 <div className="border rounded p-3">
-                                    <p className="text-muted small mb-3">Selecciona las sedes donde este estilista puede trabajar:</p>
+                                    <p className="text-muted small mb-3">{t("staff_select_branches")}</p>
                                     {branches.map(branch => (
                                         <div key={branch.id} className="form-check d-flex align-items-center gap-2 mb-2">
                                             <input
@@ -696,11 +699,11 @@ const StaffModal: React.FC<{
             </ModalBody>
             <ModalFooter>
                 <button type="button" className="btn btn-light" onClick={onClose}>
-                    Cancelar
+                    {t("cancel")}
                 </button>
                 <button type="button" className="btn btn-primary d-flex align-items-center gap-1" onClick={save} disabled={saving}>
                     {saving && <span className="spinner-border spinner-border-sm" />}
-                    Guardar
+                    {t("save")}
                 </button>
             </ModalFooter>
         </Modal>
@@ -709,6 +712,7 @@ const StaffModal: React.FC<{
 
 /* Personal Component */
 const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange }) => {
+    const { t } = useTranslation();
     const tenantId = useMemo(() => decodeTenantId() || "", []);
     const [error, setError] = useState<string | null>(null);
     const [staffLoading, setStaffLoading] = useState(false);
@@ -762,7 +766,7 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
         await loadAssignedForStaff(filteredStaffData);
         setPage(1);
       } catch (e:any) {
-        setError(e?.response?.data?.message || e?.message || 'No se pudo cargar el personal');
+        setError(e?.response?.data?.message || e?.message || t("staff_could_not_load"));
       } finally {
         setStaffLoading(false);
       }
@@ -782,24 +786,25 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
     const openEditStaff = (u: Staff) => { setStEdit(u); setStModalOpen(true); };
 
     const deleteStaff = async (u: Staff) => {
+        const fullName = `${u.first_name}${u.last_name ? ` ${u.last_name}` : ""}`;
         const result = await Swal.fire({
-            title: '¿Estás seguro?',
-            text: `Vas a eliminar a ${u.first_name}${u.last_name ? ` ${u.last_name}` : ""}. ¡Esta acción no se puede deshacer!`,
+            title: t("staff_confirm_delete_title"),
+            text: t("staff_confirm_delete_text", { name: fullName }),
             icon: 'warning',
             showCancelButton: true,
             confirmButtonColor: '#d33',
             cancelButtonColor: '#3085d6',
-            confirmButtonText: 'Sí, ¡eliminar!',
-            cancelButtonText: 'Cancelar'
+            confirmButtonText: t("staff_yes_delete"),
+            cancelButtonText: t("cancel")
         });
 
         if (result.isConfirmed) {
             try {
                 await api.delete(`/users/${u.id}`);
                 await refreshStaff();
-                Swal.fire('¡Eliminado!', `${u.first_name} ha sido eliminado del personal.`, 'success');
+                Swal.fire(t("staff_deleted"), t("staff_deleted_text", { name: u.first_name }), 'success');
             } catch (e:any) {
-                Swal.fire({ icon: 'error', title: 'Error', text: e?.response?.data?.message || e?.message || 'No se pudo eliminar el personal.' });
+                Swal.fire({ icon: 'error', title: t("error"), text: e?.response?.data?.message || e?.message || t("staff_could_not_delete") });
             }
         }
     };
@@ -850,12 +855,12 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
 
         <div className="d-flex justify-content-between align-items-center mb-3">
             <h5 className="fw-semibold mb-0 d-flex align-items-center gap-2">
-              <i className="ri-team-line text-primary"></i>Personal
+              <i className="ri-team-line text-primary"></i>{t("staff_title")}
             </h5>
             <div className="d-flex align-items-center gap-2">
               {staffLoading && <span className="spinner-border spinner-border-sm text-primary"></span>}
               <button type="button" className="btn btn-primary btn-sm d-flex align-items-center gap-1" onClick={openNewStaff}>
-                <i className="ri-add-line" /> Nuevo Personal
+                <i className="ri-add-line" /> {t("staff_new_staff")}
               </button>
             </div>
         </div>
@@ -864,19 +869,19 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
         <div className="d-flex flex-wrap gap-2 mb-3">
           <button type="button" onClick={() => { setRoleFilter("all"); setPage(1); }}
             className={`btn btn-sm rounded-pill ${roleFilter === "all" ? 'btn-primary' : 'btn-light'}`}>
-            Todos ({staff.length})
+            {t("all")} ({staff.length})
           </button>
           <button type="button" onClick={() => { setRoleFilter(3); setPage(1); }}
             className={`btn btn-sm rounded-pill ${roleFilter === 3 ? 'btn-success' : 'btn-light'}`}>
-            <i className="ri-scissors-line me-1"></i>Estilistas ({stylistsCount})
+            <i className="ri-scissors-line me-1"></i>{t("staff_stylists")} ({stylistsCount})
           </button>
           <button type="button" onClick={() => { setRoleFilter(2); setPage(1); }}
             className={`btn btn-sm rounded-pill ${roleFilter === 2 ? 'btn-info' : 'btn-light'}`}>
-            <i className="ri-cash-line me-1"></i>Cajeros ({cashiersCount})
+            <i className="ri-cash-line me-1"></i>{t("staff_cashiers")} ({cashiersCount})
           </button>
           <button type="button" onClick={() => { setRoleFilter(6); setPage(1); }}
             className={`btn btn-sm rounded-pill ${roleFilter === 6 ? 'btn-warning' : 'btn-light'}`}>
-            <i className="ri-customer-service-2-line me-1"></i>Recepcionistas ({receptionistsCount})
+            <i className="ri-customer-service-2-line me-1"></i>{t("staff_receptionists")} ({receptionistsCount})
           </button>
         </div>
 
@@ -884,12 +889,12 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
             <table className="table table-hover align-middle mb-0">
             <thead className="table-light">
                 <tr>
-                  <th>Nombre</th>
-                  <th>Rol</th>
-                  <th>Comisión</th>
-                  <th>Contacto</th>
-                  <th>Servicios</th>
-                  <th style={{width: 100}}>Acciones</th>
+                  <th>{t("name")}</th>
+                  <th>{t("staff_role")}</th>
+                  <th>{t("staff_commission")}</th>
+                  <th>{t("staff_contact")}</th>
+                  <th>{t("services")}</th>
+                  <th style={{width: 100}}>{t("actions")}</th>
                 </tr>
             </thead>
             <tbody>
@@ -898,13 +903,13 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
                     <td colSpan={6} className="text-center py-5">
                       <i className="ri-team-line fs-36 text-muted d-block mb-2"></i>
                       <h6 className="fw-medium mb-1">
-                        {roleFilter === "all" ? "No hay personal registrado" : roleFilter === 3 ? "No hay estilistas registrados" : roleFilter === 6 ? "No hay recepcionistas registrados" : "No hay cajeros registrados"}
+                        {roleFilter === "all" ? t("staff_no_staff") : roleFilter === 3 ? t("staff_no_stylists") : roleFilter === 6 ? t("staff_no_receptionists") : t("staff_no_cashiers")}
                       </h6>
                       <p className="text-muted fs-13 mb-3">
-                        {roleFilter === "all" ? "Agrega a tu equipo para gestionar citas y servicios." : "Prueba con otro filtro o agrega nuevo personal."}
+                        {roleFilter === "all" ? t("staff_add_team_hint") : t("staff_try_other_filter")}
                       </p>
                       <button type="button" className="btn btn-primary btn-sm" onClick={openNewStaff}>
-                        <i className="ri-add-line me-1"></i> Agregar personal
+                        <i className="ri-add-line me-1"></i> {t("staff_add_staff")}
                       </button>
                     </td>
                   </tr>
@@ -929,10 +934,10 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
                       </td>
                       <td>
                         {u.role_id === 2
-                          ? <span className="badge bg-info-subtle text-info rounded-pill">Cajero</span>
+                          ? <span className="badge bg-info-subtle text-info rounded-pill">{t("staff_cashier")}</span>
                           : u.role_id === 6
-                          ? <span className="badge bg-warning-subtle text-warning rounded-pill">Recepcionista</span>
-                          : <span className="badge bg-success-subtle text-success rounded-pill">Estilista</span>
+                          ? <span className="badge bg-warning-subtle text-warning rounded-pill">{t("staff_receptionist")}</span>
+                          : <span className="badge bg-success-subtle text-success rounded-pill">{t("staff_stylist")}</span>
                         }
                       </td>
                       <td>
@@ -952,7 +957,7 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
                       <td>
                         {u.role_id === 3 ? (
                           <>
-                            {show.length === 0 && <span className="text-muted fs-12">Sin asignar</span>}
+                            {show.length === 0 && <span className="text-muted fs-12">{t("staff_unassigned")}</span>}
                             {show.map(s => (
                               <span key={s.id} className="badge bg-primary-subtle text-primary rounded-pill me-1 mb-1">{s.name}</span>
                             ))}
@@ -964,10 +969,10 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
                       </td>
                       <td>
                         <div className="d-flex gap-1">
-                          <button type="button" className="btn btn-soft-primary btn-sm" onClick={() => openEditStaff(u)} title="Editar">
+                          <button type="button" className="btn btn-soft-primary btn-sm" onClick={() => openEditStaff(u)} title={t("edit")}>
                             <i className="ri-edit-line" />
                           </button>
-                          <button type="button" className="btn btn-soft-danger btn-sm" onClick={() => deleteStaff(u)} title="Eliminar">
+                          <button type="button" className="btn btn-soft-danger btn-sm" onClick={() => deleteStaff(u)} title={t("delete")}>
                             <i className="ri-delete-bin-line" />
                           </button>
                         </div>

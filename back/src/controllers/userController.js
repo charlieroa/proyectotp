@@ -282,10 +282,30 @@ exports.createUser = async (req, res) => {
       },
     });
 
+    // Send welcome email to stylists and staff with real emails
+    if ((isStylist || isStaff) && email && !email.includes('@temp.tupelukeria.com')) {
+      try {
+        const tenant = await prisma.tenants.findUnique({ where: { id: tenant_id }, select: { name: true } });
+        const { sendStylistWelcomeEmail } = require('../services/emailService');
+        await sendStylistWelcomeEmail({
+          to: email,
+          stylistName: first_name,
+          tenantName: tenant?.name,
+          email: finalEmail,
+          password: password,
+        });
+        console.log(`📧 Email de bienvenida enviado a ${email}`);
+      } catch (emailErr) {
+        console.error(`📧 Error enviando email de bienvenida:`, emailErr.message);
+      }
+    }
+
     if (isClient) {
       const newUserFromDb = dbToApiUser(newUser);
       const clientResponse = {
         id: newUserFromDb.id,
+        first_name: newUserFromDb.first_name,
+        last_name: newUserFromDb.last_name || '',
         name: `${newUserFromDb.first_name} ${newUserFromDb.last_name || ''}`.trim(),
         email: newUserFromDb.email,
         phone: newUserFromDb.phone,

@@ -10,6 +10,9 @@ const stripeController = require('../controllers/stripeController');
 router.post('/create-checkout-session', requireAuth, stripeController.createCheckoutSession);
 router.post('/cancel-subscription', requireAuth, stripeController.cancelSubscription);
 router.get('/subscription-status', requireAuth, stripeController.getSubscriptionStatus);
+router.post('/billing-portal', requireAuth, stripeController.createBillingPortalSession);
+router.get('/invoices', requireAuth, stripeController.getInvoices);
+router.post('/apply-discount', requireAuth, stripeController.applyRetentionDiscount);
 
 // NOTA: El webhook se registra directamente en index.js con express.raw()
 

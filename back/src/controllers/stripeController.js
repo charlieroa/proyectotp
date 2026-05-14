@@ -3,6 +3,7 @@
 
 const prisma = require('../config/prisma');
 const { stripe, getPriceId } = require('../config/stripePrices');
+const { sendSubscriptionEmail } = require('../services/emailService');
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://app.tupelukeria.com';
 
@@ -84,16 +85,32 @@ exports.createCheckoutSession = async (req, res) => {
 exports.cancelSubscription = async (req, res) => {
   try {
     const tenantId = req.user.tenant_id;
+    const { confirm } = req.body || {}; // confirm=true means user rejected the 10% offer
 
     const tenant = await prisma.tenants.findUnique({
       where: { id: tenantId },
-      select: { id: true, stripe_subscription_id: true },
+      select: { id: true, stripe_subscription_id: true, stripe_customer_id: true, current_period_end: true, plan: true },
     });
     if (!tenant) return res.status(404).json({ error: 'Tenant no encontrado.' });
 
+    // Step 1: If not confirmed, offer 10% discount first
+    if (!confirm) {
+      return res.json({
+        offer_discount: true,
+        discount_percent: 10,
+        message: 'Antes de irte, te ofrecemos un 10% de descuento en tu próxima factura. ¿Te quedas?',
+      });
+    }
+
+    // Step 2: User rejected the offer, proceed with cancellation
+    let periodEnd = tenant.current_period_end;
+
     if (tenant.stripe_subscription_id) {
       try {
-        await stripe.subscriptions.cancel(tenant.stripe_subscription_id);
+        const sub = await stripe.subscriptions.update(tenant.stripe_subscription_id, {
+          cancel_at_period_end: true,
+        });
+        periodEnd = new Date(sub.current_period_end * 1000);
       } catch (e) {
         if (e.code !== 'resource_missing') console.warn('Aviso cancelando sub:', e.message);
       }
@@ -102,18 +119,70 @@ exports.cancelSubscription = async (req, res) => {
     await prisma.tenants.update({
       where: { id: tenantId },
       data: {
-        plan: 'free',
-        stripe_subscription_id: null,
-        subscription_status: 'canceled',
-        current_period_end: null,
+        subscription_status: 'cancel_at_period_end',
+        current_period_end: periodEnd,
         updated_at: new Date(),
       },
     });
 
-    return res.json({ message: 'Suscripcion cancelada. Plan cambiado a Free.' });
+    const endDate = periodEnd ? new Date(periodEnd).toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+
+    return res.json({
+      message: `Suscripcion cancelada. Tu plan seguirá activo hasta el ${endDate}.`,
+      current_period_end: periodEnd,
+    });
   } catch (error) {
     console.error('Error cancelando suscripcion:', error);
     return res.status(500).json({ error: 'Error al cancelar suscripcion.' });
+  }
+};
+
+// ─── POST /api/stripe/apply-discount ─────────────────────────────────
+exports.applyRetentionDiscount = async (req, res) => {
+  try {
+    const tenantId = req.user.tenant_id;
+
+    if (!stripe) return res.status(503).json({ error: 'Stripe no configurado.' });
+
+    const tenant = await prisma.tenants.findUnique({
+      where: { id: tenantId },
+      select: { id: true, stripe_subscription_id: true, stripe_customer_id: true, retention_discount_used: true },
+    });
+    if (!tenant?.stripe_subscription_id) return res.status(400).json({ error: 'No hay suscripción activa.' });
+
+    // Only allow once
+    if (tenant.retention_discount_used) {
+      return res.status(400).json({ error: 'Ya usaste tu descuento de retención.' });
+    }
+
+    // Create a one-time 10% coupon
+    const coupon = await stripe.coupons.create({
+      percent_off: 10,
+      duration: 'once',
+      name: 'Descuento retención 10%',
+      metadata: { tenant_id: tenantId },
+    });
+
+    // Apply to subscription (next invoice only)
+    await stripe.subscriptions.update(tenant.stripe_subscription_id, {
+      coupon: coupon.id,
+    });
+
+    // Mark as used so it can't be used again
+    await prisma.tenants.update({
+      where: { id: tenantId },
+      data: { retention_discount_used: true, updated_at: new Date() },
+    });
+
+    console.log(`🎁 [Stripe] Cupón 10% aplicado a tenant ${tenantId} (una sola vez)`);
+
+    return res.json({
+      success: true,
+      message: '¡Descuento del 10% aplicado a tu próxima factura!',
+    });
+  } catch (error) {
+    console.error('Error aplicando descuento:', error);
+    return res.status(500).json({ error: 'Error al aplicar descuento.' });
   }
 };
 
@@ -145,6 +214,76 @@ exports.getSubscriptionStatus = async (req, res) => {
   }
 };
 
+// ─── POST /api/stripe/billing-portal ─────────────────────────────────
+exports.createBillingPortalSession = async (req, res) => {
+  try {
+    const tenantId = req.user.tenant_id;
+
+    if (!stripe) {
+      return res.status(503).json({ error: 'Stripe no esta configurado en este servidor.' });
+    }
+
+    const tenant = await prisma.tenants.findUnique({
+      where: { id: tenantId },
+      select: { stripe_customer_id: true },
+    });
+    if (!tenant) return res.status(404).json({ error: 'Tenant no encontrado.' });
+    if (!tenant.stripe_customer_id) {
+      return res.status(400).json({ error: 'No tienes una cuenta de pago asociada. Suscribete a un plan primero.' });
+    }
+
+    const session = await stripe.billingPortal.sessions.create({
+      customer: tenant.stripe_customer_id,
+      return_url: `${FRONTEND_URL}/settings?tab=6`,
+    });
+
+    return res.json({ url: session.url });
+  } catch (error) {
+    console.error('Error creando billing portal session:', error);
+    return res.status(500).json({ error: 'Error al abrir el portal de facturacion.' });
+  }
+};
+
+// ─── GET /api/stripe/invoices ────────────────────────────────────────
+exports.getInvoices = async (req, res) => {
+  try {
+    const tenantId = req.user.tenant_id;
+
+    if (!stripe) {
+      return res.status(503).json({ error: 'Stripe no esta configurado en este servidor.' });
+    }
+
+    const tenant = await prisma.tenants.findUnique({
+      where: { id: tenantId },
+      select: { stripe_customer_id: true },
+    });
+    if (!tenant) return res.status(404).json({ error: 'Tenant no encontrado.' });
+    if (!tenant.stripe_customer_id) {
+      return res.json({ invoices: [] });
+    }
+
+    const invoices = await stripe.invoices.list({
+      customer: tenant.stripe_customer_id,
+      limit: 20,
+    });
+
+    const formatted = invoices.data.map(inv => ({
+      id: inv.id,
+      date: new Date(inv.created * 1000),
+      amount: inv.amount_paid,
+      currency: inv.currency,
+      status: inv.status,
+      pdf_url: inv.invoice_pdf,
+      hosted_url: inv.hosted_invoice_url,
+    }));
+
+    return res.json({ invoices: formatted });
+  } catch (error) {
+    console.error('Error obteniendo facturas:', error);
+    return res.status(500).json({ error: 'Error al obtener facturas.' });
+  }
+};
+
 // ─── POST /api/stripe/webhook (raw body, sin auth) ──────────────────
 exports.handleWebhook = async (req, res) => {
   const sig = req.headers['stripe-signature'];
@@ -169,17 +308,29 @@ exports.handleWebhook = async (req, res) => {
         // Obtener la suscripcion para datos extra
         const subscription = await stripe.subscriptions.retrieve(session.subscription);
 
-        await prisma.tenants.update({
+        const periodEnd = new Date(subscription.current_period_end * 1000);
+        const updatedTenant = await prisma.tenants.update({
           where: { id: tenantId },
           data: {
             plan,
             stripe_subscription_id: session.subscription,
             subscription_status: 'active',
-            current_period_end: new Date(subscription.current_period_end * 1000),
+            current_period_end: periodEnd,
             updated_at: new Date(),
           },
+          select: { name: true, email: true },
         });
         console.log(`✅ [Stripe] Tenant ${tenantId} → plan ${plan} (checkout completed)`);
+
+        // Enviar email de confirmación de suscripción
+        if (updatedTenant.email) {
+          try {
+            await sendSubscriptionEmail(updatedTenant.email, updatedTenant.name, plan, periodEnd);
+            console.log(`📧 [Stripe] Email de suscripción enviado a ${updatedTenant.email}`);
+          } catch (emailErr) {
+            console.error(`📧 [Stripe] Error enviando email de suscripción:`, emailErr.message);
+          }
+        }
         break;
       }
 

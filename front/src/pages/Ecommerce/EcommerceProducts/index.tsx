@@ -53,6 +53,11 @@ const ProductsPage = () => {
     const [imagePreview, setImagePreview] = useState<string | null>(null);
     const [isCategoryManagerOpen, setCategoryManagerOpen] = useState(false);
 
+    // Carga masiva
+    const [bulkOpen, setBulkOpen] = useState(false);
+    const [bulkFile, setBulkFile] = useState<File | null>(null);
+    const [bulkUploading, setBulkUploading] = useState(false);
+
     useEffect(() => {
         dispatch(fetchProducts());
         dispatch(fetchProductCategories());
@@ -146,6 +151,37 @@ const ProductsPage = () => {
         const file = e.target.files?.[0] ?? null;
         setSelectedImageFile(file);
         setImagePreview(file ? URL.createObjectURL(file) : null);
+    };
+
+    const handleBulkUpload = async () => {
+        if (!bulkFile) {
+            Swal.fire({ icon: 'warning', title: 'Selecciona un archivo', text: 'Elige un archivo Excel (.xlsx, .xls) o CSV.' });
+            return;
+        }
+        setBulkUploading(true);
+        try {
+            const formDataUpload = new FormData();
+            formDataUpload.append('file', bulkFile);
+            const { data } = await api.post('/bulk-import/products', formDataUpload, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            });
+            Swal.fire({
+                icon: 'success',
+                title: 'Importación completada',
+                text: data?.message || `${data?.created || 0} productos creados`,
+            });
+            setBulkOpen(false);
+            setBulkFile(null);
+            dispatch(fetchProducts());
+        } catch (err: any) {
+            Swal.fire({
+                icon: 'error',
+                title: 'Error al importar',
+                text: err?.response?.data?.error || 'No se pudo procesar el archivo.',
+            });
+        } finally {
+            setBulkUploading(false);
+        }
     };
 
     const handleCategoryChange = (val: any) => setFormData(p => ({ ...p, category_id: val?.value }));
@@ -391,6 +427,9 @@ const ProductsPage = () => {
                                         <Button color="soft-info" onClick={() => setCategoryManagerOpen(true)}>
                                             <i className="ri-settings-3-line align-bottom me-1"></i> Categorías
                                         </Button>
+                                        <Button color="soft-primary" onClick={() => setBulkOpen(true)}>
+                                            <i className="ri-upload-2-line align-bottom me-1"></i> Carga masiva
+                                        </Button>
                                         <Button color="success" onClick={handleAddClick}>
                                             <i className="ri-add-fill me-1 align-bottom"></i> Agregar Producto
                                         </Button>
@@ -514,6 +553,46 @@ const ProductsPage = () => {
                                 </Button>
                             </ModalFooter>
                         </Form>
+                    </Modal>
+
+                    {/* --- Modal Carga Masiva --- */}
+                    <Modal isOpen={bulkOpen} toggle={() => !bulkUploading && setBulkOpen(false)} centered>
+                        <ModalHeader toggle={() => !bulkUploading && setBulkOpen(false)} className="bg-light p-3">
+                            <span className="fs-16 fw-semibold"><i className="ri-upload-2-line me-2"></i>Carga masiva de productos</span>
+                        </ModalHeader>
+                        <ModalBody>
+                            <p className="text-muted mb-3">
+                                Sube un archivo Excel (.xlsx, .xls) o CSV con tus productos. Cada fila se creará como un nuevo producto.
+                            </p>
+                            <div className="alert alert-info py-2 mb-3">
+                                <strong>Columnas aceptadas:</strong>
+                                <ul className="mb-0 mt-1 ps-3 small">
+                                    <li><code>nombre</code> (requerido)</li>
+                                    <li><code>precio</code> — precio de venta</li>
+                                    <li><code>stock</code> — cantidad disponible</li>
+                                    <li><code>marca</code> — marca del producto</li>
+                                </ul>
+                                <small className="text-muted d-block mt-1">Los nombres de columna pueden estar en español o inglés (name, price, stock, brand).</small>
+                            </div>
+                            <Label className="form-label">Archivo</Label>
+                            <Input
+                                type="file"
+                                accept=".xlsx,.xls,.csv"
+                                onChange={(e) => setBulkFile(e.target.files?.[0] ?? null)}
+                                disabled={bulkUploading}
+                            />
+                            {bulkFile && (
+                                <div className="mt-2 small text-muted">
+                                    <i className="ri-file-excel-2-line me-1"></i>{bulkFile.name}
+                                </div>
+                            )}
+                        </ModalBody>
+                        <ModalFooter>
+                            <Button color="light" onClick={() => setBulkOpen(false)} disabled={bulkUploading}>Cancelar</Button>
+                            <Button color="primary" onClick={handleBulkUpload} disabled={!bulkFile || bulkUploading}>
+                                {bulkUploading ? <><Spinner size="sm" className="me-1" /> Subiendo...</> : <><i className="ri-upload-2-line me-1"></i> Importar</>}
+                            </Button>
+                        </ModalFooter>
                     </Modal>
 
                     <CategoryManagerModal isOpen={isCategoryManagerOpen} toggle={() => setCategoryManagerOpen(false)} title="Gestionar Categorías" categories={categories} onSave={handleUpdateCategory} onDelete={handleDeleteCategory} />

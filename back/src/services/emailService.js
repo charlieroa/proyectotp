@@ -37,22 +37,32 @@ async function sendPasswordResetEmail(email, token, firstName) {
   const resetUrl = `${FRONTEND_URL}/reset-password/${token}`;
 
   const html = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-      <div style="text-align: center; margin-bottom: 30px;">
-        <h1 style="color: #438eff; margin: 0;">Tupelukeria</h1>
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff;">
+      <div style="background: linear-gradient(135deg, #438eff 0%, #6c5ce7 100%); padding: 40px 30px; text-align: center; border-radius: 8px 8px 0 0;">
+        <h1 style="color: #ffffff; margin: 0; font-size: 28px;">Tupelukeria</h1>
       </div>
-      <h2 style="color: #333;">Recuperar Contraseña</h2>
-      <p>Hola${firstName ? ` ${firstName}` : ''},</p>
-      <p>Recibimos una solicitud para restablecer tu contraseña. Haz clic en el botón de abajo para crear una nueva:</p>
-      <div style="text-align: center; margin: 30px 0;">
-        <a href="${resetUrl}"
-           style="background-color: #438eff; color: white; padding: 14px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
-          Restablecer Contraseña
-        </a>
+      <div style="padding: 30px;">
+        <div style="text-align: center; margin-bottom: 25px;">
+          <div style="width: 64px; height: 64px; background: #fff3e0; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;">
+            <span style="font-size: 32px;">🔐</span>
+          </div>
+        </div>
+        <h2 style="color: #333; text-align: center;">Recuperar Contraseña</h2>
+        <p style="color: #666;">Hola${firstName ? ` <strong>${firstName}</strong>` : ''},</p>
+        <p style="color: #666;">Recibimos una solicitud para restablecer tu contraseña. Haz clic en el botón de abajo para crear una nueva:</p>
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${resetUrl}"
+             style="background-color: #438eff; color: white; padding: 14px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+            Restablecer Contraseña
+          </a>
+        </div>
+        <p style="color: #888; font-size: 13px; text-align: center;">Este enlace expira en 1 hora. Si no solicitaste este cambio, puedes ignorar este correo.</p>
+        <div style="background: #fff8e1; border-radius: 6px; padding: 12px 15px; margin-top: 20px; font-size: 13px; color: #795548;">
+          <strong>Consejo de seguridad:</strong> Nunca compartas este enlace con nadie. Tupelukeria nunca te pedirá tu contraseña por correo.
+        </div>
       </div>
-      <p style="color: #666; font-size: 14px;">Este enlace expira en 1 hora. Si no solicitaste este cambio, puedes ignorar este correo.</p>
-      <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;" />
-      <p style="color: #999; font-size: 12px; text-align: center;">
+      <hr style="border: none; border-top: 1px solid #eee; margin: 0;" />
+      <p style="color: #999; font-size: 12px; text-align: center; padding: 20px;">
         &copy; ${new Date().getFullYear()} Tupelukeria. Todos los derechos reservados.
       </p>
     </div>
@@ -61,6 +71,186 @@ async function sendPasswordResetEmail(email, token, firstName) {
   return sendEmail({
     to: email,
     subject: 'Recuperar tu contraseña - Tupelukeria',
+    html,
+  });
+}
+
+/**
+ * Send subscription confirmation email after Stripe payment.
+ */
+async function sendSubscriptionEmail(email, tenantName, plan, periodEnd) {
+  const planNames = { test: 'Test', pro: 'Pro', business: 'Business', enterprise: 'Enterprise' };
+  const planPrices = { test: '$2.000 COP', pro: '$29.900 COP', business: '$49.900 COP', enterprise: '$129.900 COP' };
+  const displayPlan = planNames[plan] || plan;
+  const displayPrice = planPrices[plan] || '';
+  const nextDate = periodEnd ? new Date(periodEnd).toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric' }) : '';
+
+  const html = `
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff;">
+      <div style="background: linear-gradient(135deg, #438eff 0%, #6c5ce7 100%); padding: 40px 30px; text-align: center; border-radius: 8px 8px 0 0;">
+        <h1 style="color: #ffffff; margin: 0; font-size: 28px;">Tupelukeria</h1>
+        <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0; font-size: 16px;">Tu suscripción está activa</p>
+      </div>
+      <div style="padding: 30px;">
+        <div style="text-align: center; margin-bottom: 25px;">
+          <div style="width: 64px; height: 64px; background: #e8f5e9; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;">
+            <span style="font-size: 32px;">✓</span>
+          </div>
+        </div>
+        <h2 style="color: #333; text-align: center; margin-bottom: 5px;">¡Gracias por tu suscripción!</h2>
+        <p style="color: #666; text-align: center;">Hola <strong>${tenantName || ''}</strong>, tu pago ha sido procesado exitosamente.</p>
+
+        <div style="background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 25px 0; border-left: 4px solid #438eff;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr><td style="padding: 8px 0; color: #666;">Plan</td><td style="padding: 8px 0; text-align: right; font-weight: bold; color: #333;">${displayPlan}</td></tr>
+            <tr><td style="padding: 8px 0; color: #666;">Precio mensual</td><td style="padding: 8px 0; text-align: right; font-weight: bold; color: #333;">${displayPrice}</td></tr>
+            ${nextDate ? `<tr><td style="padding: 8px 0; color: #666;">Próxima renovación</td><td style="padding: 8px 0; text-align: right; color: #333;">${nextDate}</td></tr>` : ''}
+          </table>
+        </div>
+
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${FRONTEND_URL}/settings?tab=6"
+             style="background-color: #438eff; color: white; padding: 14px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+            Ver mi suscripción
+          </a>
+        </div>
+
+        <p style="color: #888; font-size: 13px; text-align: center;">
+          Puedes administrar tu suscripción, cambiar de plan o ver tus facturas desde la configuración de tu cuenta.
+        </p>
+      </div>
+      <hr style="border: none; border-top: 1px solid #eee; margin: 0;" />
+      <p style="color: #999; font-size: 12px; text-align: center; padding: 20px;">
+        &copy; ${new Date().getFullYear()} Tupelukeria. Todos los derechos reservados.
+      </p>
+    </div>
+  `;
+
+  return sendEmail({
+    to: email,
+    subject: `¡Bienvenido al plan ${displayPlan}! - Tupelukeria`,
+    html,
+  });
+}
+
+/**
+ * Send electronic invoice email to client after POS purchase.
+ */
+async function sendInvoiceEmail({ to, clientName, invoiceId, items, totalAmount, tenantName, paymentMethod }) {
+  const itemRows = (items || []).map(item => `
+    <tr>
+      <td style="padding: 10px; border-bottom: 1px solid #eee;">${item.description}</td>
+      <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
+      <td style="padding: 10px; border-bottom: 1px solid #eee; text-align: right;">$${Number(item.total_price || 0).toLocaleString('es-CO')}</td>
+    </tr>
+  `).join('');
+
+  const shortId = String(invoiceId).slice(0, 8).toUpperCase();
+  const payMethodLabel = paymentMethod === 'cash' ? 'Efectivo' : paymentMethod === 'credit_card' ? 'Tarjeta' : (paymentMethod || 'Mixto');
+
+  const html = `
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff;">
+      <div style="background: linear-gradient(135deg, #438eff 0%, #6c5ce7 100%); padding: 30px; text-align: center; border-radius: 8px 8px 0 0;">
+        <h1 style="color: #ffffff; margin: 0; font-size: 24px;">${tenantName || 'Tu Peluquería'}</h1>
+        <p style="color: rgba(255,255,255,0.9); margin: 5px 0 0; font-size: 14px;">Comprobante de compra</p>
+      </div>
+      <div style="padding: 30px;">
+        <p style="color: #666;">Hola <strong>${clientName || 'Cliente'}</strong>,</p>
+        <p style="color: #666;">Aquí tienes el detalle de tu compra:</p>
+
+        <div style="background: #f8f9fa; border-radius: 8px; padding: 15px; margin: 20px 0;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+            <tr><td style="padding: 5px 0; color: #888;">Factura</td><td style="text-align: right; font-weight: bold;">#${shortId}</td></tr>
+            <tr><td style="padding: 5px 0; color: #888;">Fecha</td><td style="text-align: right;">${new Date().toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric' })}</td></tr>
+            <tr><td style="padding: 5px 0; color: #888;">Método de pago</td><td style="text-align: right;">${payMethodLabel}</td></tr>
+          </table>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin: 20px 0;">
+          <thead>
+            <tr style="background: #f8f9fa;">
+              <th style="padding: 10px; text-align: left;">Descripción</th>
+              <th style="padding: 10px; text-align: center;">Cant.</th>
+              <th style="padding: 10px; text-align: right;">Total</th>
+            </tr>
+          </thead>
+          <tbody>${itemRows}</tbody>
+          <tfoot>
+            <tr>
+              <td colspan="2" style="padding: 12px 10px; font-weight: bold; font-size: 16px;">TOTAL</td>
+              <td style="padding: 12px 10px; text-align: right; font-weight: bold; font-size: 16px; color: #438eff;">$${Number(totalAmount || 0).toLocaleString('es-CO')}</td>
+            </tr>
+          </tfoot>
+        </table>
+
+        <p style="color: #888; font-size: 13px; text-align: center;">¡Gracias por tu preferencia! Te esperamos pronto.</p>
+      </div>
+      <hr style="border: none; border-top: 1px solid #eee; margin: 0;" />
+      <p style="color: #999; font-size: 12px; text-align: center; padding: 20px;">
+        &copy; ${new Date().getFullYear()} ${tenantName || 'Tupelukeria'}. Todos los derechos reservados.<br/>
+        Powered by <a href="https://tupelukeria.com" style="color: #438eff;">Tupelukeria</a>
+      </p>
+    </div>
+  `;
+
+  return sendEmail({
+    to: email,
+    subject: `Comprobante de compra #${shortId} - ${tenantName || 'Tu Peluquería'}`,
+    html,
+  });
+}
+
+/**
+ * Send welcome email to new stylist with login credentials.
+ */
+async function sendStylistWelcomeEmail({ to, stylistName, tenantName, email, password }) {
+  const appUrl = `${FRONTEND_URL}/login`;
+  const stylistAppUrl = 'https://app.tupelukeria.com/stylist-app';
+
+  const html = `
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff;">
+      <div style="background: linear-gradient(135deg, #438eff 0%, #6c5ce7 100%); padding: 40px 30px; text-align: center; border-radius: 8px 8px 0 0;">
+        <h1 style="color: #ffffff; margin: 0; font-size: 28px;">Tupelukeria</h1>
+        <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0; font-size: 16px;">¡Bienvenido/a al equipo!</p>
+      </div>
+      <div style="padding: 30px;">
+        <div style="text-align: center; margin-bottom: 25px;">
+          <div style="width: 64px; height: 64px; background: #e0e7ff; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;">
+            <span style="font-size: 32px;">💇</span>
+          </div>
+        </div>
+        <h2 style="color: #333; text-align: center; margin-bottom: 5px;">¡Hola ${stylistName || ''}!</h2>
+        <p style="color: #666; text-align: center;">Has sido agregado/a como estilista en <strong>${tenantName || 'tu salón'}</strong>.</p>
+
+        <div style="background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 25px 0; border-left: 4px solid #438eff;">
+          <h3 style="margin: 0 0 12px; font-size: 15px; color: #333;">Tus datos de acceso:</h3>
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr><td style="padding: 6px 0; color: #666;">Email</td><td style="padding: 6px 0; text-align: right; font-weight: bold; color: #333; font-family: monospace;">${email}</td></tr>
+            <tr><td style="padding: 6px 0; color: #666;">Contraseña</td><td style="padding: 6px 0; text-align: right; font-weight: bold; color: #333; font-family: monospace;">${password}</td></tr>
+          </table>
+        </div>
+
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${appUrl}"
+             style="background-color: #438eff; color: white; padding: 14px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+            Iniciar Sesión
+          </a>
+        </div>
+
+        <div style="background: #fff8e1; border-radius: 6px; padding: 12px 15px; margin-top: 20px; font-size: 13px; color: #795548;">
+          <strong>Importante:</strong> Te recomendamos cambiar tu contraseña después de tu primer inicio de sesión.
+        </div>
+      </div>
+      <hr style="border: none; border-top: 1px solid #eee; margin: 0;" />
+      <p style="color: #999; font-size: 12px; text-align: center; padding: 20px;">
+        &copy; ${new Date().getFullYear()} Tupelukeria. Todos los derechos reservados.
+      </p>
+    </div>
+  `;
+
+  return sendEmail({
+    to: email,
+    subject: `¡Bienvenido/a a ${tenantName || 'Tupelukeria'}! - Tus datos de acceso`,
     html,
   });
 }
@@ -76,5 +266,8 @@ async function sendCampaignEmail({ to, subject, html, recipientName }) {
 module.exports = {
   sendEmail,
   sendPasswordResetEmail,
+  sendSubscriptionEmail,
+  sendInvoiceEmail,
+  sendStylistWelcomeEmail,
   sendCampaignEmail,
 };

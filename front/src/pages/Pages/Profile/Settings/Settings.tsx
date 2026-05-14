@@ -16,6 +16,8 @@ import CreatableSelect from 'react-select/creatable';
 
 // --- NUEVO: Imports de Redux ---
 import { useDispatch } from 'react-redux';
+import { useTranslation } from 'react-i18next';
+import { useCurrency } from '../../../../contexts/CurrencyContext';
 import { setSetupProgress } from '../../../../slices/Settings/settingsSlice';
 
 import progileBg from '../../../../assets/images/profile-bg.jpg';
@@ -46,7 +48,10 @@ type Tenant = {
   admin_fee_enabled?: boolean;
   loans_to_staff_enabled?: boolean;
   allow_past_appointments?: boolean;
+  price_override_enabled?: boolean;
   shared_stylists_enabled?: boolean;
+  multi_stylist_enabled?: boolean;
+  ticket_virtual_enabled?: boolean;
   cross_branch_schedule_block?: boolean;
   manage_all_branches_cash?: boolean;
   is_primary_branch?: boolean;
@@ -62,11 +67,11 @@ type Tenant = {
   updated_at?: string;
 };
 
-const PLAN_CONFIG: Record<string, { label: string; color: string; price: string }> = {
-  free: { label: "Gratis", color: "secondary", price: "$0" },
-  pro: { label: "Pro", color: "primary", price: "$29.900/mes" },
-  business: { label: "Business", color: "info", price: "$49.900/mes" },
-  enterprise: { label: "Enterprise", color: "warning", price: "$99.900/mes" },
+const PLAN_CONFIG: Record<string, { label: string; color: string; priceUSD: number; priceCOP: number }> = {
+  free: { label: "Gratis", color: "secondary", priceUSD: 0, priceCOP: 0 },
+  pro: { label: "Pro", color: "primary", priceUSD: 10, priceCOP: 29900 },
+  business: { label: "Business", color: "info", priceUSD: 19, priceCOP: 49900 },
+  enterprise: { label: "Enterprise", color: "warning", priceUSD: 34.90, priceCOP: 129900 },
 };
 
 // Plan feature gating: which modules each plan unlocks
@@ -103,6 +108,7 @@ type Service = {
   price: number;
   duration_minutes: number;
   is_active?: boolean;
+  max_concurrent_stylists?: number;
 };
 
 // --- Helpers para formateo ---
@@ -176,12 +182,12 @@ const buildWorkingHoursPayload = (perDay: WorkingHoursPerDay): Record<string, st
   return out;
 };
 const validateWorkingHours = (perDay: WorkingHoursPerDay): string | null => {
-  for (const { key, label } of DAYS) {
+  for (const { key } of DAYS) {
     const d = perDay[key];
     if (d.active) {
       const [sh, sm] = toTime(d.start).split(":").map(Number);
       const [eh, em] = toTime(d.end).split(":").map(Number);
-      if (eh * 60 + em <= sh * 60 + sm) return `El horario de ${label} es inválido: fin debe ser mayor que inicio.`;
+      if (eh * 60 + em <= sh * 60 + sm) return key;
     }
   }
   return null;
@@ -192,6 +198,14 @@ const decodeTenantId = (): string | null => {
     if (!t) return null;
     const decoded: any = jwtDecode(t);
     return decoded?.user?.tenant_id || decoded?.tenant_id || null;
+  } catch { return null; }
+};
+const decodeRoleId = (): number | null => {
+  try {
+    const t = getToken();
+    if (!t) return null;
+    const decoded: any = jwtDecode(t);
+    return decoded?.user?.role_id ?? decoded?.role_id ?? null;
   } catch { return null; }
 };
 const ensureNumber = (v: string) => (v.trim() === "" ? null : Number(v));
@@ -225,13 +239,16 @@ const ServiceModal: React.FC<{
   tenantId: string;
   edit?: Service | null;
   onManageCategories: () => void;
-}> = ({ isOpen, onClose, onSaved, categories, onCategoryCreated, tenantId, edit, onManageCategories }) => {
+  multiStylistEnabled?: boolean;
+}> = ({ isOpen, onClose, onSaved, categories, onCategoryCreated, tenantId, edit, onManageCategories, multiStylistEnabled }) => {
+  const { t: tr } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [categoryId, setCategoryId] = useState<string>("");
   const [name, setName] = useState<string>("");
   const [price, setPrice] = useState<string>("");
   const [duration, setDuration] = useState<string>("");
   const [description, setDescription] = useState<string>("");
+  const [maxStylists, setMaxStylists] = useState<string>("1");
 
   const categoryOptions = useMemo(() =>
     categories.map(cat => ({ value: cat.id, label: cat.name })),
@@ -245,9 +262,10 @@ const ServiceModal: React.FC<{
         setPrice(String(edit.price));
         setDuration(String(edit.duration_minutes));
         setDescription(edit.description || "");
+        setMaxStylists(String(edit.max_concurrent_stylists || 1));
       } else {
         setCategoryId(categories[0]?.id || "");
-        setName(""); setPrice(""); setDuration(""); setDescription("");
+        setName(""); setPrice(""); setDuration(""); setDescription(""); setMaxStylists("1");
       }
     }
   }, [isOpen, edit, categories]);
@@ -259,9 +277,9 @@ const ServiceModal: React.FC<{
       const { data } = await api.post('/categories', { name: inputValue.trim() });
       onCategoryCreated(data);
       setCategoryId(data.id);
-      Swal.fire({ icon: 'success', title: '!Categoria creada!', timer: 1500, showConfirmButton: false });
+      Swal.fire({ icon: 'success', title: tr('svc_modal_category_created'), timer: 1500, showConfirmButton: false });
     } catch (e: any) {
-      Swal.fire('Error', e?.response?.data?.error || 'No se pudo crear la categoria', 'error');
+      Swal.fire(tr('error'), e?.response?.data?.error || tr('svc_modal_category_error'), 'error');
     } finally {
       setSaving(false);
     }
@@ -269,12 +287,13 @@ const ServiceModal: React.FC<{
 
   const save = async () => {
     if (!categoryId || !name.trim() || !price || !duration) {
-      Swal.fire('Campos incompletos', 'Por favor completa categoria, nombre, precio y duracion.', 'warning');
+      Swal.fire(tr('svc_modal_incomplete'), tr('svc_modal_incomplete_text'), 'warning');
       return;
     }
     const body: any = {
       category_id: categoryId, name: name.trim(), price: Number(price),
       duration_minutes: Number(duration), description: description.trim() || null,
+      max_concurrent_stylists: Math.max(1, Number(maxStylists) || 1),
     };
     setSaving(true);
     try {
@@ -284,21 +303,21 @@ const ServiceModal: React.FC<{
         body.tenant_id = tenantId;
         await api.post(`/services`, body);
       }
-      Swal.fire({ icon: 'success', title: edit ? '!Servicio actualizado!' : '!Servicio Creado!', showConfirmButton: false, timer: 1500 });
+      Swal.fire({ icon: 'success', title: edit ? tr('svc_modal_updated') : tr('svc_modal_created'), showConfirmButton: false, timer: 1500 });
       onSaved();
       onClose();
     } catch (e: any) {
-      Swal.fire('Error al guardar', e?.response?.data?.message || 'No se pudo guardar el servicio', 'error');
+      Swal.fire(tr('svc_modal_save_error'), e?.response?.data?.message || tr('svc_modal_save_error_text'), 'error');
     } finally { setSaving(false); }
   };
 
   return (
     <Modal isOpen={isOpen} toggle={onClose} size="lg" centered>
-      <ModalHeader toggle={onClose}>{edit ? "Editar servicio" : "Nuevo servicio"}</ModalHeader>
+      <ModalHeader toggle={onClose}>{edit ? tr('svc_modal_edit') : tr('svc_modal_new')}</ModalHeader>
       <ModalBody>
         <div className="vstack gap-3">
           <div>
-            <Label className="form-label">Categoria</Label>
+            <Label className="form-label">{tr('svc_modal_category')}</Label>
             <div className="d-flex gap-2">
               <div className="flex-grow-1">
                 <CreatableSelect
@@ -307,44 +326,53 @@ const ServiceModal: React.FC<{
                   value={categoryOptions.find(opt => opt.value === categoryId)}
                   onChange={(selected) => setCategoryId(selected ? selected.value : "")}
                   onCreateOption={handleCreateCategory}
-                  placeholder="Busca o crea una categoria..."
-                  formatCreateLabel={inputValue => `Crear nueva categoria: "${inputValue}"`}
+                  placeholder={tr('svc_modal_search_create')}
+                  formatCreateLabel={inputValue => tr('svc_modal_create_category', { value: inputValue })}
                   isLoading={saving}
                   isDisabled={saving}
                 />
               </div>
-              <Button type="button" color="light" onClick={onManageCategories} className="d-inline-flex align-items-center justify-content-center" title="Gestionar categorias">
+              <Button type="button" color="light" onClick={onManageCategories} className="d-inline-flex align-items-center justify-content-center" title={tr('svc_modal_manage_categories')}>
                 <i className="ri-settings-3-line"></i>
               </Button>
             </div>
           </div>
           <Row className="g-3">
             <Col md={6}>
-              <Label className="form-label">Nombre del servicio</Label>
-              <Input className="form-control" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: Corte para Dama" />
+              <Label className="form-label">{tr('svc_modal_name')}</Label>
+              <Input className="form-control" value={name} onChange={(e) => setName(e.target.value)} placeholder={tr('svc_modal_name_placeholder')} />
             </Col>
             <Col md={6}>
-              <Label className="form-label">Duracion (minutos)</Label>
+              <Label className="form-label">{tr('svc_modal_duration')}</Label>
               <Input type="number" min={1} className="form-control" value={duration} onChange={(e) => setDuration(e.target.value)} placeholder="Ej: 60" />
             </Col>
           </Row>
-          <div>
-            <Label className="form-label">Precio</Label>
-            <Input
-              type="text"
-              inputMode="numeric"
-              className="form-control"
-              value={formatCOPString(price)}
-              onChange={(e) => setPrice(onlyDigits(e.target.value))}
-              placeholder="$50.000"
-            />
-          </div>
+          <Row className="g-3">
+            <Col md={multiStylistEnabled ? 8 : 12}>
+              <Label className="form-label">{tr('svc_modal_price')}</Label>
+              <Input
+                type="text"
+                inputMode="numeric"
+                className="form-control"
+                value={formatCOPString(price)}
+                onChange={(e) => setPrice(onlyDigits(e.target.value))}
+                placeholder="$50.000"
+              />
+            </Col>
+            {multiStylistEnabled && (
+              <Col md={4}>
+                <Label className="form-label">{tr('svc_modal_max_stylists') || 'Estilistas simultáneos'}</Label>
+                <Input type="number" min={1} max={5} className="form-control" value={maxStylists} onChange={(e) => setMaxStylists(e.target.value)} placeholder="1" />
+                <small className="text-muted">{tr('svc_modal_max_stylists_hint') || 'Ej: 2 para masaje a 4 manos'}</small>
+              </Col>
+            )}
+          </Row>
         </div>
       </ModalBody>
       <ModalFooter>
-        <Button color="light" onClick={onClose}>Cancelar</Button>
+        <Button color="light" onClick={onClose}>{tr('svc_modal_cancel')}</Button>
         <Button color="primary" onClick={save} disabled={saving}>
-          {saving && <Spinner size="sm" className="me-1" />} Guardar
+          {saving && <Spinner size="sm" className="me-1" />} {tr('svc_modal_save')}
         </Button>
       </ModalFooter>
     </Modal>
@@ -354,6 +382,8 @@ const ServiceModal: React.FC<{
 /* ================= Pagina Settings ================= */
 const Settings: React.FC = () => {
   const dispatch = useDispatch();
+  const { t: tr } = useTranslation();
+  const { formatCurrency: fmtCurrency, formatFromUSD } = useCurrency();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<"1" | "2" | "3" | "4" | "5" | "6">(() => {
     const t = searchParams.get("tab");
@@ -382,8 +412,12 @@ const Settings: React.FC = () => {
   const [loansToStaff, setLoansToStaff] = useState<boolean>(false);
   const [allowPastAppointments, setAllowPastAppointments] = useState<boolean>(false);
   const [sharedStylistsEnabled, setSharedStylistsEnabled] = useState<boolean>(false);
+  const [multiStylistEnabled, setMultiStylistEnabled] = useState<boolean>(false);
+  const [ticketVirtualEnabled, setTicketVirtualEnabled] = useState<boolean>(false);
   const [crossBranchScheduleBlock, setCrossBranchScheduleBlock] = useState<boolean>(true);
   const [manageAllBranchesCash, setManageAllBranchesCash] = useState<boolean>(false);
+  const [priceOverrideEnabled, setPriceOverrideEnabled] = useState<boolean>(false);
+  const isAdmin = useMemo(() => decodeRoleId() === 1, []);
   const [tipSalonPercent, setTipSalonPercent] = useState<string>("10");
   const [branchColor, setBranchColor] = useState<string>("#3788d8");
   const [hasBranches, setHasBranches] = useState<boolean>(false);
@@ -440,8 +474,11 @@ const Settings: React.FC = () => {
     setLoansToStaff(tenantData.loans_to_staff_enabled ?? false);
     setAllowPastAppointments(tenantData.allow_past_appointments ?? false);
     setSharedStylistsEnabled(tenantData.shared_stylists_enabled ?? false);
+    setMultiStylistEnabled(tenantData.multi_stylist_enabled ?? false);
+    setTicketVirtualEnabled(tenantData.ticket_virtual_enabled ?? false);
     setCrossBranchScheduleBlock(tenantData.cross_branch_schedule_block !== false);
     setManageAllBranchesCash(tenantData.manage_all_branches_cash ?? false);
+    setPriceOverrideEnabled(tenantData.price_override_enabled ?? false);
     setTipSalonPercent(tenantData.tip_salon_percent != null ? String(tenantData.tip_salon_percent) : "10");
     setBranchColor(tenantData.branch_color ?? "#3788d8");
     setHasBranches(!!tenantData.parent_tenant_id);
@@ -455,13 +492,13 @@ const Settings: React.FC = () => {
   };
 
   useEffect(() => {
-    document.title = "Configuracion | Peluqueria";
+    document.title = tr("settings_page_title");
     const load = async () => {
       setLoading(true); setError(null);
       try {
         const tenantId = decodeTenantId();
         if (!tenantId) {
-          setError("No se encontro el tenant en tu sesion. Inicia sesion nuevamente.");
+          setError(tr("settings_no_tenant"));
           return;
         }
         const { data } = await api.get(`/tenants/${tenantId}`);
@@ -475,7 +512,7 @@ const Settings: React.FC = () => {
           }
         } catch { /* ignore if endpoint not available */ }
       } catch (e: any) {
-        setError(e?.response?.data?.message || e?.message || "No se pudo cargar la informacion.");
+        setError(e?.response?.data?.message || e?.message || tr("settings_could_not_load"));
       } finally {
         setLoading(false);
       }
@@ -507,16 +544,16 @@ const Settings: React.FC = () => {
       reload();
       Swal.fire({
         icon: 'success',
-        title: 'Pago exitoso!',
-        text: 'Tu plan ha sido actualizado. Gracias por tu suscripcion.',
+        title: tr('settings_payment_success_title'),
+        text: tr('settings_payment_success_text'),
         timer: 3000,
         showConfirmButton: false,
       });
     } else if (stripeResult === 'cancel') {
       Swal.fire({
         icon: 'info',
-        title: 'Pago cancelado',
-        text: 'No se realizo ningun cargo. Tu plan actual se mantiene.',
+        title: tr('settings_payment_cancel_title'),
+        text: tr('settings_payment_cancel_text'),
         timer: 3000,
         showConfirmButton: false,
       });
@@ -527,11 +564,11 @@ const Settings: React.FC = () => {
     setSaving(true); setError(null);
     try {
       const tenantId = tenant?.id || decodeTenantId();
-      if (!tenantId) throw new Error("No se encontro el tenant para actualizar.");
+      if (!tenantId) throw new Error(tr("settings_could_not_update"));
 
       const hoursErr = validateWorkingHours(perDay);
       if (hoursErr) {
-        Swal.fire({ icon: 'error', title: 'Horario Invalido', text: hoursErr });
+        Swal.fire({ icon: 'error', title: tr('settings_invalid_schedule'), text: tr('schedule_invalid_end', { day: tr(`day_${hoursErr}`) }) });
         setSaving(false);
         return;
       }
@@ -555,10 +592,10 @@ const Settings: React.FC = () => {
             logoUrlForPayload = data.url;
             setLogoFile(null);
           } else {
-            throw new Error("La URL del logo no se recibio correctamente.");
+            throw new Error(tr("settings_logo_url_error"));
           }
         } catch (uploadError: any) {
-          Swal.fire({ icon: 'error', title: 'Error de Carga', text: uploadError?.response?.data?.message || uploadError?.message || "No se pudo subir el logo." });
+          Swal.fire({ icon: 'error', title: tr('settings_upload_error'), text: uploadError?.response?.data?.message || uploadError?.message || tr("settings_could_not_upload_logo") });
           setUploadingLogo(false); setSaving(false); return;
         } finally {
           setUploadingLogo(false);
@@ -581,8 +618,11 @@ const Settings: React.FC = () => {
         loans_to_staff_enabled: loansToStaff,
         allow_past_appointments: allowPastAppointments,
         shared_stylists_enabled: sharedStylistsEnabled,
+        multi_stylist_enabled: multiStylistEnabled,
+        ticket_virtual_enabled: ticketVirtualEnabled,
         cross_branch_schedule_block: crossBranchScheduleBlock,
         manage_all_branches_cash: manageAllBranchesCash,
+        ...(isAdmin ? { price_override_enabled: priceOverrideEnabled } : {}),
         tip_salon_percent: ensureNumber(tipSalonPercent),
         branch_color: branchColor,
       } as any;
@@ -590,10 +630,10 @@ const Settings: React.FC = () => {
       await api.put(`/tenants/${tenantId}`, payload);
       const { data: freshTenantData } = await api.get(`/tenants/${tenantId}`);
       updateStateFromTenant(freshTenantData);
-      Swal.fire({ icon: 'success', title: '!Guardado!', text: 'Los cambios se guardaron correctamente.', timer: 2000, showConfirmButton: false });
+      Swal.fire({ icon: 'success', title: tr('settings_saved_title'), text: tr('settings_saved_text'), timer: 2000, showConfirmButton: false });
       window.dispatchEvent(new Event('profileUpdated'));
     } catch (e: any) {
-      Swal.fire({ icon: 'error', title: 'Error al Guardar', text: e?.response?.data?.message || e?.message || "No se pudieron guardar los cambios." });
+      Swal.fire({ icon: 'error', title: tr('settings_save_error'), text: e?.response?.data?.message || e?.message || tr("settings_could_not_save") });
     } finally {
       setSaving(false);
     }
@@ -609,21 +649,73 @@ const Settings: React.FC = () => {
     try {
       setSaving(true);
       if (newPlan === 'free') {
-        // Downgrade a free: cancelar suscripcion Stripe
-        await api.post('/stripe/cancel-subscription');
-        const { data: fresh } = await api.get(`/tenants/${tid}`);
-        updateStateFromTenant(fresh);
-        Swal.fire({ icon: 'success', title: 'Plan actualizado', text: 'Tu plan ahora es Gratis. La suscripcion fue cancelada.', timer: 2500, showConfirmButton: false });
+        // Step 1: Ask backend - it will offer 10% discount first
+        const { data: step1 } = await api.post('/stripe/cancel-subscription');
+
+        if (step1.offer_discount) {
+          // Show retention modal with 10% offer
+          const result = await Swal.fire({
+            icon: 'warning',
+            title: '¡Espera! No te vayas',
+            html: `
+              <div style="text-align:left">
+                <p>Entendemos que quieras cancelar, pero queremos que sepas que valoramos tu confianza.</p>
+                <div style="background:#d1fae5;border-radius:12px;padding:16px;margin:16px 0;text-align:center">
+                  <span style="font-size:32px">🎁</span>
+                  <h4 style="color:#065f46;margin:8px 0 4px;font-weight:700">10% de descuento</h4>
+                  <p style="color:#047857;margin:0">en tu próxima factura si decides quedarte</p>
+                </div>
+                <p class="text-muted" style="font-size:13px">El descuento se aplica automáticamente. Sin compromisos adicionales.</p>
+              </div>
+            `,
+            showCancelButton: true,
+            confirmButtonText: '🎉 ¡Me quedo con el 10%!',
+            cancelButtonText: 'Cancelar de todas formas',
+            confirmButtonColor: '#0ab39c',
+            cancelButtonColor: '#f06548',
+            reverseButtons: true,
+          });
+
+          if (result.isConfirmed) {
+            // User accepts 10% discount - apply it
+            await api.post('/stripe/apply-discount');
+            const { data: fresh } = await api.get(`/tenants/${tid}`);
+            updateStateFromTenant(fresh);
+            Swal.fire({
+              icon: 'success',
+              title: '¡Gracias por quedarte!',
+              html: '<p>Tu <strong>10% de descuento</strong> se aplicará en tu próxima factura automáticamente.</p>',
+              timer: 3000,
+              showConfirmButton: false,
+            });
+          } else if (result.dismiss === Swal.DismissReason.cancel) {
+            // User still wants to cancel - confirm with final message
+            await api.post('/stripe/cancel-subscription', { confirm: true });
+            const { data: fresh } = await api.get(`/tenants/${tid}`);
+            updateStateFromTenant(fresh);
+            Swal.fire({
+              icon: 'info',
+              title: 'Plan cancelado',
+              html: '<p>Tu plan seguirá activo hasta el final del período pagado. <strong>Siempre puedes volver.</strong></p>',
+              timer: 3000,
+              showConfirmButton: false,
+            });
+          }
+        } else {
+          // Direct cancellation response (already confirmed)
+          const { data: fresh } = await api.get(`/tenants/${tid}`);
+          updateStateFromTenant(fresh);
+        }
       } else {
         // Upgrade a plan pago: redirigir a Stripe Checkout
         const { data } = await api.post('/stripe/create-checkout-session', { plan: newPlan });
         if (data.url) {
           window.location.href = data.url;
-          return; // No resetear saving, estamos navegando fuera
+          return;
         }
       }
     } catch (e: any) {
-      Swal.fire({ icon: 'error', title: 'Error', text: e?.response?.data?.error || 'No se pudo cambiar el plan.' });
+      Swal.fire({ icon: 'error', title: tr('error'), text: e?.response?.data?.error || tr('could_not_change_plan') });
     } finally {
       setSaving(false);
     }
@@ -658,7 +750,7 @@ const Settings: React.FC = () => {
     if (!tenantId) return;
     setCatLoading(true);
     try { const { data } = await api.get('/categories'); setCategories(data || []); }
-    catch (e: any) { setError(e?.response?.data?.message || e?.message || 'No se pudieron cargar las categorias'); }
+    catch (e: any) { setError(e?.response?.data?.message || e?.message || tr('cat_could_not_load')); }
     finally { setCatLoading(false); }
   };
   const loadServices = async () => {
@@ -668,7 +760,7 @@ const Settings: React.FC = () => {
       const { data } = await api.get(`/services/tenant/${tenantId}`);
       setServices(Array.isArray(data) ? data : []);
     }
-    catch (e: any) { setError(e?.response?.data?.message || e?.message || 'No se pudieron cargar los servicios'); }
+    catch (e: any) { setError(e?.response?.data?.message || e?.message || tr('svc_could_not_load')); }
     finally { setSvcLoading(false); }
   };
 
@@ -710,18 +802,18 @@ const Settings: React.FC = () => {
 
   const deleteService = async (svc: Service) => {
     const result = await Swal.fire({
-      title: `Eliminar "${svc.name}"?`, text: "Esta accion no se puede deshacer.", icon: 'warning',
+      title: tr('svc_delete_title', { name: svc.name }), text: tr('svc_delete_text'), icon: 'warning',
       showCancelButton: true, confirmButtonColor: '#d33', cancelButtonColor: '#3085d6',
-      confirmButtonText: 'Si, eliminar!', cancelButtonText: 'Cancelar'
+      confirmButtonText: tr('svc_delete_confirm'), cancelButtonText: tr('cancel')
     });
     if (result.isConfirmed) {
       try {
         await api.delete(`/services/${svc.id}`);
         await loadServices();
-        Swal.fire('Eliminado!', 'El servicio ha sido eliminado.', 'success');
+        Swal.fire(tr('svc_deleted_title'), tr('svc_deleted_text'), 'success');
       }
       catch (e: any) {
-        Swal.fire({ icon: 'error', title: 'Error', text: e?.response?.data?.message || e?.message || 'No se pudo eliminar el servicio' });
+        Swal.fire({ icon: 'error', title: tr('error'), text: e?.response?.data?.message || e?.message || tr('svc_delete_error') });
       }
     }
   };
@@ -772,10 +864,10 @@ const Settings: React.FC = () => {
   const handleUpdateServiceCategory = async (id: string, newName: string) => {
     try {
       await api.put(`/categories/${id}`, { name: newName });
-      Swal.fire({ icon: 'success', title: '!Actualizada!', text: 'La categoria ha sido actualizada.', timer: 1500, showConfirmButton: false });
+      Swal.fire({ icon: 'success', title: tr('cat_updated_title'), text: tr('cat_updated_text'), timer: 1500, showConfirmButton: false });
       await loadCategories();
     } catch (e: any) {
-      Swal.fire('Error', e?.response?.data?.error || 'No se pudo actualizar la categoria', 'error');
+      Swal.fire(tr('error'), e?.response?.data?.error || tr('cat_update_error'), 'error');
     }
   };
 
@@ -783,9 +875,9 @@ const Settings: React.FC = () => {
     try {
       await api.delete(`/categories/${id}`);
       handleCategoryDeleted(id);
-      Swal.fire({ icon: 'success', title: '!Eliminada!', text: 'La categoria ha sido eliminada.', timer: 1500, showConfirmButton: false });
+      Swal.fire({ icon: 'success', title: tr('cat_deleted_title'), text: tr('cat_deleted_text'), timer: 1500, showConfirmButton: false });
     } catch (e: any) {
-      Swal.fire('Error', e?.response?.data?.error || 'No se pudo eliminar la categoria', 'error');
+      Swal.fire(tr('error'), e?.response?.data?.error || tr('cat_delete_error'), 'error');
     }
   };
 
@@ -798,7 +890,7 @@ const Settings: React.FC = () => {
               <Card className="mt-3">
                 <CardBody className="text-center d-flex align-items-center justify-content-center gap-2">
                   <Spinner size="sm" color="primary" />
-                  <span className="text-muted">Cargando configuracion...</span>
+                  <span className="text-muted">{tr('settings_loading')}</span>
                 </CardBody>
               </Card>
             </div>
@@ -831,7 +923,7 @@ const Settings: React.FC = () => {
                 {/* Logo card */}
                 <Card className="overflow-hidden position-relative" style={{ zIndex: 1 }}>
                   <CardBody className="text-center">
-                    <div className={`position-relative d-inline-block mb-3${isPrimaryBranch ? ' cursor-pointer' : ''}`} onClick={isPrimaryBranch ? openLogoPicker : undefined} title={isPrimaryBranch ? "Cambiar logo" : "Solo la sede principal puede cambiar el logo"}>
+                    <div className={`position-relative d-inline-block mb-3${isPrimaryBranch ? ' cursor-pointer' : ''}`} onClick={isPrimaryBranch ? openLogoPicker : undefined} title={isPrimaryBranch ? tr('sidebar_change_logo') : tr('sidebar_logo_primary_only')}>
                       <img src={logoUrl || avatar1} className="rounded-circle border border-4 border-white shadow object-fit-cover" style={{ width: '96px', height: '96px' }} alt="logo" />
                       {isPrimaryBranch && (
                         <span className="position-absolute bottom-0 end-0 d-flex align-items-center justify-content-center rounded-circle bg-primary text-white border border-2 border-white shadow" style={{ width: '32px', height: '32px' }}>
@@ -841,9 +933,9 @@ const Settings: React.FC = () => {
                       {isPrimaryBranch && <input ref={logoInputRef} type="file" accept="image/*" className="d-none" onChange={onLogoInputChange} />}
                     </div>
                     <div className="fs-12 text-muted mb-2">
-                      {!isPrimaryBranch ? "Solo la sede principal puede cambiar el logo" : uploadingLogo ? "Subiendo logo..." : (logoFile ? "Logo listo para guardar" : "Haz clic en el logo para cambiarlo")}
+                      {!isPrimaryBranch ? tr('sidebar_logo_primary_only') : uploadingLogo ? tr('sidebar_uploading_logo') : (logoFile ? tr('sidebar_logo_ready') : tr('sidebar_logo_click_change'))}
                     </div>
-                    <h5 className="fs-16 fw-semibold mb-1">{name || "Mi peluqueria"}</h5>
+                    <h5 className="fs-16 fw-semibold mb-1">{name || tr('sidebar_my_salon')}</h5>
                   </CardBody>
                 </Card>
 
@@ -857,14 +949,14 @@ const Settings: React.FC = () => {
                       return (
                         <>
                           <div className="d-flex align-items-center mb-3">
-                            <div className="flex-grow-1"><h5 className="fw-semibold mb-0">Mi Plan</h5></div>
+                            <div className="flex-grow-1"><h5 className="fw-semibold mb-0">{tr("my_plan")}</h5></div>
                             <div className="flex-shrink-0">
-                              <span className={`badge bg-${planInfo.color}-subtle text-${planInfo.color} rounded-pill`}>{planInfo.price}</span>
+                              <span className={`badge bg-${planInfo.color}-subtle text-${planInfo.color} rounded-pill`}>{planInfo.priceCOP === 0 ? tr("free") : `$${planInfo.priceCOP.toLocaleString('es-CO')}/${tr("month_short")}`}</span>
                             </div>
                           </div>
                           <div className="text-center mb-3">
                             <span className={`badge bg-${badgeColor}-subtle text-${badgeColor} rounded-pill fs-14 px-3 py-2`}>
-                              {planInfo.label}
+                              {planKey === "free" ? tr("free") : planInfo.label}
                             </span>
                           </div>
                           <Button
@@ -874,7 +966,7 @@ const Settings: React.FC = () => {
                             onClick={() => tabChange("6")}
                           >
                             <i className={planKey === "enterprise" ? "ri-check-double-line" : "ri-vip-crown-line"}></i>
-                            {planKey === "enterprise" ? "Plan Completo" : "Upgrade de Plan"}
+                            {planKey === "enterprise" ? tr('sidebar_full_plan') : tr('sidebar_upgrade_plan')}
                           </Button>
                         </>
                       );
@@ -886,10 +978,10 @@ const Settings: React.FC = () => {
                 <Card>
                   <CardBody>
                     <div className="d-flex align-items-center mb-3">
-                      <div className="flex-grow-1"><h5 className="fw-semibold mb-0">Avance de configuracion</h5></div>
+                      <div className="flex-grow-1"><h5 className="fw-semibold mb-0">{tr('progress_title')}</h5></div>
                       <div className="flex-shrink-0">
                         <span className={`badge ${progress === 100 ? 'bg-success-subtle text-success' : 'bg-primary-subtle text-primary'} rounded-pill`}>
-                          {progress === 100 ? "Completo" : "Parcial"}
+                          {progress === 100 ? tr('progress_complete') : tr('progress_partial')}
                         </span>
                       </div>
                     </div>
@@ -904,39 +996,39 @@ const Settings: React.FC = () => {
                     <ul className="list-unstyled vstack gap-2 mt-3 mb-0">
                       <li className="d-flex align-items-center gap-2">
                         <i className={`fs-16 ${datosOk ? 'ri-checkbox-circle-fill text-success' : 'ri-checkbox-blank-circle-line text-muted'}`}></i>
-                        <span className="flex-grow-1">Datos de la peluqueria</span>
+                        <span className="flex-grow-1">{tr('progress_salon_data')}</span>
                         {!datosOk && (
                           <button onClick={() => tabChange("1")} className="btn btn-link btn-sm text-primary p-0 fw-medium">
-                            Ir <i className="ri-arrow-right-s-line"></i>
+                            {tr('progress_go')} <i className="ri-arrow-right-s-line"></i>
                           </button>
                         )}
                       </li>
                       <li className="d-flex align-items-center gap-2">
                         <i className={`fs-16 ${horariosOk ? 'ri-checkbox-circle-fill text-success' : 'ri-checkbox-blank-circle-line text-muted'}`}></i>
-                        <span className="flex-grow-1">Horarios de atencion</span>
+                        <span className="flex-grow-1">{tr('progress_schedule')}</span>
                         {!horariosOk && (
                           <button onClick={() => tabChange("2")} className="btn btn-link btn-sm text-primary p-0 fw-medium">
-                            Ir <i className="ri-arrow-right-s-line"></i>
+                            {tr('progress_go')} <i className="ri-arrow-right-s-line"></i>
                           </button>
                         )}
                       </li>
                       <li className="d-flex align-items-center gap-2">
                         <i className={`fs-16 ${serviciosOk ? 'ri-checkbox-circle-fill text-success' : 'ri-checkbox-blank-circle-line text-muted'}`}></i>
-                        <span className="flex-grow-1">Servicios creados</span>
+                        <span className="flex-grow-1">{tr('progress_services')}</span>
                         {!serviciosOk && (
                           <button onClick={() => tabChange("3")} className="btn btn-link btn-sm text-primary p-0 fw-medium">
-                            Ir <i className="ri-arrow-right-s-line"></i>
+                            {tr('progress_go')} <i className="ri-arrow-right-s-line"></i>
                           </button>
                         )}
                       </li>
                       <li className="d-flex align-items-center gap-2">
                         <i className={`fs-16 ${personalOk ? 'ri-checkbox-circle-fill text-success' : 'ri-checkbox-blank-circle-line text-muted'}`}></i>
                         <span className="flex-grow-1">
-                          Personal registrado {staffLoading && <Spinner size="sm" className="ms-1" />}
+                          {tr('progress_staff')} {staffLoading && <Spinner size="sm" className="ms-1" />}
                         </span>
                         {!personalOk && !staffLoading && (
                           <button onClick={() => tabChange("4")} className="btn btn-link btn-sm text-primary p-0 fw-medium">
-                            Ir <i className="ri-arrow-right-s-line"></i>
+                            {tr('progress_go')} <i className="ri-arrow-right-s-line"></i>
                           </button>
                         )}
                       </li>
@@ -954,7 +1046,7 @@ const Settings: React.FC = () => {
                   <div className="d-flex align-items-center px-4 pt-3 pb-2">
                     <h4 className="fw-semibold mb-0">
                       <i className="ri-settings-3-line me-2 text-primary"></i>
-                      Configuración
+                      {tr('settings_configuration')}
                     </h4>
                   </div>
                   <Nav tabs className="nav-tabs-custom px-4 mb-0">
@@ -965,7 +1057,7 @@ const Settings: React.FC = () => {
                         style={{ cursor: 'pointer' }}
                       >
                         <i className="ri-home-line me-1"></i>
-                        Datos de la peluqueria
+                        {tr('tab_salon_data')}
                       </NavLink>
                     </NavItem>
                     <NavItem>
@@ -975,7 +1067,7 @@ const Settings: React.FC = () => {
                         style={{ cursor: 'pointer' }}
                       >
                         <i className="ri-time-line me-1"></i>
-                        Horario
+                        {tr('tab_schedule')}
                       </NavLink>
                     </NavItem>
                     <NavItem>
@@ -986,7 +1078,7 @@ const Settings: React.FC = () => {
                       >
                         {!allowedTabs.includes("3") && <i className="ri-lock-line text-muted me-1"></i>}
                         <i className="ri-scissors-2-line me-1"></i>
-                        Servicios
+                        {tr('tab_services')}
                         {allowedTabs.includes("3") && services.length > 0 && (
                           <span className="badge bg-primary-subtle text-primary rounded-pill ms-1">{services.length}</span>
                         )}
@@ -1000,7 +1092,7 @@ const Settings: React.FC = () => {
                       >
                         {!allowedTabs.includes("4") && <i className="ri-lock-line text-muted me-1"></i>}
                         <i className="ri-team-line me-1"></i>
-                        Personal
+                        {tr('tab_staff')}
                         {allowedTabs.includes("4") && staffCount > 0 && (
                           <span className="badge bg-primary-subtle text-primary rounded-pill ms-1">{staffCount}</span>
                         )}
@@ -1014,7 +1106,7 @@ const Settings: React.FC = () => {
                       >
                         {!allowedTabs.includes("5") && <i className="ri-lock-line text-muted me-1"></i>}
                         <i className="ri-whatsapp-line me-1"></i>
-                        Configura tu bot
+                        {tr('tab_whatsapp_bot')}
                       </NavLink>
                     </NavItem>
                     <NavItem>
@@ -1024,7 +1116,7 @@ const Settings: React.FC = () => {
                         style={{ cursor: 'pointer' }}
                       >
                         <i className="ri-vip-crown-line me-1"></i>
-                        Planes
+                        {tr('tab_plans')}
                       </NavLink>
                     </NavItem>
                   </Nav>
@@ -1048,12 +1140,16 @@ const Settings: React.FC = () => {
                       loansToStaff={loansToStaff} setLoansToStaff={setLoansToStaff}
                       allowPastAppointments={allowPastAppointments} setAllowPastAppointments={setAllowPastAppointments}
                       sharedStylistsEnabled={sharedStylistsEnabled} setSharedStylistsEnabled={setSharedStylistsEnabled}
+                      multiStylistEnabled={multiStylistEnabled} setMultiStylistEnabled={setMultiStylistEnabled}
+                      ticketVirtualEnabled={ticketVirtualEnabled} setTicketVirtualEnabled={setTicketVirtualEnabled}
                       crossBranchScheduleBlock={crossBranchScheduleBlock} setCrossBranchScheduleBlock={setCrossBranchScheduleBlock}
                       manageAllBranchesCash={manageAllBranchesCash} setManageAllBranchesCash={setManageAllBranchesCash}
+                      priceOverrideEnabled={priceOverrideEnabled} setPriceOverrideEnabled={setPriceOverrideEnabled}
                       tipSalonPercent={tipSalonPercent} setTipSalonPercent={setTipSalonPercent}
                       branchColor={branchColor} setBranchColor={setBranchColor}
                       hasBranches={hasBranches}
                       isPrimaryBranch={isPrimaryBranch}
+                      isAdmin={isAdmin}
                       perDay={perDay} toggleDay={() => { }} changeHour={() => { }} applyMondayToAll={() => { }}
                       plan={currentPlan}
                       saving={saving} onSubmit={handleSaveInfo} onCancel={() => updateStateFromTenant(tenant)}
@@ -1070,12 +1166,16 @@ const Settings: React.FC = () => {
                       loansToStaff={loansToStaff} setLoansToStaff={setLoansToStaff}
                       allowPastAppointments={allowPastAppointments} setAllowPastAppointments={setAllowPastAppointments}
                       sharedStylistsEnabled={sharedStylistsEnabled} setSharedStylistsEnabled={setSharedStylistsEnabled}
+                      multiStylistEnabled={multiStylistEnabled} setMultiStylistEnabled={setMultiStylistEnabled}
+                      ticketVirtualEnabled={ticketVirtualEnabled} setTicketVirtualEnabled={setTicketVirtualEnabled}
                       crossBranchScheduleBlock={crossBranchScheduleBlock} setCrossBranchScheduleBlock={setCrossBranchScheduleBlock}
                       manageAllBranchesCash={manageAllBranchesCash} setManageAllBranchesCash={setManageAllBranchesCash}
+                      priceOverrideEnabled={priceOverrideEnabled} setPriceOverrideEnabled={setPriceOverrideEnabled}
                       tipSalonPercent={tipSalonPercent} setTipSalonPercent={setTipSalonPercent}
                       branchColor={branchColor} setBranchColor={setBranchColor}
                       hasBranches={hasBranches}
                       isPrimaryBranch={isPrimaryBranch}
+                      isAdmin={isAdmin}
                       perDay={perDay} toggleDay={toggleDay} changeHour={changeHour} applyMondayToAll={applyMondayToAll}
                       saving={saving} onSubmit={handleSaveHours} onCancel={() => updateStateFromTenant(tenant)}
                     />
@@ -1085,12 +1185,12 @@ const Settings: React.FC = () => {
                     <>
                       <div className="d-flex justify-content-between align-items-center mb-3">
                         <h5 className="fs-16 fw-semibold d-flex align-items-center gap-2 mb-0">
-                          <i className="ri-scissors-2-line text-primary"></i>Servicios
+                          <i className="ri-scissors-2-line text-primary"></i>{tr('tab_services')}
                         </h5>
                         <div className="d-flex align-items-center gap-2">
                           {svcLoading && <Spinner size="sm" color="primary" />}
                           <Button color="primary" onClick={openNewService}>
-                            <i className="ri-add-line me-1" /> Nuevo servicio
+                            <i className="ri-add-line me-1" /> {tr('svc_new_service')}
                           </Button>
                         </div>
                       </div>
@@ -1106,7 +1206,7 @@ const Settings: React.FC = () => {
                                 : 'btn-soft-secondary'
                             } rounded-pill`}
                           >
-                            Todas ({services.length})
+                            {tr('svc_all_filter')} ({services.length})
                           </button>
                           {categories.map(cat => {
                             const count = services.filter(s => s.category_id === cat.id).length;
@@ -1132,11 +1232,11 @@ const Settings: React.FC = () => {
                         <Table className="table-hover align-middle mb-0">
                           <thead className="table-light">
                             <tr>
-                              <th>Servicio</th>
-                              <th>Categoria</th>
-                              <th>Duracion</th>
-                              <th>Precio</th>
-                              <th style={{ width: 100 }}>Acciones</th>
+                              <th>{tr('svc_table_service')}</th>
+                              <th>{tr('svc_table_category')}</th>
+                              <th>{tr('svc_table_duration')}</th>
+                              <th>{tr('svc_table_price')}</th>
+                              <th style={{ width: 100 }}>{tr('svc_table_actions')}</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1145,13 +1245,13 @@ const Settings: React.FC = () => {
                                 <td colSpan={5} className="text-center py-4">
                                   <i className="ri-scissors-2-line fs-36 text-muted d-block mb-3"></i>
                                   <h6 className="fw-medium mb-1">
-                                    {svcCategoryFilter !== "all" ? "No hay servicios en esta categoria" : "No has creado ningun servicio todavia"}
+                                    {svcCategoryFilter !== "all" ? tr('svc_no_services_category') : tr('svc_no_services_yet')}
                                   </h6>
                                   <p className="text-muted mb-3">
-                                    {svcCategoryFilter !== "all" ? "Prueba con otra categoria o crea un nuevo servicio." : "Crea tu primer servicio para que tus clientes puedan agendarlo."}
+                                    {svcCategoryFilter !== "all" ? tr('svc_try_other_category') : tr('svc_create_first')}
                                   </p>
                                   <Button color="primary" size="sm" onClick={openNewService}>
-                                    <i className="ri-add-line me-1"></i> Crear servicio
+                                    <i className="ri-add-line me-1"></i> {tr('svc_create_service')}
                                   </Button>
                                 </td>
                               </tr>
@@ -1167,13 +1267,13 @@ const Settings: React.FC = () => {
                                   <td>
                                     <i className="ri-time-line me-1 text-muted"></i>{s.duration_minutes} min
                                   </td>
-                                  <td className="fw-semibold">{formatterCOP.format(s.price)}</td>
+                                  <td className="fw-semibold">{fmtCurrency(s.price)}</td>
                                   <td>
                                     <div className="d-flex gap-2">
-                                      <Button color="soft-primary" size="sm" className="btn-icon" onClick={() => openEditService(s)} title="Editar">
+                                      <Button color="soft-primary" size="sm" className="btn-icon" onClick={() => openEditService(s)} title={tr('edit')}>
                                         <i className="ri-edit-line" />
                                       </Button>
-                                      <Button color="soft-danger" size="sm" className="btn-icon" onClick={() => deleteService(s)} title="Eliminar">
+                                      <Button color="soft-danger" size="sm" className="btn-icon" onClick={() => deleteService(s)} title={tr('delete')}>
                                         <i className="ri-delete-bin-line" />
                                       </Button>
                                     </div>
@@ -1238,6 +1338,7 @@ const Settings: React.FC = () => {
                         tenantId={tenantId}
                         edit={svEdit}
                         onManageCategories={() => setCategoryManagerOpen(true)}
+                        multiStylistEnabled={multiStylistEnabled}
                       />
                     </>
                   )}
@@ -1259,73 +1360,183 @@ const Settings: React.FC = () => {
                       {(() => {
                         const plans = [
                           {
-                            key: "free", name: "Gratis", price: "$0", period: "para siempre",
+                            key: "free", name: tr("free"), priceUSD: 0, priceCOP: 0, period: tr("forever"),
                             icon: "ri-gift-line", color: "secondary", features: [
-                              { text: "Calendario y agenda basica", included: true },
-                              { text: "Enlace de reservas web", included: true },
-                              { text: "1 Perfil de Staff (Admin)", included: true },
-                              { text: "Asistente IA de agendamiento", included: false },
-                              { text: "Geolocalizacion y Digiturno", included: false },
-                              { text: "Modulos avanzados", included: false },
-                              { text: "Asistente IA completo + WhatsApp", included: false },
+                              { text: tr("plan_feat_calendar"), included: true },
+                              { text: tr("plan_feat_booking_link"), included: true },
+                              { text: tr("plan_feat_1_staff"), included: true },
+                              { text: tr("plan_feat_ai_scheduling"), included: false },
+                              { text: tr("plan_feat_geo_queue"), included: false },
+                              { text: tr("plan_feat_advanced_modules"), included: false },
+                              { text: tr("plan_feat_ai_whatsapp"), included: false },
                             ],
                           },
                           {
-                            key: "pro", name: "Pro", price: "$29.900", period: "COP / mes",
+                            key: "pro", name: "Pro", priceUSD: 10, priceCOP: 29900, period: `/ ${tr("month_short")}`,
                             icon: "ri-rocket-line", color: "primary", features: [
-                              { text: "Todo lo del plan Gratis", included: true },
-                              { text: "Asistente IA de agendamiento", included: true },
-                              { text: "Geolocalizacion y Digiturno", included: true },
-                              { text: "Servicios y catalogo completo", included: true },
-                              { text: "Staff ilimitado + recepcionistas", included: true },
-                              { text: "Modulos: nomina, inventario, prestamos", included: true },
-                              { text: "Asistente IA completo + WhatsApp", included: false },
+                              { text: tr("plan_feat_all_free"), included: true },
+                              { text: tr("plan_feat_ai_scheduling"), included: true },
+                              { text: tr("plan_feat_geo_queue"), included: true },
+                              { text: tr("plan_feat_full_catalog"), included: true },
+                              { text: tr("plan_feat_unlimited_staff"), included: true },
+                              { text: tr("plan_feat_payroll_inventory"), included: true },
+                              { text: tr("plan_feat_ai_whatsapp"), included: false },
                             ],
                           },
                           {
-                            key: "business", name: "Business", price: "$49.900", period: "COP / mes",
+                            key: "business", name: "Business", priceUSD: 19, priceCOP: 49900, period: `/ ${tr("month_short")}`,
                             icon: "ri-building-2-line", color: "info", highlighted: true, features: [
-                              { text: "Todo lo del plan Pro", included: true },
-                              { text: "Asistente IA completo (ventas, reportes)", included: true },
-                              { text: "Bot de WhatsApp con IA", included: true },
-                              { text: "Boton flotante con asistente completo", included: true },
-                              { text: "Sitio web profesional incluido", included: true },
-                              { text: "Multiples sucursales", included: false },
+                              { text: tr("plan_feat_all_pro"), included: true },
+                              { text: tr("plan_feat_ai_complete"), included: true },
+                              { text: tr("plan_feat_whatsapp_bot"), included: true },
+                              { text: tr("plan_feat_floating_assistant"), included: true },
+                              { text: tr("plan_feat_pro_website"), included: true },
+                              { text: tr("plan_feat_multi_branch"), included: false },
                             ],
                           },
                           {
-                            key: "enterprise", name: "Enterprise", price: "$99.900", period: "COP / mes",
+                            key: "enterprise", name: "Enterprise", priceUSD: 34.90, priceCOP: 129900, period: `/ ${tr("month_short")}`,
                             icon: "ri-global-line", color: "warning", features: [
-                              { text: "Todo lo del plan Business", included: true },
-                              { text: "Multiples sucursales (Multisite)", included: true },
-                              { text: "Estilistas compartidos entre sedes", included: true },
-                              { text: "Analitica global avanzada", included: true },
-                              { text: "Soporte VIP 24/7", included: true },
+                              { text: tr("plan_feat_all_business"), included: true },
+                              { text: tr("plan_feat_multisite"), included: true },
+                              { text: tr("plan_feat_shared_stylists"), included: true },
+                              { text: tr("plan_feat_global_analytics"), included: true },
+                              { text: tr("plan_feat_vip_support"), included: true },
+                              { text: tr("plan_feat_electronic_invoice"), included: true },
                             ],
                           },
                         ];
                         const currentIdx = PLAN_ORDER.indexOf(currentPlan);
                         return (
                           <>
+                            {/* Header */}
                             <div className="text-center mb-4">
                               <h5 className="fs-16 fw-semibold mb-1 d-flex align-items-center justify-content-center gap-2">
                                 <i className="ri-vip-crown-line text-warning"></i>
-                                Planes Tupelukeria
+                                {tr("plans_title")}
                               </h5>
-                              <p className="text-muted">Elige el plan que mejor se adapte a tu negocio. Todos los modulos se desbloquean al activar el plan correspondiente.</p>
-                              {tenant?.has_stripe_subscription && tenant?.subscription_status && (
-                                <div className="mt-2">
-                                  <Badge color={tenant.subscription_status === 'active' ? 'success' : tenant.subscription_status === 'past_due' ? 'warning' : 'secondary'} className="me-2">
-                                    {tenant.subscription_status === 'active' ? 'Suscripcion activa' : tenant.subscription_status === 'past_due' ? 'Pago pendiente' : 'Cancelada'}
-                                  </Badge>
-                                  {tenant.current_period_end && tenant.subscription_status === 'active' && (
-                                    <small className="text-muted">
-                                      Proxima facturacion: {new Date(tenant.current_period_end).toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })}
-                                    </small>
-                                  )}
-                                </div>
-                              )}
+                              <p className="text-muted mb-0">{tr("plans_subtitle")}</p>
                             </div>
+
+                            {/* Subscription status card */}
+                            {tenant?.has_stripe_subscription && tenant?.subscription_status && (
+                              <Card className={`mb-4 border ${
+                                tenant.subscription_status === 'active' ? 'border-success' :
+                                tenant.subscription_status === 'cancel_at_period_end' ? 'border-warning' :
+                                tenant.subscription_status === 'past_due' ? 'border-danger' : 'border-secondary'
+                              }`}>
+                                <CardBody className="py-3">
+                                  <Row className="align-items-center">
+                                    <Col md={6}>
+                                      <div className="d-flex align-items-center gap-3">
+                                        <div className={`rounded-circle d-flex align-items-center justify-content-center ${
+                                          tenant.subscription_status === 'active' ? 'bg-success-subtle text-success' :
+                                          tenant.subscription_status === 'cancel_at_period_end' ? 'bg-warning-subtle text-warning' :
+                                          tenant.subscription_status === 'past_due' ? 'bg-danger-subtle text-danger' : 'bg-secondary-subtle text-secondary'
+                                        }`} style={{ width: 44, height: 44, flexShrink: 0 }}>
+                                          <i className={`fs-20 ${
+                                            tenant.subscription_status === 'active' ? 'ri-checkbox-circle-fill' :
+                                            tenant.subscription_status === 'cancel_at_period_end' ? 'ri-time-fill' :
+                                            tenant.subscription_status === 'past_due' ? 'ri-error-warning-fill' : 'ri-close-circle-fill'
+                                          }`}></i>
+                                        </div>
+                                        <div>
+                                          <h6 className="mb-1 fw-semibold">
+                                            Plan {(PLAN_CONFIG[currentPlan] || PLAN_CONFIG.free).label}
+                                            <Badge color={
+                                              tenant.subscription_status === 'active' ? 'success' :
+                                              tenant.subscription_status === 'cancel_at_period_end' ? 'warning' :
+                                              tenant.subscription_status === 'past_due' ? 'danger' : 'secondary'
+                                            } className="ms-2" pill>
+                                              {tenant.subscription_status === 'active' ? tr('subscription_active') :
+                                               tenant.subscription_status === 'cancel_at_period_end' ? tr('cancels_at_period_end') :
+                                               tenant.subscription_status === 'past_due' ? tr('payment_pending') : tr('subscription_cancelled')}
+                                            </Badge>
+                                          </h6>
+                                          {tenant.current_period_end && (tenant.subscription_status === 'active' || tenant.subscription_status === 'cancel_at_period_end') && (
+                                            <small className="text-muted">
+                                              <i className="ri-calendar-line me-1"></i>
+                                              {tenant.subscription_status === 'cancel_at_period_end' ? tr("plan_active_until") : tr("next_billing")}{' '}
+                                              {new Date(tenant.current_period_end).toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })}
+                                            </small>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </Col>
+                                    <Col md={6} className="mt-3 mt-md-0">
+                                      <div className="d-flex justify-content-md-end gap-2">
+                                        <Button size="sm" color="primary" outline onClick={async () => {
+                                          try {
+                                            const { data } = await api.post('/stripe/billing-portal');
+                                            if (data.url) window.open(data.url, '_blank');
+                                          } catch (e: any) {
+                                            Swal.fire({ icon: 'error', title: 'Error', text: e?.response?.data?.error || 'No se pudo abrir el portal.' });
+                                          }
+                                        }}>
+                                          <i className="ri-bank-card-line me-1"></i>{tr("manage_payment")}
+                                        </Button>
+                                        <Button size="sm" color="info" outline onClick={async () => {
+                                          try {
+                                            const { data } = await api.get('/stripe/invoices');
+                                            if (!data.invoices?.length) {
+                                              Swal.fire({ icon: 'info', title: tr('invoices_history'), text: tr('no_invoices') });
+                                              return;
+                                            }
+                                            const invoiceHtml = data.invoices.map((inv: any) =>
+                                              `<tr>
+                                                <td class="py-2">${new Date(inv.date).toLocaleDateString('es-CO')}</td>
+                                                <td class="py-2 fw-semibold">$${(inv.amount / 100).toLocaleString('es-CO')}</td>
+                                                <td class="py-2"><span class="badge bg-${inv.status === 'paid' ? 'success' : 'warning'}-subtle text-${inv.status === 'paid' ? 'success' : 'warning'} rounded-pill">${inv.status === 'paid' ? 'Pagada' : inv.status}</span></td>
+                                                <td class="py-2">${inv.pdf_url ? `<a href="${inv.pdf_url}" target="_blank" class="text-primary"><i class="ri-download-2-line"></i> PDF</a>` : '-'}</td>
+                                              </tr>`
+                                            ).join('');
+                                            Swal.fire({
+                                              title: `<i class="ri-file-list-3-line me-2"></i>${tr('invoices_title')}`,
+                                              html: `<div class="table-responsive"><table class="table table-hover table-sm text-start mb-0"><thead class="table-light"><tr><th>Fecha</th><th>Monto</th><th>Estado</th><th></th></tr></thead><tbody>${invoiceHtml}</tbody></table></div>`,
+                                              width: 650,
+                                              showConfirmButton: true,
+                                              confirmButtonText: 'Cerrar',
+                                              confirmButtonColor: '#405189',
+                                            });
+                                          } catch (e: any) {
+                                            Swal.fire({ icon: 'error', title: 'Error', text: 'No se pudieron cargar las facturas.' });
+                                          }
+                                        }}>
+                                          <i className="ri-file-list-3-line me-1"></i>{tr("invoices_history")}
+                                        </Button>
+                                      </div>
+                                    </Col>
+                                  </Row>
+                                </CardBody>
+                              </Card>
+                            )}
+                            {/* Banner "Vuelve" for cancelled/free users */}
+                            {currentPlan === 'free' && (tenant?.subscription_status === 'canceled' || tenant?.subscription_status === 'expired') && (
+                              <Card className="mb-3 border border-primary" style={{ background: 'linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%)' }}>
+                                <CardBody className="py-3">
+                                  <Row className="align-items-center">
+                                    <Col md={8}>
+                                      <div className="d-flex align-items-center gap-3">
+                                        <span style={{ fontSize: 36 }}>👋</span>
+                                        <div>
+                                          <h5 className="fw-bold mb-1 text-primary">¡Te extrañamos! Vuelve a tu plan</h5>
+                                          <p className="text-muted mb-0 small">
+                                            Tu salón funcionaba mejor con las herramientas avanzadas: agenda inteligente, geolocalización, reportes y más.
+                                            <strong> Reactiva tu plan y recupera todo al instante.</strong>
+                                          </p>
+                                        </div>
+                                      </div>
+                                    </Col>
+                                    <Col md={4} className="text-md-end mt-2 mt-md-0">
+                                      <Badge color="primary" className="fs-13 px-3 py-2">
+                                        <i className="ri-arrow-go-back-line me-1"></i> {tr("come_back") || "¡Vuelve!"}
+                                      </Badge>
+                                    </Col>
+                                  </Row>
+                                </CardBody>
+                              </Card>
+                            )}
+
                             <Row className="g-3">
                               {plans.map((plan) => {
                                 const isCurrent = plan.key === currentPlan;
@@ -1339,13 +1550,13 @@ const Settings: React.FC = () => {
                                     }`}>
                                       {plan.highlighted && !isCurrent && (
                                         <div className="text-center pt-3">
-                                          <span className="badge bg-primary-subtle text-primary rounded-pill">Recomendado</span>
+                                          <span className="badge bg-primary-subtle text-primary rounded-pill">{tr("recommended")}</span>
                                         </div>
                                       )}
                                       {isCurrent && (
                                         <div className="text-center pt-3">
                                           <span className="badge bg-success-subtle text-success rounded-pill">
-                                            <i className="ri-check-line me-1"></i>Tu plan actual
+                                            <i className="ri-check-line me-1"></i>{tr("your_current_plan")}
                                           </span>
                                         </div>
                                       )}
@@ -1357,7 +1568,7 @@ const Settings: React.FC = () => {
                                           <h5 className="fw-bold mb-0">{plan.name}</h5>
                                         </div>
                                         <div className="text-center mb-3">
-                                          <span className="fs-24 fw-bold">{plan.price}</span>
+                                          <span className="fs-24 fw-bold">{plan.priceCOP === 0 ? tr("free") : `$${plan.priceCOP.toLocaleString('es-CO')}`}</span>
                                           <small className="text-muted d-block">{plan.period}</small>
                                         </div>
                                         <hr className="my-2" />
@@ -1372,7 +1583,7 @@ const Settings: React.FC = () => {
                                         <div className="mt-auto">
                                           {isCurrent ? (
                                             <Button disabled color="success" outline className="w-100">
-                                              <i className="ri-check-double-line me-1"></i> Plan Activo
+                                              <i className="ri-check-double-line me-1"></i> {tr("plan_active")}
                                             </Button>
                                           ) : isDowngrade ? (
                                             <Button
@@ -1380,21 +1591,21 @@ const Settings: React.FC = () => {
                                               className="w-100"
                                               onClick={() => {
                                                 Swal.fire({
-                                                  title: `Cambiar a ${plan.name}?`,
+                                                  title: `${tr("switch_to")} ${plan.name}?`,
                                                   html: plan.key === 'free' && tenant?.has_stripe_subscription
-                                                    ? `<p>Tu suscripcion actual sera <strong>cancelada</strong> y perderas acceso a las funcionalidades de tu plan.</p>`
-                                                    : `<p>Vas a cambiar al plan <strong>${plan.name}</strong>. Perderas acceso a funcionalidades de tu plan actual.</p>`,
+                                                    ? `<p>${tr("cancel_subscription_warning")}</p>`
+                                                    : `<p>${tr("downgrade_warning")} <strong>${plan.name}</strong>.</p>`,
                                                   icon: "warning",
                                                   showCancelButton: true,
-                                                  confirmButtonText: plan.key === 'free' ? "Cancelar suscripcion" : "Si, cambiar",
-                                                  cancelButtonText: "Volver",
+                                                  confirmButtonText: plan.key === 'free' ? tr("cancel_subscription") : tr("yes_switch"),
+                                                  cancelButtonText: tr("go_back"),
                                                   confirmButtonColor: "#f06548",
                                                 }).then((result) => {
                                                   if (result.isConfirmed) changePlan(plan.key);
                                                 });
                                               }}
                                             >
-                                              Cambiar a {plan.name}
+                                              {tr("switch_to")} {plan.name}
                                             </Button>
                                           ) : (
                                             <Button
@@ -1403,19 +1614,19 @@ const Settings: React.FC = () => {
                                               disabled={saving}
                                               onClick={() => {
                                                 Swal.fire({
-                                                  title: `Activar plan ${plan.name}`,
-                                                  html: `<p>Deseas activar el plan <strong>${plan.name} (${plan.price}/mes)</strong>?</p><p class="text-muted small">Seras redirigido a la pagina de pago seguro para completar tu suscripcion.</p>`,
+                                                  title: `${tr("activate_plan")} ${plan.name}`,
+                                                  html: `<p>${tr("activate_plan_confirm")} <strong>${plan.name} ($${plan.priceCOP.toLocaleString('es-CO')}/${tr("month_short")})</strong>?</p><p class="text-muted small">${tr("redirect_to_payment")}</p>`,
                                                   icon: "question",
                                                   showCancelButton: true,
-                                                  confirmButtonText: `Ir a pagar`,
-                                                  cancelButtonText: "Cancelar",
+                                                  confirmButtonText: tr("go_to_pay"),
+                                                  cancelButtonText: tr("cancel"),
                                                   confirmButtonColor: "#0ab39c",
                                                 }).then((result) => {
                                                   if (result.isConfirmed) changePlan(plan.key);
                                                 });
                                               }}
                                             >
-                                              {saving ? <Spinner size="sm" /> : <><i className="ri-vip-crown-line me-1"></i> Activar {plan.name}</>}
+                                              {saving ? <Spinner size="sm" /> : <><i className="ri-vip-crown-line me-1"></i> {tr("activate")} {plan.name}</>}
                                             </Button>
                                           )}
                                         </div>
@@ -1440,7 +1651,7 @@ const Settings: React.FC = () => {
       <CategoryManagerModal
         isOpen={isCategoryManagerOpen}
         toggle={() => setCategoryManagerOpen(false)}
-        title="Gestionar Categorias de Servicios"
+        title={tr('cat_manager_title')}
         categories={categories}
         onSave={handleUpdateServiceCategory}
         onDelete={handleDeleteServiceCategory}

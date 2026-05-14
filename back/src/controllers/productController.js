@@ -69,11 +69,21 @@ exports.createProduct = async (req, res) => {
  * Obtiene todos los productos activos de un tenant, con filtros opcionales.
  */
 exports.getProductsByTenant = async (req, res) => {
-  const { tenant_id } = req.user;
-  const { audience } = req.query;
+  const { tenant_id: userTenantId } = req.user;
+  const { audience, target_tenant_id } = req.query;
+
+  let effectiveTenantId = userTenantId;
+  if (target_tenant_id && target_tenant_id !== userTenantId) {
+    const { canAccessTenant } = require('./ficheroController');
+    const canAccess = await canAccessTenant(userTenantId, target_tenant_id);
+    if (!canAccess) {
+      return res.status(403).json({ error: 'No tiene acceso a este negocio.' });
+    }
+    effectiveTenantId = target_tenant_id;
+  }
 
   try {
-    const where = { tenant_id, is_active: true };
+    const where = { tenant_id: effectiveTenantId, is_active: true };
 
     if (audience === 'cliente') {
       where.audience_type = { in: ['cliente', 'ambos'] };

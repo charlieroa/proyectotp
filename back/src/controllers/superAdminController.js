@@ -35,7 +35,10 @@ exports.getDashboard = async (_req, res) => {
 exports.listTenants = async (_req, res) => {
   try {
     const rows = await prisma.$queryRawUnsafe(
-      `SELECT t.id, t.name, t.slug, t.email, t.phone, t.payment_plan, t.created_at,
+      `SELECT t.id, t.name, t.slug, t.email, t.phone,
+              t.plan, t.subscription_status, t.current_period_end,
+              t.stripe_subscription_id, t.stripe_customer_id,
+              t.created_at,
               (SELECT COUNT(*)::int FROM users u WHERE u.tenant_id = t.id) AS user_count,
               (SELECT COALESCE(SUM(tu.total_tokens), 0)::bigint
                FROM token_usage tu
@@ -59,16 +62,34 @@ exports.listTenants = async (_req, res) => {
 
 exports.updateTenant = async (req, res) => {
   const { id } = req.params;
-  const { payment_plan, name } = req.body;
+  const { payment_plan, plan, name, subscription_status } = req.body;
 
   try {
     const data = {};
 
-    if (payment_plan !== undefined) {
-      data.payment_plan = payment_plan;
+    // Support both old payment_plan and new plan field
+    if (plan !== undefined) {
+      data.plan = plan;
+    } else if (payment_plan !== undefined) {
+      data.plan = payment_plan;
     }
     if (name !== undefined) {
       data.name = name;
+    }
+    if (subscription_status !== undefined) {
+      data.subscription_status = subscription_status;
+    }
+
+    // If changing to free, clear Stripe fields
+    if (data.plan === 'free') {
+      data.stripe_subscription_id = null;
+      data.subscription_status = 'canceled';
+      data.current_period_end = null;
+    }
+
+    // If upgrading manually (no Stripe), set status
+    if (data.plan && data.plan !== 'free' && !data.subscription_status) {
+      data.subscription_status = 'active';
     }
 
     if (Object.keys(data).length === 0) {
@@ -80,7 +101,7 @@ exports.updateTenant = async (req, res) => {
     const updated = await prisma.tenants.update({
       where: { id },
       data,
-      select: { id: true, name: true, payment_plan: true },
+      select: { id: true, name: true, plan: true, subscription_status: true },
     });
 
     return res.json(updated);

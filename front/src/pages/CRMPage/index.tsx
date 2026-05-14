@@ -4,6 +4,7 @@ import {
   Container, Nav, NavItem, NavLink, TabContent, TabPane, Badge, Button,
 } from "reactstrap";
 import classnames from "classnames";
+import { useTranslation } from 'react-i18next';
 import { useSelector } from "react-redux";
 import { selectTenantPlan, isPlanAtLeast } from "../../slices/Settings/settingsSlice";
 import CrmContacts from "../Crm/CrmContacts";
@@ -15,6 +16,7 @@ const TAB_MAP: Record<string, string> = {
 const TAB_MAP_REV: Record<string, string> = { "2": "campaigns" };
 
 const CRMPage = () => {
+  const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
   const [activeTab, setActiveTab] = useState(
@@ -25,8 +27,8 @@ const CRMPage = () => {
   const hasCampaigns = isPlanAtLeast(tenantPlan, "enterprise");
 
   useEffect(() => {
-    document.title = "CRM | Tupelukeria";
-  }, []);
+    document.title = `${t("menu_crm")} | Tupelukeria`;
+  }, [t]);
 
   const toggleTab = (tab: string) => {
     if (activeTab !== tab) {
@@ -39,11 +41,11 @@ const CRMPage = () => {
     <div className="page-content">
       <Container fluid>
         <div className="d-flex align-items-center mb-3">
-          <h4 className="mb-0 flex-grow-1">CRM</h4>
+          <h4 className="mb-0 flex-grow-1">{t("menu_crm")}</h4>
           {activeTab === "2" && hasCampaigns && (
             <Link to="/campaigns/new">
               <Button color="success" size="sm">
-                <i className="ri-add-line me-1"></i> Nueva Campaña
+                <i className="ri-add-line me-1"></i> {t("new_campaign")}
               </Button>
             </Link>
           )}
@@ -56,7 +58,7 @@ const CRMPage = () => {
               onClick={() => toggleTab("1")}
               style={{ cursor: "pointer" }}
             >
-              <i className="ri-contacts-line me-1"></i> Contactos
+              <i className="ri-contacts-line me-1"></i> {t("contacts")}
             </NavLink>
           </NavItem>
           <NavItem>
@@ -67,7 +69,7 @@ const CRMPage = () => {
               }}
               style={{ cursor: hasCampaigns ? "pointer" : "not-allowed", opacity: hasCampaigns ? 1 : 0.6 }}
             >
-              <i className="ri-mail-send-line me-1"></i> Campañas
+              <i className="ri-mail-send-line me-1"></i> {t("campaigns")}
               {!hasCampaigns && (
                 <Badge color="warning" className="ms-2" pill>Enterprise</Badge>
               )}

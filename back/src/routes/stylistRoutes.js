@@ -41,6 +41,12 @@ router.post('/bookings/:bookingId/reject', authMiddleware, stylistAppController.
 // 📋 App Móvil: Historial de Servicios
 router.get('/services/attended', authMiddleware, stylistAppController.getServicesAttended);
 
+// 💰 App Móvil: Earnings (dashboard)
+router.get('/earnings', authMiddleware, stylistAppController.getEarnings);
+
+// 👥 App Móvil: Clientes atendidos
+router.get('/clients', authMiddleware, stylistAppController.getClientsServed);
+
 // 💰 App Móvil: Ventas de Productos
 router.get('/products/sales', authMiddleware, stylistAppController.getProductSales);
 
@@ -53,6 +59,10 @@ router.get('/tracking', authMiddleware, stylistAppController.getStylistsTracking
 // 📋 App Móvil: Fichero Digital (Posición en cola)
 router.get('/queue-position', authMiddleware, stylistAppController.getQueuePosition);
 router.get('/smart-queue', authMiddleware, stylistAppController.getSmartQueue);
+
+// 🔔 App Móvil: Device Tokens (Push Notifications)
+router.post('/device-token', authMiddleware, stylistAppController.registerDeviceToken);
+router.delete('/device-token', authMiddleware, stylistAppController.removeDeviceToken);
 
 // 🧊 App Móvil: Schedule Blocks (Freeze Agenda)
 router.post('/schedule-block', authMiddleware, stylistAppController.createScheduleBlock);

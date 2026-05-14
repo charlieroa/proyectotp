@@ -221,22 +221,8 @@ const Layout = (props: any) => {
                 </div>
             </div>
 
-            {/* Botón flotante de Asistencia IA (hidden for super admin) */}
-            {!hideAssistant && (
-                <div className="customizer-setting d-none d-md-block">
-                    <button
-                        onClick={toggleChat}
-                        className="btn-info rounded-pill shadow-lg btn btn-icon btn-lg p-2"
-                        title="Asistencia IA"
-                        style={{ border: 'none' }}
-                    >
-                        <i className='ri-sparkling-line fs-22'></i>
-                    </button>
-                </div>
-            )}
-
-            {/* Chat flotante de Asistencia IA */}
-            {!hideAssistant && <FloatingChat isOpen={chatOpen} toggle={toggleChat} />}
+            {/* Botón flotante y FloatingChat de Asistencia IA removidos —
+                ahora se accede vía el botón "Hablar con IA" del header (Offcanvas con AIAssistant). */}
         </React.Fragment>
     );
 };

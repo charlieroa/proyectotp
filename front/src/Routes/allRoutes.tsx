@@ -1,108 +1,128 @@
-// Contenido para tu archivo de Rutas (ej: src/routes/index.js)
-
-import React from "react";
+import React, { Suspense } from "react";
 import { Navigate } from "react-router-dom";
 
-// --- Nuestros Componentes de Página ---
+// Spinner for lazy-loaded pages
+const PageLoader = () => (
+  <div className="d-flex justify-content-center align-items-center" style={{ minHeight: "60vh" }}>
+    <div className="spinner-border text-primary" role="status">
+      <span className="visually-hidden">Loading...</span>
+    </div>
+  </div>
+);
+
+// Helper to wrap lazy components with Suspense
+const Loadable = (Component: React.LazyExoticComponent<any>) => (props?: any) => (
+  <Suspense fallback={<PageLoader />}>
+    <Component {...props} />
+  </Suspense>
+);
+
+// --- Lazy-loaded Page Components ---
 
 // Dashboard
-import DashboardPrincipal from "../pages/DashboardPrincipal";
+const DashboardPrincipal = Loadable(React.lazy(() => import("../pages/DashboardPrincipal")));
+const DashboardV2 = Loadable(React.lazy(() => import("../pages/DashboardV2")));
 
 // Calendario
-import Calendar from "../pages/Calendar";
+const Calendar = Loadable(React.lazy(() => import("../pages/Calendar")));
 
 // Estilistas
-import CandidateList from "../pages/Crm/CrmContacts"; // Lista de Estilistas
-import SimplePage from "../pages/Pages/Profile/SimplePage/SimplePage"; // Detalle de Estilista
+const CandidateList = Loadable(React.lazy(() => import("../pages/Crm/CrmContacts")));
+const SimplePage = Loadable(React.lazy(() => import("../pages/Pages/Profile/SimplePage/SimplePage")));
 
 // Inventario
-import EcommerceProducts from "../pages/Ecommerce/EcommerceProducts/index";
-import EcommerceProductDetail from "../pages/Ecommerce/EcommerceProducts/EcommerceProductDetail";
+const EcommerceProducts = Loadable(React.lazy(() => import("../pages/Ecommerce/EcommerceProducts/index")));
+const EcommerceProductDetail = Loadable(React.lazy(() => import("../pages/Ecommerce/EcommerceProducts/EcommerceProductDetail")));
 
-// --- NUESTRO NUEVO COMPONENTE DE PUNTO DE VENTA ---
-import PointOfSale from "../pages/PointOfSale";
+// Punto de Venta
+const PointOfSale = Loadable(React.lazy(() => import("../pages/PointOfSale")));
 
-// --- NUESTROS COMPONENTES DE NÓMINA ---
-import PayrollPage from "../pages/Payroll"; // Página de la lista de nóminas
-import PayrollPreview from "../pages/Payroll/PayrollPreview"; // <-- 1. IMPORTAMOS LA NUEVA VISTA DE DETALLE
+// Nómina
+const PayrollPage = Loadable(React.lazy(() => import("../pages/Payroll")));
+const PayrollPreview = Loadable(React.lazy(() => import("../pages/Payroll/PayrollPreview")));
 
 // Autenticación y Perfil
-import Login from "../pages/Authentication/Login";
-import Logout from "../pages/Authentication/Logout";
-import Register from "../pages/Authentication/Register"; // Registro de Clientes
-import UserProfile from "../pages/Authentication/user-profile";
-import TenantRegister from "../pages/Authentication/TenantRegister"; // Registro de Dueños
-import ForgetPassword from "../pages/Authentication/ForgetPassword";
-import ResetPassword from "../pages/Authentication/ResetPassword";
-import Settings from '../pages/Pages/Profile/Settings/Settings';
+const Login = Loadable(React.lazy(() => import("../pages/Authentication/Login")));
+const Logout = Loadable(React.lazy(() => import("../pages/Authentication/Logout")));
+const Register = Loadable(React.lazy(() => import("../pages/Authentication/Register")));
+const UserProfile = Loadable(React.lazy(() => import("../pages/Authentication/user-profile")));
+const TenantRegister = Loadable(React.lazy(() => import("../pages/Authentication/TenantRegister")));
+const ForgetPassword = Loadable(React.lazy(() => import("../pages/Authentication/ForgetPassword")));
+const ResetPassword = Loadable(React.lazy(() => import("../pages/Authentication/ResetPassword")));
+const Settings = Loadable(React.lazy(() => import("../pages/Pages/Profile/Settings/Settings")));
 
-// CRM (tabbed page)
-import CRMPage from "../pages/CRMPage";
+// CRM
+const CRMPage = Loadable(React.lazy(() => import("../pages/CRMPage")));
 
-// Mensajes (WhatsApp conversations)
-import MessagesPage from "../pages/Mensajes";
+// Mensajes
+const MessagesPage = Loadable(React.lazy(() => import("../pages/Mensajes")));
 
 // Campañas
-import CreateCampaign from "../pages/Campaigns/CreateCampaign";
-import CampaignDetail from "../pages/Campaigns/CampaignDetail";
+const CreateCampaign = Loadable(React.lazy(() => import("../pages/Campaigns/CreateCampaign")));
+const CampaignDetail = Loadable(React.lazy(() => import("../pages/Campaigns/CampaignDetail")));
 
 // Fichero Digital
-import FicheroDigital from "../pages/Fichero";
+const FicheroDigital = Loadable(React.lazy(() => import("../pages/Fichero")));
+
+// Página Web
+const WebPage = Loadable(React.lazy(() => import("../pages/WebPage")));
 
 // Asistente IA
-import AIAssistant from "../pages/AIAssistant";
+const AIAssistant = Loadable(React.lazy(() => import("../pages/AIAssistant")));
 
 // Super Admin
-import SuperAdminDashboard from "../pages/SuperAdmin";
-
-// Landing is now a separate static page (landing.html)
-// "/" redirects to /login
+const SuperAdminDashboard = Loadable(React.lazy(() => import("../pages/SuperAdmin")));
 
 // --- NUESTRAS RUTAS PROTEGIDAS ---
 const authProtectedRoutes = [
   // Asistente IA
-  { path: "/assistant", component: <div className="page-content page-content-flush"><AIAssistant /></div> },
+  { path: "/assistant", component: <div className="page-content page-content-flush">{AIAssistant()}</div> },
 
   // Dashboard
-  { path: "/dashboard", component: <DashboardPrincipal /> },
+  { path: "/dashboard", component: DashboardPrincipal() },
+  // Dashboard v2 — preview del rediseño Luxe (sin lógica real, datos mock)
+  { path: "/dashboard-v2", component: DashboardV2() },
 
   // Super Admin
-  { path: "/super-admin", component: <SuperAdminDashboard /> },
+  { path: "/super-admin", component: SuperAdminDashboard() },
 
   // Calendario
-  { path: "/calendar", component: <Calendar /> },
+  { path: "/calendar", component: Calendar() },
 
   // Punto de Venta
-  { path: "/checkout", component: <PointOfSale /> },
+  { path: "/checkout", component: PointOfSale() },
 
   // Estilistas
-  { path: "/stylists", component: <CandidateList /> },
-  { path: "/stylists/:id", component: <SimplePage /> },
+  { path: "/stylists", component: CandidateList() },
+  { path: "/stylists/:id", component: SimplePage() },
 
   // Inventario
-  { path: "/inventory", component: <EcommerceProducts /> },
-  { path: "/inventory/:id", component: <EcommerceProductDetail /> },
+  { path: "/inventory", component: EcommerceProducts() },
+  { path: "/inventory/:id", component: EcommerceProductDetail() },
 
   // Nómina
-  { path: "/payroll", component: <PayrollPage /> },
-  { path: "/payroll/preview", component: <PayrollPreview /> },
+  { path: "/payroll", component: PayrollPage() },
+  { path: "/payroll/preview", component: PayrollPreview() },
 
   // Fichero Digital
-  { path: "/fichero", component: <FicheroDigital /> },
+  { path: "/fichero", component: FicheroDigital() },
+
+  // Página Web
+  { path: "/web-page", component: WebPage() },
 
   // CRM
-  { path: "/crm", component: <CRMPage /> },
+  { path: "/crm", component: CRMPage() },
 
   // Mensajes
-  { path: "/messages", component: <MessagesPage /> },
+  { path: "/messages", component: MessagesPage() },
 
   // Campañas (sub-routes)
-  { path: "/campaigns/new", component: <CreateCampaign /> },
-  { path: "/campaigns/:id", component: <CampaignDetail /> },
-  
+  { path: "/campaigns/new", component: CreateCampaign() },
+  { path: "/campaigns/:id", component: CampaignDetail() },
+
   // Configuración y Perfil
-  { path: "/settings", component: <Settings /> },
-  { path: "/profile", component: <UserProfile /> },
+  { path: "/settings", component: Settings() },
+  { path: "/profile", component: UserProfile() },
 
   // Catch-all redirige al dashboard
   { path: "*", component: <Navigate to="/dashboard" /> },
@@ -115,12 +135,12 @@ const publicRoutes = [
   { path: "/", component: <Navigate to="/login" /> },
 
   // Rutas de Autenticación
-  { path: "/logout", component: <Logout /> },
-  { path: "/login", component: <Login /> },
-  { path: "/register", component: <Register /> }, // Registro de Clientes
-  { path: "/register-tenant", component: <TenantRegister /> }, // Registro de Dueños
-  { path: "/forgot-password", component: <ForgetPassword /> },
-  { path: "/reset-password/:token", component: <ResetPassword /> },
+  { path: "/logout", component: Logout() },
+  { path: "/login", component: Login() },
+  { path: "/register", component: Register() },
+  { path: "/register-tenant", component: TenantRegister() },
+  { path: "/forgot-password", component: ForgetPassword() },
+  { path: "/reset-password/:token", component: ResetPassword() },
 ];
 
 export { authProtectedRoutes, publicRoutes };

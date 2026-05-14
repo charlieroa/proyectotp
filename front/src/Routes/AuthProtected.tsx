@@ -69,7 +69,7 @@ const AuthProtected = (props : any) =>{
   const userRole = getRoleFromToken();
   const blockedRoutes = userRole ? ROLE_BLOCKED_ROUTES[userRole] : undefined;
   if (blockedRoutes && blockedRoutes.some(r => location.pathname === r || location.pathname.startsWith(r + '/'))) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/dashboard-v2" replace />;
   }
 
   // Verificar restricción de plan para la ruta actual

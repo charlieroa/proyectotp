@@ -11,7 +11,7 @@ const stripe = process.env.STRIPE_SECRET_KEY
 const PLANS = [
   { key: 'pro',        name: 'Pro',        amount: 2990000  },  // $29.900 COP
   { key: 'business',   name: 'Business',   amount: 4990000  },  // $49.900 COP
-  { key: 'enterprise', name: 'Enterprise', amount: 9990000  },  // $99.900 COP
+  { key: 'enterprise', name: 'Enterprise', amount: 12990000 },  // $129.900 COP
 ];
 
 // Cache en memoria: { pro: 'price_xxx', business: 'price_yyy', ... }

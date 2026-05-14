@@ -3,6 +3,7 @@ import {
   Container, Row, Col, Input, Button, Spinner,
 } from "reactstrap";
 import { useSelector } from "react-redux";
+import { useTranslation } from 'react-i18next';
 import { api } from "../../services/api";
 import useWhatsAppSocket from "../../hooks/useWhatsAppSocket";
 import { getMyBusinesses } from "../../services/tenantApi";
@@ -37,7 +38,7 @@ interface Message {
 /* ─── Helpers ─── */
 const timeAgo = (date: string) => {
   const mins = Math.floor((Date.now() - new Date(date).getTime()) / 60000);
-  if (mins < 1) return "ahora";
+  if (mins < 1) return "now";
   if (mins < 60) return `${mins}m`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h`;
@@ -72,8 +73,8 @@ const getDateLabel = (dateStr: string) => {
   const today = new Date();
   const yesterday = new Date(today);
   yesterday.setDate(yesterday.getDate() - 1);
-  if (d.toDateString() === today.toDateString()) return "Hoy";
-  if (d.toDateString() === yesterday.toDateString()) return "Ayer";
+  if (d.toDateString() === today.toDateString()) return "today";
+  if (d.toDateString() === yesterday.toDateString()) return "yesterday";
   return d.toLocaleDateString("es-CO", { day: "numeric", month: "long" });
 };
 
@@ -287,6 +288,7 @@ const getTenantColor = (idx: number) => TENANT_COLORS[idx % TENANT_COLORS.length
 
 /* ─── Component ─── */
 const MessagesPage: React.FC = () => {
+  const { t } = useTranslation();
   const loginState = useSelector((s: any) => s.Login || {});
   const tenantPlan = useSelector(selectTenantPlan);
   const roleId = getRoleFromToken();
@@ -343,7 +345,7 @@ const MessagesPage: React.FC = () => {
 
   // All tenant IDs for socket subscription
   const allTenantIds = useMemo(() => {
-    if (isMultiTenant && allTenants.length > 1) return allTenants.map(t => t.id);
+    if (isMultiTenant && allTenants.length > 1) return allTenants.map(tn => tn.id);
     return tenantId ? [tenantId] : [];
   }, [isMultiTenant, allTenants, tenantId]);
 
@@ -356,9 +358,9 @@ const MessagesPage: React.FC = () => {
       // If multi-tenant with multiple businesses, fetch from all
       if (isMultiTenant && allTenants.length > 1) {
         const results = await Promise.allSettled(
-          allTenants.map(t =>
-            api.get(`/whatsapp-conversations/tenant/${t.id}?status=${statusParam}`)
-              .then(res => (res.data || []).map((c: any) => ({ ...c, tenant_id: t.id, tenant_name: t.name })))
+          allTenants.map(tn =>
+            api.get(`/whatsapp-conversations/tenant/${tn.id}?status=${statusParam}`)
+              .then(res => (res.data || []).map((c: any) => ({ ...c, tenant_id: tn.id, tenant_name: tn.name })))
           )
         );
         const merged: Conversation[] = [];
@@ -385,7 +387,7 @@ const MessagesPage: React.FC = () => {
   useEffect(() => { const t = setInterval(fetchConversations, 30000); return () => clearInterval(t); }, [fetchConversations]);
   useEffect(() => { if (selectedId) fetchMessages(selectedId); else setMessages([]); }, [selectedId, fetchMessages]);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
-  useEffect(() => { document.title = "Mensajes | Tupelukeria"; }, []);
+  useEffect(() => { document.title = `${t("messages")} | Tupelukeria`; }, [t]);
 
   useWhatsAppSocket(allTenantIds.length > 0 ? (allTenantIds.length === 1 ? allTenantIds[0] : allTenantIds) : undefined, {
     onNewHandoff: useCallback(() => { fetchConversations(); }, [fetchConversations]),
@@ -435,7 +437,7 @@ const MessagesPage: React.FC = () => {
 
   const handleBlock = async () => {
     if (!selectedId) return;
-    if (!window.confirm("¿Bloquear este cliente? El bot no le responderá más.")) return;
+    if (!window.confirm(t("block_client_confirm"))) return;
     setBlocking(true);
     try {
       await api.post(`/whatsapp-conversations/${selectedId}/block`);
@@ -521,7 +523,7 @@ const MessagesPage: React.FC = () => {
               <div className="msg-sidebar-header">
                 <div className="d-flex align-items-center">
                   <h5 className="mb-0">
-                    <i className="ri-message-3-line me-2"></i>Mensajes
+                    <i className="ri-message-3-line me-2"></i>{t("messages")}
                   </h5>
                   <button
                     className="btn-refresh ms-auto"
@@ -537,7 +539,7 @@ const MessagesPage: React.FC = () => {
               <div className="msg-search-wrap" style={{ paddingTop: 10, paddingBottom: 2 }}>
                 <Input
                   type="text"
-                  placeholder="Buscar conversacion..."
+                  placeholder={t("search_conversation")}
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                 />
@@ -556,7 +558,7 @@ const MessagesPage: React.FC = () => {
                   onClick={() => setFilter("all")}
                 >
                   <i className="ri-chat-3-line" style={{ fontSize: 13 }}></i>
-                  Todas
+                  {t("all")}
                   <span className={`msg-filter-count ${filter !== "all" ? "inactive" : ""}`}>{conversations.length}</span>
                 </button>
                 {pendingCount > 0 && (
@@ -565,7 +567,7 @@ const MessagesPage: React.FC = () => {
                     onClick={() => setFilter("pending")}
                   >
                     <i className="ri-alarm-warning-line" style={{ fontSize: 13 }}></i>
-                    Esperando
+                    {t("waiting")}
                     <span className={`msg-filter-count ${filter !== "pending" ? "inactive" : ""}`}>{pendingCount}</span>
                   </button>
                 )}
@@ -574,7 +576,7 @@ const MessagesPage: React.FC = () => {
                   onClick={() => setFilter("handoff")}
                 >
                   <i className="ri-user-voice-line" style={{ fontSize: 13 }}></i>
-                  En vivo
+                  {t("live")}
                   {handoffCount > 0 && (
                     <span className={`msg-filter-count ${filter !== "handoff" ? "inactive" : ""}`}>{handoffCount}</span>
                   )}
@@ -589,10 +591,10 @@ const MessagesPage: React.FC = () => {
                     value={tenantFilter}
                     onChange={e => setTenantFilter(e.target.value)}
                   >
-                    <option value="all">Todas las peluquerias ({conversations.length})</option>
-                    {allTenants.map(t => (
-                      <option key={t.id} value={t.id}>
-                        {t.name} ({tenantCounts[t.id] || 0})
+                    <option value="all">{t("all_salons")} ({conversations.length})</option>
+                    {allTenants.map(tn => (
+                      <option key={tn.id} value={tn.id}>
+                        {tn.name} ({tenantCounts[tn.id] || 0})
                       </option>
                     ))}
                   </select>
@@ -643,9 +645,9 @@ const MessagesPage: React.FC = () => {
                           {/* Row 1: Name + Time */}
                           <div className="d-flex justify-content-between align-items-baseline">
                             <span className="msg-conv-name text-truncate d-flex align-items-center gap-1">
-                              {c.client_name || "Cliente"}
+                              {c.client_name || t("client")}
                               {isMultiTenant && c.tenant_name && allTenants.length > 1 && (() => {
-                                const tIdx = allTenants.findIndex(t => t.id === c.tenant_id);
+                                const tIdx = allTenants.findIndex(tn => tn.id === c.tenant_id);
                                 const color = getTenantColor(tIdx >= 0 ? tIdx : 0);
                                 return (
                                   <span className="msg-tenant-badge">
@@ -671,21 +673,21 @@ const MessagesPage: React.FC = () => {
                                   <span className="text-truncate">{c.last_message.content}</span>
                                 </>
                               ) : (
-                                <span style={{ color: "#adb5bd", fontStyle: "italic" }}>Sin mensajes</span>
+                                <span style={{ color: "#adb5bd", fontStyle: "italic" }}>{t("no_messages")}</span>
                               )}
                             </div>
                             <div className="flex-shrink-0 ms-2">
                               {isBlocked ? (
                                 <span className="msg-badge-blocked">
-                                  <i className="ri-forbid-line" style={{ fontSize: 10 }}></i>BLOQUEADO
+                                  <i className="ri-forbid-line" style={{ fontSize: 10 }}></i>{t("blocked").toUpperCase()}
                                 </span>
                               ) : isPending ? (
                                 <span className="msg-badge-pending">
-                                  <span className="msg-live-dot orange"></span>ESPERANDO
+                                  <span className="msg-live-dot orange"></span>{t("waiting").toUpperCase()}
                                 </span>
                               ) : isHandoff ? (
                                 <span className="msg-badge-live">
-                                  <span className="msg-live-dot"></span>EN VIVO
+                                  <span className="msg-live-dot"></span>{t("live").toUpperCase()}
                                 </span>
                               ) : null}
                             </div>
@@ -718,30 +720,30 @@ const MessagesPage: React.FC = () => {
                     <div className="flex-grow-1">
                       <div className="d-flex align-items-center gap-2">
                         <h6 className="mb-0 fw-semibold" style={{ fontSize: 15, color: "#212529" }}>
-                          {selectedConv.client_name || "Cliente"}
+                          {selectedConv.client_name || t("client")}
                         </h6>
                         {selectedConv.blocked ? (
                           <span className="msg-badge-blocked">
-                            <i className="ri-forbid-line" style={{ fontSize: 10 }}></i>Bloqueado
+                            <i className="ri-forbid-line" style={{ fontSize: 10 }}></i>{t("blocked")}
                           </span>
                         ) : getConvStatus(selectedConv) === "pending" ? (
                           <span className="msg-badge-pending">
-                            <span className="msg-live-dot orange"></span>Esperando asesor
+                            <span className="msg-live-dot orange"></span>{t("waiting_advisor")}
                           </span>
                         ) : getConvStatus(selectedConv) === "handoff" ? (
                           <span className="msg-badge-live">
-                            <span className="msg-live-dot"></span>En vivo
+                            <span className="msg-live-dot"></span>{t("live")}
                           </span>
                         ) : (
                           <span style={{ fontSize: 11, color: "#3577f1", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 3 }}>
-                            <i className="ri-robot-line" style={{ fontSize: 12 }}></i>Bot activo
+                            <i className="ri-robot-line" style={{ fontSize: 12 }}></i>{t("bot_active")}
                           </span>
                         )}
                       </div>
                       <small style={{ fontSize: 12.5, color: "#878a99" }}>
                         {selectedConv.client_phone}
                         {isMultiTenant && selectedConv.tenant_name && allTenants.length > 1 && (
-                          <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 600, color: getTenantColor(allTenants.findIndex(t => t.id === selectedConv.tenant_id)) }}>
+                          <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 600, color: getTenantColor(allTenants.findIndex(tn => tn.id === selectedConv.tenant_id)) }}>
                             <i className="ri-store-2-line me-1" style={{ fontSize: 11 }}></i>{selectedConv.tenant_name}
                           </span>
                         )}
@@ -755,7 +757,7 @@ const MessagesPage: React.FC = () => {
                           onClick={handleUnblock}
                           disabled={blocking}
                         >
-                          {blocking ? <Spinner size="sm" /> : <><i className="ri-lock-unlock-line me-1"></i>Desbloquear</>}
+                          {blocking ? <Spinner size="sm" /> : <><i className="ri-lock-unlock-line me-1"></i>{t("unblock")}</>}
                         </Button>
                       ) : (
                         <>
@@ -769,7 +771,7 @@ const MessagesPage: React.FC = () => {
                               onClick={handleTake}
                               disabled={taking}
                             >
-                              {taking ? <Spinner size="sm" /> : <><i className="ri-hand-heart-line me-1"></i>Tomar</>}
+                              {taking ? <Spinner size="sm" /> : <><i className="ri-hand-heart-line me-1"></i>{t("take")}</>}
                             </Button>
                           )}
                           {selectedConv.status === "handoff" && (
@@ -779,7 +781,7 @@ const MessagesPage: React.FC = () => {
                               onClick={handleClose}
                               disabled={closing}
                             >
-                              {closing ? <Spinner size="sm" /> : <><i className="ri-close-circle-line me-1"></i>Finalizar</>}
+                              {closing ? <Spinner size="sm" /> : <><i className="ri-close-circle-line me-1"></i>{t("finish")}</>}
                             </Button>
                           )}
                         </>
@@ -793,7 +795,7 @@ const MessagesPage: React.FC = () => {
                       <div className="text-center py-5"><Spinner color="secondary" /></div>
                     ) : messages.length === 0 ? (
                       <div className="text-center py-5">
-                        <span className="msg-date-pill">No hay mensajes en esta conversacion</span>
+                        <span className="msg-date-pill">{t("no_messages_conversation")}</span>
                       </div>
                     ) : (
                       messages.map((m, i) => {
@@ -818,7 +820,7 @@ const MessagesPage: React.FC = () => {
                                   <div className={`msg-bubble ${bubbleClass}`} style={{ maxWidth: "65%", minWidth: 80 }}>
                                     {!isClient && (
                                       <div style={{ fontWeight: 700, fontSize: 11, marginBottom: 2, color: isBot ? "#3577f1" : "#6559cc" }}>
-                                        {isBot ? <><i className="ri-robot-line me-1" style={{ fontSize: 11 }}></i>Bot</> : <><i className="ri-shield-user-line me-1" style={{ fontSize: 11 }}></i>{m.sender_name || "Agente"}</>}
+                                        {isBot ? <><i className="ri-robot-line me-1" style={{ fontSize: 11 }}></i>Bot</> : <><i className="ri-shield-user-line me-1" style={{ fontSize: 11 }}></i>{m.sender_name || t("agent")}</>}
                                       </div>
                                     )}
                                     <span style={{ fontSize: 13.5, whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.35 }}>
@@ -842,10 +844,10 @@ const MessagesPage: React.FC = () => {
                   {selectedConv.blocked ? (
                     <div className="px-3 py-2 d-flex align-items-center justify-content-center gap-2" style={{ borderTop: "1px solid #eff2f7", background: "#fff" }}>
                       <i className="ri-forbid-line" style={{ color: "#212529", fontSize: 16 }}></i>
-                      <small style={{ color: "#495057", fontWeight: 500 }}>Cliente bloqueado</small>
+                      <small style={{ color: "#495057", fontWeight: 500 }}>{t("client_blocked")}</small>
                       <span style={{ color: "#ced4da" }}>|</span>
                       <button className="btn btn-link btn-sm p-0 text-decoration-none" style={{ fontWeight: 600, fontSize: 12.5, color: "#45CB85" }} onClick={handleUnblock} disabled={blocking}>
-                        {blocking ? <Spinner size="sm" /> : "Desbloquear"}
+                        {blocking ? <Spinner size="sm" /> : t("unblock")}
                       </button>
                     </div>
                   ) : selectedConv.status === "handoff" ? (
@@ -857,7 +859,7 @@ const MessagesPage: React.FC = () => {
                           disabled={closing}
                           style={{ borderRadius: 16, fontSize: 11, fontWeight: 600, padding: "4px 12px", border: "1.5px solid #f06548", color: "#f06548", background: "transparent", whiteSpace: "nowrap" }}
                         >
-                          {closing ? <Spinner size="sm" color="danger" /> : "Finalizar"}
+                          {closing ? <Spinner size="sm" color="danger" /> : t("finish")}
                         </button>
                         <button
                           className="btn btn-sm"
@@ -865,14 +867,14 @@ const MessagesPage: React.FC = () => {
                           disabled={blocking}
                           style={{ borderRadius: 16, fontSize: 11, fontWeight: 600, padding: "4px 12px", background: "#212529", color: "#fff", border: "none", whiteSpace: "nowrap" }}
                         >
-                          {blocking ? <Spinner size="sm" color="light" /> : "Bloquear"}
+                          {blocking ? <Spinner size="sm" color="light" /> : t("block")}
                         </button>
                       </div>
                       <Input
                         type="textarea"
                         value={reply}
                         onChange={e => setReply(e.target.value)}
-                        placeholder="Escribe un mensaje..."
+                        placeholder={t("write_message")}
                         rows={1}
                         onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                         style={{ resize: "none", borderRadius: 10, maxHeight: 100, fontSize: 14, padding: "10px 16px", border: "1px solid #e9ebec", background: "#f8f9fa" }}
@@ -890,23 +892,23 @@ const MessagesPage: React.FC = () => {
                       {getConvStatus(selectedConv) === "pending" ? (
                         <>
                           <i className="ri-alarm-warning-line" style={{ color: "#f1963b", fontSize: 16 }}></i>
-                          <small style={{ color: "#495057", fontWeight: 500 }}>Cliente esperando asesor</small>
+                          <small style={{ color: "#495057", fontWeight: 500 }}>{t("client_waiting_advisor")}</small>
                           <span style={{ color: "#ced4da" }}>|</span>
                           <button className="btn btn-link btn-sm p-0 text-decoration-none" style={{ fontWeight: 600, fontSize: 12.5, color: "#3577f1" }} onClick={handleTake} disabled={taking}>
-                            {taking ? <Spinner size="sm" /> : "Tomar conversacion"}
+                            {taking ? <Spinner size="sm" /> : t("take_conversation")}
                           </button>
                         </>
                       ) : (
                         <>
                           <i className="ri-robot-line" style={{ color: "#3577f1", fontSize: 16 }}></i>
-                          <small style={{ color: "#495057", fontWeight: 500 }}>Bot atendiendo</small>
+                          <small style={{ color: "#495057", fontWeight: 500 }}>{t("bot_attending")}</small>
                           <span style={{ color: "#ced4da" }}>|</span>
                           <button className="btn btn-link btn-sm p-0 text-decoration-none" style={{ fontWeight: 600, fontSize: 12.5, color: "#3577f1" }} onClick={handleTake} disabled={taking}>
-                            {taking ? <Spinner size="sm" /> : "Tomar conversacion"}
+                            {taking ? <Spinner size="sm" /> : t("take_conversation")}
                           </button>
                           <span style={{ color: "#ced4da" }}>|</span>
                           <button className="btn btn-link btn-sm p-0 text-decoration-none" style={{ fontWeight: 600, fontSize: 12.5, color: "#212529" }} onClick={handleBlock} disabled={blocking}>
-                            {blocking ? <Spinner size="sm" /> : "Bloquear"}
+                            {blocking ? <Spinner size="sm" /> : t("block")}
                           </button>
                         </>
                       )}
@@ -924,9 +926,9 @@ const MessagesPage: React.FC = () => {
                     }}>
                       <i className="ri-message-3-line" style={{ fontSize: 50, color: "#fff" }}></i>
                     </div>
-                    <h4 className="fw-bold mb-2" style={{ color: "#212529" }}>Mensajes</h4>
+                    <h4 className="fw-bold mb-2" style={{ color: "#212529" }}>{t("messages")}</h4>
                     <p className="mb-3" style={{ fontSize: 14, lineHeight: 1.6, color: "#878a99" }}>
-                      Selecciona una conversacion para ver el historial completo entre el cliente, el bot y los agentes.
+                      {t("select_conversation_hint")}
                     </p>
                     <div style={{ display: "inline-flex", gap: 20, padding: "12px 24px", background: "#fff", borderRadius: 12, boxShadow: "0 1px 4px rgba(0,0,0,.04)", border: "1px solid #eff2f7" }}>
                       <div className="text-center">
@@ -936,12 +938,12 @@ const MessagesPage: React.FC = () => {
                       <div style={{ width: 1, background: "#eff2f7" }}></div>
                       <div className="text-center">
                         <div style={{ fontSize: 20, fontWeight: 700, color: pendingCount > 0 ? "#f1963b" : "#adb5bd" }}>{pendingCount}</div>
-                        <div style={{ fontSize: 11, color: "#878a99", fontWeight: 500 }}>Esperando</div>
+                        <div style={{ fontSize: 11, color: "#878a99", fontWeight: 500 }}>{t("waiting")}</div>
                       </div>
                       <div style={{ width: 1, background: "#eff2f7" }}></div>
                       <div className="text-center">
                         <div style={{ fontSize: 20, fontWeight: 700, color: handoffCount > 0 ? "#f06548" : "#adb5bd" }}>{handoffCount}</div>
-                        <div style={{ fontSize: 11, color: "#878a99", fontWeight: 500 }}>En vivo</div>
+                        <div style={{ fontSize: 11, color: "#878a99", fontWeight: 500 }}>{t("live")}</div>
                       </div>
                     </div>
                   </div>

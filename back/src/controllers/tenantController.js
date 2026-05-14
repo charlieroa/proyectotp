@@ -57,12 +57,15 @@ const dbToApiTenant = (row) => ({
   business_type: row.business_type || 'peluqueria',
   // Multi-sede & Propinas
   shared_stylists_enabled: !!row.shared_stylists_enabled,
+  multi_stylist_enabled: !!row.multi_stylist_enabled,
+  ticket_virtual_enabled: !!row.ticket_virtual_enabled,
   tip_salon_percent: row.tip_salon_percent != null ? Number(row.tip_salon_percent) : 10,
   branch_color: row.branch_color || '#3788d8',
   // Primary branch
   is_primary_branch: !!row.is_primary_branch,
   cross_branch_schedule_block: row.cross_branch_schedule_block !== false,
   manage_all_branches_cash: !!row.manage_all_branches_cash,
+  price_override_enabled: !!row.price_override_enabled,
   created_at: row.created_at,
   updated_at: row.updated_at,
 });
@@ -221,6 +224,10 @@ exports.updateTenant = async (req, res) => {
     // Multi-sede & Propinas
     if (body.shared_stylists_enabled !== undefined)
       data.shared_stylists_enabled = !!body.shared_stylists_enabled;
+    if (body.multi_stylist_enabled !== undefined)
+      data.multi_stylist_enabled = !!body.multi_stylist_enabled;
+    if (body.ticket_virtual_enabled !== undefined)
+      data.ticket_virtual_enabled = !!body.ticket_virtual_enabled;
     if (body.tip_salon_percent !== undefined) {
       const tipPct = Number(body.tip_salon_percent);
       data.tip_salon_percent = Number.isFinite(tipPct) ? tipPct : 10;
@@ -235,6 +242,14 @@ exports.updateTenant = async (req, res) => {
     // Multi-branch cash management
     if (body.manage_all_branches_cash !== undefined)
       data.manage_all_branches_cash = !!body.manage_all_branches_cash;
+
+    // Price override at checkout — Admin-only toggle
+    if (body.price_override_enabled !== undefined) {
+      if (req.user?.role_id !== 1) {
+        return res.status(403).json({ error: 'Solo el administrador puede modificar esta opcion.' });
+      }
+      data.price_override_enabled = !!body.price_override_enabled;
+    }
 
     if (Object.keys(data).length === 0) {
       const current = await prisma.tenants.findUnique({ where: { id } });

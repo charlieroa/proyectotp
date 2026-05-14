@@ -24,11 +24,13 @@ model appointments {
   updated_at                           DateTime?  @default(now()) @db.Timestamptz(6)
   reminder_sent_1h                     Boolean?   @default(false)
   reminder_sent_24h                    Boolean?   @default(false)
+  batch_id                             String?    @db.Uuid
   users_appointments_client_idTousers  users?     @relation("appointments_client_idTousers", fields: [client_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   services                             services?  @relation(fields: [service_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   users_appointments_stylist_idTousers users?     @relation("appointments_stylist_idTousers", fields: [stylist_id], references: [id], onUpdate: NoAction)
   tenants                              tenants?   @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   payments                             payments[]
+  invoices                             invoices[]
 
   @@index([status], map: "idx_appt_status")
   @@index([stylist_id, start_time, end_time], map: "idx_appt_stylist_time")
@@ -53,6 +55,10 @@ model cash_movements {
   cash_session_id     String?        @db.Uuid
   invoice_id          String?        @db.Uuid
   status              String         @default("pending") @db.VarChar(20)
+  edited_by_user_id   String?        @db.Uuid
+  edited_at           DateTime?      @db.Timestamptz(6)
+  edit_reason         String?        @db.VarChar(255)
+  original_amount     Decimal?       @db.Decimal(10, 2)
   cash_sessions       cash_sessions? @relation(fields: [cash_session_id], references: [id], onUpdate: NoAction)
   invoices            invoices?      @relation(fields: [invoice_id], references: [id], onUpdate: NoAction)
 
@@ -119,6 +125,9 @@ model invoice_items {
   admin_fee_rate       Decimal?  @db.Decimal
   admin_fee_value      Decimal?  @db.Decimal
   tenant_id            String    @db.Uuid
+  original_unit_price    Decimal?  @db.Decimal(10, 2)
+  override_reason        String?   @db.VarChar(255)
+  overridden_by_user_id  String?   @db.Uuid
   tenants              tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_invoice_items_tenant")
   invoices             invoices  @relation(fields: [invoice_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   users                users?    @relation(fields: [seller_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
@@ -129,20 +138,31 @@ model invoice_items {
 model invoices {
   id                     String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   tenant_id              String           @db.Uuid
-  client_id              String           @db.Uuid
+  client_id              String?          @db.Uuid
   cash_session_id        String?          @db.Uuid
-  total_amount           Decimal          @db.Decimal(10, 2)
+  total_amount           Decimal          @default(0) @db.Decimal(10, 2)
   tip_amount             Decimal?         @default(0) @db.Decimal(10, 2)
   status                 String           @default("paid") @db.VarChar(20)
   created_at             DateTime         @default(now()) @db.Timestamptz(6)
   updated_at             DateTime         @default(now()) @db.Timestamptz(6)
   admin_fee_rate_at_sale Decimal?         @db.Decimal
+  appointment_id         String?          @db.Uuid
+  opened_by_user_id      String?          @db.Uuid
+  client_name_adhoc      String?          @db.VarChar(255)
+  closed_at              DateTime?        @db.Timestamptz(6)
+  tip_recipient_user_id  String?          @db.Uuid
   cash_movements         cash_movements[]
   invoice_items          invoice_items[]
   cash_sessions          cash_sessions?   @relation(fields: [cash_session_id], references: [id], onUpdate: NoAction)
-  users                  users            @relation(fields: [client_id], references: [id], onUpdate: NoAction)
+  users                  users?           @relation("invoices_client", fields: [client_id], references: [id], onUpdate: NoAction)
+  opened_by_user         users?           @relation("invoices_opened_by", fields: [opened_by_user_id], references: [id], onUpdate: NoAction)
+  tip_recipient          users?           @relation("invoices_tip_recipient", fields: [tip_recipient_user_id], references: [id], onUpdate: NoAction)
   tenants                tenants          @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  appointment            appointments?    @relation(fields: [appointment_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   payments               payments[]
+
+  @@index([tenant_id, status], map: "idx_invoices_tenant_status")
+  @@index([appointment_id], map: "idx_invoices_appointment")
 }
 
 model payments {
@@ -302,8 +322,9 @@ model services {
   created_at         DateTime?           @default(now()) @db.Timestamptz(6)
   updated_at         DateTime?           @default(now()) @db.Timestamptz(6)
   is_active          Boolean?            @default(true)
-  commission_percent Decimal?            @db.Decimal(5, 2)
-  appointments       appointments[]
+  commission_percent       Decimal?            @db.Decimal(5, 2)
+  max_concurrent_stylists  Int                 @default(1)
+  appointments             appointments[]
   service_categories service_categories? @relation(fields: [category_id], references: [id], onUpdate: NoAction)
   tenants            tenants?            @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   stylist_services   stylist_services[]
@@ -485,6 +506,9 @@ model tenants {
   is_primary_branch          Boolean                         @default(false)
   cross_branch_schedule_block Boolean                        @default(true)
   manage_all_branches_cash   Boolean                         @default(false)
+  price_override_enabled     Boolean                         @default(false)
+  multi_stylist_enabled      Boolean                         @default(false)
+  ticket_virtual_enabled     Boolean                         @default(false)
   business_type              String?                         @default("peluqueria") @db.VarChar(50)
   plan                       String                          @default("free") @db.VarChar(50)
   stripe_customer_id         String?                         @db.VarChar(255)
@@ -557,7 +581,9 @@ model users {
   cash_sessions_cash_sessions_closed_by_user_idTousers  cash_sessions[]       @relation("cash_sessions_closed_by_user_idTousers")
   cash_sessions_cash_sessions_opened_by_user_idTousers  cash_sessions[]       @relation("cash_sessions_opened_by_user_idTousers")
   invoice_items                                         invoice_items[]
-  invoices                                              invoices[]
+  invoices                                              invoices[]            @relation("invoices_client")
+  invoices_opened                                       invoices[]            @relation("invoices_opened_by")
+  invoices_tipped                                       invoices[]            @relation("invoices_tip_recipient")
   payments                                              payments[]
   payroll_runs                                          payroll_runs[]
   payrolls                                              payrolls[]

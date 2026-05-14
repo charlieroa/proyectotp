@@ -37,7 +37,10 @@ const bulkImportRoutes = require('./routes/bulkImportRoutes'); // ✅ Bulk impor
 const campaignRoutes = require('./routes/campaignRoutes'); // ✅ Campañas CRM
 const whatsappConversationRoutes = require('./routes/whatsappConversationRoutes'); // ✅ WhatsApp Handoff
 const ficheroRoutes = require('./routes/ficheroRoutes'); // ✅ Fichero digital (cola de turnos)
+const webPageRoutes = require('./routes/webPageRoutes'); // ✅ Web Pages (Plury)
 const stripeRoutes = require('./routes/stripeRoutes'); // ✅ Stripe Checkout
+const ticketRoutes = require('./routes/ticketRoutes'); // ✅ Ticket Virtual
+const dashboardV2Routes = require('./routes/dashboardV2Routes'); // ✅ Dashboard V2
 const { handleWebhook } = require('./controllers/stripeController'); // ✅ Stripe Webhook
 const { uploadTenantLogo, uploadTenantBrochure, deleteTenantBrochure } = require('./controllers/tenantController');
 
@@ -50,10 +53,16 @@ const PORT = process.env.PORT || 3000;
 ======================================= */
 const allowedOrigins = [
   'http://localhost:3001',
+  'http://localhost:5173',
+  'http://localhost:8080',
   'https://app.tupelukeria.com',
   'https://tpia.tupelukeria.com',
   'https://www.tupelukeria.com',
   'https://tupelukeria.com',
+  'capacitor://localhost',   // Capacitor iOS
+  'ionic://localhost',       // Ionic iOS
+  'http://localhost',        // Capacitor fallback
+  'https://localhost',       // Capacitor Android
 ];
 
 const corsOptions = {
@@ -62,20 +71,24 @@ const corsOptions = {
     if (!origin) {
       return callback(null, true);
     }
-    
+
     // Permitir orígenes específicos
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
-    
-    // En desarrollo: permitir cualquier localhost (para Flutter Web, etc.)
-    if (process.env.NODE_ENV !== 'production') {
-      const localhostRegex = /^https?:\/\/localhost(:\d+)?$/;
-      if (localhostRegex.test(origin)) {
-        return callback(null, true);
-      }
+
+    // Permitir cualquier localhost (Capacitor, dev servers, mobile WebViews)
+    const localhostRegex = /^https?:\/\/localhost(:\d+)?$/;
+    if (localhostRegex.test(origin)) {
+      return callback(null, true);
     }
-    
+
+    // Permitir esquemas nativos (capacitor://, ionic://)
+    if (origin.startsWith('capacitor://') || origin.startsWith('ionic://')) {
+      return callback(null, true);
+    }
+
+    console.error('[CORS BLOCKED] Origin:', origin);
     callback(new Error('No permitido por la política de CORS.'));
   },
   credentials: true,
@@ -153,7 +166,10 @@ app.use('/api/bulk-import', bulkImportRoutes); // ✅ Bulk import Excel
 app.use('/api/campaigns', campaignRoutes); // ✅ Campañas CRM
 app.use('/api/whatsapp-conversations', whatsappConversationRoutes); // ✅ WhatsApp Handoff
 app.use('/api/fichero', ficheroRoutes); // ✅ Fichero digital (cola de turnos)
+app.use('/api/web-pages', webPageRoutes); // ✅ Web Pages (Plury)
 app.use('/api/stripe', stripeRoutes); // ✅ Stripe Checkout (rutas protegidas)
+app.use('/api/tickets', ticketRoutes); // ✅ Ticket Virtual
+app.use('/api/dashboard-v2', dashboardV2Routes); // ✅ Dashboard V2
 app.post('/api/tenants/:tenantId/logo', upload.single('logo'), uploadTenantLogo);
 app.post('/api/tenants/:tenantId/brochure', brochureUpload.single('brochure'), uploadTenantBrochure);
 app.delete('/api/tenants/:tenantId/brochure', deleteTenantBrochure);
@@ -211,6 +227,10 @@ prismaClient.whatsapp_conversations.findMany({ where: { status: 'handoff' }, sel
 // Preload Stripe prices
 const { ensureStripePrices } = require('./config/stripePrices');
 ensureStripePrices().catch(err => console.error('❌ [Stripe] Error cargando precios:', err.message));
+
+// Start subscription expiration checker
+const { startSubscriptionChecker } = require('./services/subscriptionChecker');
+startSubscriptionChecker();
 
 server.listen(PORT, () => {
   console.log(`🚀 API + WebSockets escuchando en el puerto ${PORT}`);

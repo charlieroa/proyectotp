@@ -537,6 +537,19 @@ exports.updateLocationWithTracking = async (req, res) => {
             return { wasInside, nowInside };
         });
 
+        // Emit real-time location to dashboard via Socket.IO
+        try {
+            const io = getIO();
+            io.to(`tenant:${tenant_id}`).emit('stylist:location-update', {
+                stylist_id: stylistId,
+                lat,
+                lng,
+                is_inside_geofence: !!is_inside_geofence,
+                geofence_event: result.wasInside !== result.nowInside ? (result.nowInside ? 'entry' : 'exit') : null,
+                timestamp: new Date().toISOString()
+            });
+        } catch (_) { /* socket not ready */ }
+
         return res.status(200).json({
             success: true,
             message: 'Ubicacion actualizada',
@@ -1137,6 +1150,54 @@ exports.approveScheduleBlock = async (req, res) => {
    PUT /api/stylists/schedule-blocks/:blockId/reject
    Body: { admin_note }
 ============================================================ */
+/* ============================================================
+   Device Token Management (Push Notifications)
+============================================================ */
+exports.registerDeviceToken = async (req, res) => {
+    const { id: userId } = req.user;
+    const { token, platform } = req.body;
+
+    if (!token || !platform) {
+        return res.status(400).json({ error: 'token and platform are required' });
+    }
+
+    try {
+        await prisma.$executeRawUnsafe(
+            `INSERT INTO device_tokens (user_id, token, platform)
+             VALUES ($1::uuid, $2, $3)
+             ON CONFLICT (user_id, token) DO UPDATE SET platform = $3, created_at = NOW()`,
+            userId, token, platform
+        );
+        return res.json({ ok: true });
+    } catch (error) {
+        console.error('Error registering device token:', error);
+        return res.status(500).json({ error: 'Error registering device token' });
+    }
+};
+
+exports.removeDeviceToken = async (req, res) => {
+    const { id: userId } = req.user;
+    const { token } = req.body;
+
+    try {
+        if (token) {
+            await prisma.$executeRawUnsafe(
+                `DELETE FROM device_tokens WHERE user_id = $1::uuid AND token = $2`,
+                userId, token
+            );
+        } else {
+            await prisma.$executeRawUnsafe(
+                `DELETE FROM device_tokens WHERE user_id = $1::uuid`,
+                userId
+            );
+        }
+        return res.json({ ok: true });
+    } catch (error) {
+        console.error('Error removing device token:', error);
+        return res.status(500).json({ error: 'Error removing device token' });
+    }
+};
+
 exports.rejectScheduleBlock = async (req, res) => {
   const { tenant_id } = req.user;
   const { blockId } = req.params;
@@ -1162,4 +1223,210 @@ exports.rejectScheduleBlock = async (req, res) => {
     console.error('Error rejecting schedule block:', error);
     return res.status(500).json({ error: 'Error interno del servidor' });
   }
+};
+
+/* ============================================================
+   GET /api/stylists/earnings?period=day|week|month
+   Returns: { total, services, tips, clients, delta, bars, topService, serviceMix }
+   Earnings = SUM(service.price) * commission_rate for completed/checked_out appts.
+============================================================ */
+exports.getEarnings = async (req, res) => {
+    const { id: stylistId, tenant_id, commission_rate } = req.user;
+    const rate = parseFloat(commission_rate || 0) || 1;
+    const period = (req.query.period || 'day').toLowerCase();
+
+    const TZ = 'America/Bogota';
+    const now = new Date();
+
+    // range bounds in local TZ - prev range same length for delta comparison.
+    let rangeSql, prevRangeSql, barsSql, barDims;
+    if (period === 'day') {
+      rangeSql = `DATE(a.start_time AT TIME ZONE 'UTC' AT TIME ZONE '${TZ}') = DATE(NOW() AT TIME ZONE '${TZ}')`;
+      prevRangeSql = `DATE(a.start_time AT TIME ZONE 'UTC' AT TIME ZONE '${TZ}') = DATE(NOW() AT TIME ZONE '${TZ}') - INTERVAL '1 day'`;
+      barsSql = `
+        SELECT EXTRACT(HOUR FROM a.start_time AT TIME ZONE 'UTC' AT TIME ZONE '${TZ}')::int AS b,
+               COALESCE(SUM(s.price), 0)::float AS v
+        FROM appointments a JOIN services s ON a.service_id = s.id
+        WHERE a.stylist_id = $1::uuid AND a.tenant_id = $2::uuid
+          AND a.status IN ('completed', 'checked_out')
+          AND DATE(a.start_time AT TIME ZONE 'UTC' AT TIME ZONE '${TZ}') = DATE(NOW() AT TIME ZONE '${TZ}')
+        GROUP BY b ORDER BY b`;
+      barDims = { label: 'hour', from: 9, to: 18 };
+    } else if (period === 'week') {
+      rangeSql = `a.start_time AT TIME ZONE 'UTC' AT TIME ZONE '${TZ}' >= date_trunc('week', NOW() AT TIME ZONE '${TZ}')`;
+      prevRangeSql = `a.start_time AT TIME ZONE 'UTC' AT TIME ZONE '${TZ}' >= date_trunc('week', NOW() AT TIME ZONE '${TZ}') - INTERVAL '7 days' AND a.start_time AT TIME ZONE 'UTC' AT TIME ZONE '${TZ}' < date_trunc('week', NOW() AT TIME ZONE '${TZ}')`;
+      barsSql = `
+        SELECT EXTRACT(ISODOW FROM a.start_time AT TIME ZONE 'UTC' AT TIME ZONE '${TZ}')::int AS b,
+               COALESCE(SUM(s.price), 0)::float AS v
+        FROM appointments a JOIN services s ON a.service_id = s.id
+        WHERE a.stylist_id = $1::uuid AND a.tenant_id = $2::uuid
+          AND a.status IN ('completed', 'checked_out')
+          AND a.start_time AT TIME ZONE 'UTC' AT TIME ZONE '${TZ}' >= date_trunc('week', NOW() AT TIME ZONE '${TZ}')
+        GROUP BY b ORDER BY b`;
+      barDims = { label: 'dow', from: 1, to: 7 };
+    } else {
+      // month
+      rangeSql = `date_trunc('month', a.start_time AT TIME ZONE 'UTC' AT TIME ZONE '${TZ}') = date_trunc('month', NOW() AT TIME ZONE '${TZ}')`;
+      prevRangeSql = `date_trunc('month', a.start_time AT TIME ZONE 'UTC' AT TIME ZONE '${TZ}') = date_trunc('month', NOW() AT TIME ZONE '${TZ}') - INTERVAL '1 month'`;
+      barsSql = `
+        SELECT FLOOR((EXTRACT(DAY FROM a.start_time AT TIME ZONE 'UTC' AT TIME ZONE '${TZ}') - 1) / 7)::int + 1 AS b,
+               COALESCE(SUM(s.price), 0)::float AS v
+        FROM appointments a JOIN services s ON a.service_id = s.id
+        WHERE a.stylist_id = $1::uuid AND a.tenant_id = $2::uuid
+          AND a.status IN ('completed', 'checked_out')
+          AND date_trunc('month', a.start_time AT TIME ZONE 'UTC' AT TIME ZONE '${TZ}') = date_trunc('month', NOW() AT TIME ZONE '${TZ}')
+        GROUP BY b ORDER BY b`;
+      barDims = { label: 'week-of-month', from: 1, to: 5 };
+    }
+
+    try {
+      const totalsSql = `
+        SELECT COALESCE(SUM(s.price), 0)::float AS services_total,
+               COUNT(DISTINCT a.client_id)::int AS clients_count,
+               COUNT(a.id)::int AS appt_count
+        FROM appointments a JOIN services s ON a.service_id = s.id
+        WHERE a.stylist_id = $1::uuid AND a.tenant_id = $2::uuid
+          AND a.status IN ('completed', 'checked_out')
+          AND ${rangeSql}`;
+      const [curr] = await prisma.$queryRawUnsafe(totalsSql, stylistId, tenant_id);
+
+      const prevTotalsSql = totalsSql.replace(rangeSql, prevRangeSql);
+      const [prev] = await prisma.$queryRawUnsafe(prevTotalsSql, stylistId, tenant_id);
+
+      const services = Number(curr?.services_total || 0);
+      const prevServices = Number(prev?.services_total || 0);
+      const delta = prevServices > 0 ? ((services - prevServices) / prevServices) * 100 : 0;
+      const tips = Math.round(services * 0.10); // heuristic — backend has no tip field
+
+      const rawBars = await prisma.$queryRawUnsafe(barsSql, stylistId, tenant_id);
+      const bars = [];
+      for (let b = barDims.from; b <= barDims.to; b++) {
+        const hit = rawBars.find(x => Number(x.b) === b);
+        bars.push({ b, v: hit ? Number(hit.v) : 0 });
+      }
+
+      // top service + mix
+      const mixSql = `
+        SELECT s.name, COALESCE(SUM(s.price), 0)::float AS total, COUNT(a.id)::int AS count
+        FROM appointments a JOIN services s ON a.service_id = s.id
+        WHERE a.stylist_id = $1::uuid AND a.tenant_id = $2::uuid
+          AND a.status IN ('completed', 'checked_out')
+          AND ${rangeSql}
+        GROUP BY s.name ORDER BY total DESC LIMIT 6`;
+      const mix = await prisma.$queryRawUnsafe(mixSql, stylistId, tenant_id);
+      const mixTotal = mix.reduce((s, m) => s + Number(m.total), 0) || 1;
+      const serviceMix = mix.map(m => ({
+        name: m.name,
+        count: Number(m.count),
+        total: Number(m.total),
+        pct: Math.round((Number(m.total) / mixTotal) * 100),
+      }));
+      const topService = serviceMix[0] || null;
+
+      return res.json({
+        period,
+        earnings: services * rate,
+        services,
+        tips,
+        clients: Number(curr?.clients_count || 0),
+        appt_count: Number(curr?.appt_count || 0),
+        delta: Number(delta.toFixed(2)),
+        bars,
+        topService,
+        serviceMix,
+      });
+    } catch (error) {
+      console.error('Error getting stylist earnings:', error);
+      return res.status(500).json({ error: 'Error interno del servidor' });
+    }
+};
+
+/* ============================================================
+   GET /api/stylists/clients
+   Returns unique clients attended by this stylist, w/ visit count,
+   last visit, and most frequent service.
+============================================================ */
+exports.getClientsServed = async (req, res) => {
+    const { id: stylistId, tenant_id } = req.user;
+    const search = (req.query.search || '').trim();
+    const limit = Math.min(parseInt(req.query.limit || 100, 10), 500);
+
+    try {
+      const params = [stylistId, tenant_id];
+      let searchClause = '';
+      if (search) {
+        params.push(`%${search}%`);
+        searchClause = `AND (COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '')) ILIKE $3`;
+      }
+
+      const sql = `
+        WITH stylist_appts AS (
+          SELECT a.id, a.client_id, a.start_time, a.status, a.service_id
+          FROM appointments a
+          WHERE a.stylist_id = $1::uuid AND a.tenant_id = $2::uuid
+            AND a.client_id IS NOT NULL
+        ),
+        client_stats AS (
+          SELECT
+            sa.client_id,
+            COUNT(*)::int AS visits,
+            COUNT(*) FILTER (WHERE sa.status IN ('completed','checked_out'))::int AS done,
+            MAX(sa.start_time) AS last_visit,
+            (SELECT sa2.service_id FROM stylist_appts sa2
+              WHERE sa2.client_id = sa.client_id
+              GROUP BY sa2.service_id
+              ORDER BY COUNT(*) DESC LIMIT 1) AS top_service_id
+          FROM stylist_appts sa
+          GROUP BY sa.client_id
+        )
+        SELECT
+          c.id,
+          c.first_name,
+          c.last_name,
+          c.phone,
+          cs.visits,
+          cs.done,
+          cs.last_visit,
+          s.name AS top_service_name,
+          s.price AS top_service_price,
+          -- today's appointment (if any) to show live/upcoming state
+          (SELECT a2.status FROM appointments a2
+            WHERE a2.client_id = c.id AND a2.stylist_id = $1::uuid AND a2.tenant_id = $2::uuid
+              AND DATE(a2.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') =
+                  DATE(NOW() AT TIME ZONE 'America/Bogota')
+            ORDER BY a2.start_time LIMIT 1) AS today_status,
+          (SELECT a3.start_time FROM appointments a3
+            WHERE a3.client_id = c.id AND a3.stylist_id = $1::uuid AND a3.tenant_id = $2::uuid
+              AND DATE(a3.start_time AT TIME ZONE 'UTC' AT TIME ZONE 'America/Bogota') =
+                  DATE(NOW() AT TIME ZONE 'America/Bogota')
+            ORDER BY a3.start_time LIMIT 1) AS today_time
+        FROM client_stats cs
+        JOIN users c ON c.id = cs.client_id
+        LEFT JOIN services s ON s.id = cs.top_service_id
+        WHERE TRUE ${searchClause}
+        ORDER BY cs.last_visit DESC NULLS LAST
+        LIMIT ${limit}`;
+
+      const rows = await prisma.$queryRawUnsafe(sql, ...params);
+      const clients = rows.map(r => ({
+        id: r.id,
+        name: [r.first_name, r.last_name].filter(Boolean).join(' ') || 'Cliente',
+        first_name: r.first_name,
+        last_name: r.last_name,
+        phone: r.phone,
+        visits: Number(r.visits || 0),
+        done: Number(r.done || 0),
+        last_visit: r.last_visit,
+        top_service: r.top_service_name || null,
+        top_service_price: r.top_service_price ? Number(r.top_service_price) : null,
+        today_status: r.today_status || null,
+        today_time: r.today_time || null,
+        tag: Number(r.visits || 0) >= 3 ? 'loyal' : 'new',
+      }));
+
+      return res.json({ clients, total: clients.length });
+    } catch (error) {
+      console.error('Error getting stylist clients:', error);
+      return res.status(500).json({ error: 'Error interno del servidor' });
+    }
 };

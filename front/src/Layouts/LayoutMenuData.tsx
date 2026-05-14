@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from 'react-i18next';
 import { jwtDecode } from "jwt-decode";
 import Swal from 'sweetalert2';
 import { getToken } from "../services/auth";
@@ -32,6 +33,7 @@ const PLAN_NAMES: Record<string, string> = {
 };
 
 const LayoutMenuData = () => {
+    const { t } = useTranslation();
     const history = useNavigate();
     const [iscurrentState, setIscurrentState] = useState("Dashboard");
 
@@ -56,12 +58,12 @@ const LayoutMenuData = () => {
                 badgeColor: 'warning',
                 onClick: () => {
                     Swal.fire({
-                        title: `Disponible en plan ${PLAN_NAMES[minPlan] || minPlan}`,
-                        text: `Esta función requiere el plan ${PLAN_NAMES[minPlan] || minPlan} o superior. Ve a Configuración → Planes para actualizar.`,
+                        title: t("available_in_plan", { plan: PLAN_NAMES[minPlan] || minPlan }),
+                        text: t("requires_plan", { plan: PLAN_NAMES[minPlan] || minPlan }),
                         icon: 'info',
-                        confirmButtonText: 'Ver planes',
+                        confirmButtonText: t("view_plans"),
                         showCancelButton: true,
-                        cancelButtonText: 'Cerrar',
+                        cancelButtonText: t("close"),
                         confirmButtonColor: '#438eff'
                     }).then((result) => {
                         if (result.isConfirmed) {
@@ -77,17 +79,17 @@ const LayoutMenuData = () => {
     // Step 1: Build static menu structure (filtered by role + plan + setup) — memoized
     const filteredMenuItems = useMemo(() => {
         const menuItems: any[] = [
-            { label: "Menú Principal", isHeader: true },
-            { id: "dashboard", label: "Dashboard", icon: "ri-dashboard-2-line", link: "/dashboard", roles: [1, 2, 3, 6], minPlan: "free" },
-            { id: "fichero", label: "Fichero", icon: "ri-list-ordered", link: "/fichero", roles: [1, 2], minPlan: "pro" },
-            { id: "crm", label: "CRM", icon: "ri-user-heart-line", link: "/crm", roles: [1, 3], minPlan: "free" },
-            { id: "messages", label: "Mensajes", icon: "ri-message-3-line", link: "/messages", roles: [1, 2, 6], minPlan: "business" },
-            { id: "inventory", label: "Inventario", icon: "ri-archive-line", link: "/inventory", roles: [1], minPlan: "pro" },
-            { id: "payroll", label: "Nómina", icon: "ri-money-dollar-circle-line", link: "/payroll", roles: [1], minPlan: "pro" },
-            { id: "settings", label: "Configuración", icon: "ri-settings-3-line", link: "/settings", roles: [1], minPlan: "free" },
+            { label: t("menu_main"), isHeader: true },
+            { id: "dashboard-v2", label: t("menu_dashboard"), icon: "ri-dashboard-2-line", link: "/dashboard-v2", roles: [1, 2, 3, 6], minPlan: "free" },
+            { id: "crm", label: t("menu_crm"), icon: "ri-user-heart-line", link: "/crm", roles: [1, 3], minPlan: "free" },
+            { id: "messages", label: t("menu_messages"), icon: "ri-message-3-line", link: "/messages", roles: [1, 2, 6], minPlan: "business" },
+            { id: "inventory", label: t("menu_inventory"), icon: "ri-archive-line", link: "/inventory", roles: [1], minPlan: "pro" },
+            { id: "payroll", label: t("menu_payroll"), icon: "ri-money-dollar-circle-line", link: "/payroll", roles: [1], minPlan: "pro" },
+            { id: "web-page", label: t("menu_web_page"), icon: "ri-global-line", link: "/web-page", roles: [1], minPlan: "pro" },
+            { id: "settings", label: t("menu_settings"), icon: "ri-settings-3-line", link: "/settings", roles: [1], minPlan: "free" },
             // Super Admin (role 5)
-            { label: "Super Admin", isHeader: true, roles: [5] },
-            { id: "super-admin", label: "Panel Super Admin", icon: "ri-shield-star-line", link: "/super-admin", roles: [5] },
+            { label: t("menu_super_admin"), isHeader: true, roles: [5] },
+            { id: "super-admin", label: t("menu_super_admin"), icon: "ri-shield-star-line", link: "/super-admin", roles: [5] },
         ];
 
         if (!userRole) return [];
@@ -126,12 +128,12 @@ const LayoutMenuData = () => {
                     badgeColor: 'warning',
                     onClick: () => {
                         Swal.fire({
-                            title: `Disponible en plan ${PLAN_NAMES[minPlan] || minPlan}`,
-                            text: `Esta función requiere el plan ${PLAN_NAMES[minPlan] || minPlan} o superior. Ve a Configuración → Planes para actualizar.`,
+                            title: t("available_in_plan", { plan: PLAN_NAMES[minPlan] || minPlan }),
+                            text: t("requires_plan", { plan: PLAN_NAMES[minPlan] || minPlan }),
                             icon: 'info',
-                            confirmButtonText: 'Ver planes',
+                            confirmButtonText: t("view_plans"),
                             showCancelButton: true,
-                            cancelButtonText: 'Cerrar',
+                            cancelButtonText: t("close"),
                             confirmButtonColor: '#438eff'
                         }).then((result) => {
                             if (result.isConfirmed) {
@@ -151,10 +153,10 @@ const LayoutMenuData = () => {
                     subItems: undefined,
                     onClick: () => {
                         Swal.fire({
-                            title: 'Configuración Incompleta',
-                            text: 'Tienes que configurar primero tu negocio para acceder a esta sección.',
+                            title: t("incomplete_setup"),
+                            text: t("setup_first"),
                             icon: 'warning',
-                            confirmButtonText: 'Entendido',
+                            confirmButtonText: t("got_it"),
                             confirmButtonColor: '#438eff'
                         });
                     }
