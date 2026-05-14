@@ -165,6 +165,7 @@ exports.resetQueues = async (req, res) => {
         where: {
           role_id: 3,
           status: 'active',
+          NOT: { rental_status: 'blocked' },
           OR: [
             { tenant_id: tenantId },
             { stylist_branch_assignments: { some: { branch_tenant_id: tenantId } } }

@@ -1349,6 +1349,7 @@ async function getAvailableStylists(tenantId, serviceId) {
          WHERE u.tenant_id = $1::uuid
            AND u.role_id = 3
            AND COALESCE(NULLIF(u.status, ''), 'active') = 'active'
+           AND COALESCE(u.rental_status, '') <> 'blocked'
            AND ss.service_id = $2::uuid
          ORDER BY u.first_name ASC, u.last_name ASC`,
         [tenantId, serviceId]

@@ -180,6 +180,7 @@ exports.searchStylists = async (req, res) => {
         FROM users
         WHERE tenant_id=$1::uuid AND role_id=3
           AND COALESCE(NULLIF(status,''),'active')='active'
+          AND COALESCE(rental_status, '') <> 'blocked'
       )
       SELECT id, first_name, last_name
       FROM base

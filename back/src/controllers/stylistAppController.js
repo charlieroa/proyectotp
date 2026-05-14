@@ -792,6 +792,7 @@ exports.getStylistsTracking = async (req, res) => {
             WHERE u.tenant_id = $1::uuid
               AND u.role_id = 3
               AND u.status = 'active'
+              AND COALESCE(u.rental_status, '') <> 'blocked'
             ORDER BY ${orderBy}`,
             tenant_id
         );
@@ -947,6 +948,7 @@ exports.getSmartQueue = async (req, res) => {
              WHERE tenant_id = $1::uuid
                AND role_id = 3
                AND status = 'active'
+               AND COALESCE(rental_status, '') <> 'blocked'
              ORDER BY COALESCE(last_turn_at, last_service_at) ASC NULLS FIRST
              LIMIT 1`,
             tenant_id
@@ -979,6 +981,7 @@ exports.getSmartQueue = async (req, res) => {
                 WHERE u.tenant_id = $1::uuid
                   AND u.role_id = 3
                   AND COALESCE(NULLIF(u.status,''),'active') = 'active'
+                  AND COALESCE(u.rental_status, '') <> 'blocked'
                   AND ss.service_id = $2::uuid
                 ORDER BY
                   ss.last_completed_at NULLS FIRST,

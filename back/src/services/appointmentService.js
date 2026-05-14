@@ -446,6 +446,15 @@ async function getAvailableSlotsForStylist(tenantId, stylistId, serviceId, date,
 async function createAppointmentRecord(tenantId, clientId, stylistId, serviceId, startTime, duration, { skipOverlapCheck = false, batchId = null } = {}) {
   const endTime = new Date(startTime.getTime() + duration * 60000);
 
+  // Hard gate: si el estilista es renter bloqueado, rechazar
+  const stylistGate = await prisma.users.findUnique({
+    where: { id: stylistId },
+    select: { employment_type: true, rental_status: true },
+  });
+  if (stylistGate?.employment_type === 'renter' && stylistGate?.rental_status === 'blocked') {
+    throw new Error('El estilista está suspendido por falta de pago del arriendo de su cupo. No puede recibir citas hasta que regularice.');
+  }
+
   console.log('\n' + '📝'.repeat(40));
   console.log('📝 [DIGITURNO] Creando cita...');
   console.log('   Tenant ID:', tenantId);
