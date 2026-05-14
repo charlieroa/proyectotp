@@ -34,3 +34,11 @@ nul
 appestilistav2/
 tupelukeria_stylist_v3/
 appestilista/
+
+# Claude Code locales y locks
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
+
+# Scripts scratch / one-shot deploys
+plury_check.js
+deploy_patch_*.py
