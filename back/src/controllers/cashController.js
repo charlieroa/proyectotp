@@ -24,12 +24,20 @@ exports.openCashSession = async (req, res) => {
         return res.status(400).json({ error: 'El monto inicial es obligatorio y debe ser un n\u00famero positivo.' });
     }
     try {
+        // Auto-cerrar sesiones huérfanas de días anteriores antes de validar
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        await prisma.cash_sessions.updateMany({
+            where: { tenant_id, status: 'OPEN', opened_at: { lt: today } },
+            data: { status: 'CLOSED', closed_at: new Date(), difference: 0 }
+        });
+
         const existingOpenSession = await prisma.cash_sessions.findFirst({
-            where: { tenant_id, status: 'OPEN' },
+            where: { tenant_id, status: 'OPEN', opened_by_user_id: user_id },
             select: { id: true }
         });
         if (existingOpenSession) {
-            return res.status(409).json({ error: 'Ya existe una sesi\u00f3n de caja abierta para este negocio.' });
+            return res.status(409).json({ error: 'Ya tienes una sesi\u00f3n de caja abierta.' });
         }
         const newSession = await prisma.cash_sessions.create({
             data: {
@@ -48,17 +56,16 @@ exports.openCashSession = async (req, res) => {
 };
 
 exports.getCurrentSession = async (req, res) => {
-    const { tenant_id: userTenantId } = req.user;
+    const { tenant_id: userTenantId, id: user_id } = req.user;
     const tenant_id = req.query.target_tenant_id || userTenantId;
     try {
-        // --- MEJORA: Se busca la sesi\u00f3n abierta por tenant_id, no por user_id ---
-        // Esto permite que un admin pueda ver/cerrar la caja de otro usuario.
+        // Busca la sesión abierta por ESTE USUARIO en el tenant
         const sessionRows = await prisma.$queryRawUnsafe(
             `SELECT s.id, s.initial_amount, s.opened_at, u.first_name || ' ' || u.last_name as opener_name
              FROM cash_sessions s
              JOIN users u ON s.opened_by_user_id = u.id
-             WHERE s.tenant_id = $1::uuid AND s.status = 'OPEN'`,
-            tenant_id
+             WHERE s.tenant_id = $1::uuid AND s.status = 'OPEN' AND s.opened_by_user_id = $2::uuid`,
+            tenant_id, user_id
         );
 
         if (!sessionRows || sessionRows.length === 0) {
@@ -148,7 +155,7 @@ exports.closeCashSession = async (req, res) => {
     try {
         const updatedSession = await prisma.$transaction(async (tx) => {
             const session = await tx.cash_sessions.findFirst({
-                where: { tenant_id, status: 'OPEN' }
+                where: { tenant_id, status: 'OPEN', opened_by_user_id: user_id }
             });
             if (!session) throw new Error('NO_OPEN_SESSION');
 
@@ -191,7 +198,16 @@ exports.closeCashSession = async (req, res) => {
 // --- El resto de las funciones no necesitan cambios ---
 exports.getSessionHistory = async (req, res) => {
     const { tenant_id } = req.user;
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
+    const offset = (page - 1) * limit;
     try {
+        const countRows = await prisma.$queryRawUnsafe(
+            `SELECT COUNT(*)::int as total FROM cash_sessions WHERE tenant_id = $1::uuid AND status = 'CLOSED'`,
+            tenant_id
+        );
+        const total = countRows[0]?.total || 0;
+
         const rows = await prisma.$queryRawUnsafe(
             `SELECT
                 s.*, opener.first_name as opened_by_name, closer.first_name as closed_by_name
@@ -199,10 +215,14 @@ exports.getSessionHistory = async (req, res) => {
             LEFT JOIN users opener ON s.opened_by_user_id = opener.id
             LEFT JOIN users closer ON s.closed_by_user_id = closer.id
             WHERE s.tenant_id = $1::uuid AND s.status = 'CLOSED'
-            ORDER BY s.closed_at DESC`,
-            tenant_id
+            ORDER BY s.closed_at DESC
+            LIMIT $2::int OFFSET $3::int`,
+            tenant_id, limit, offset
         );
-        res.status(200).json(rows);
+        res.status(200).json({
+            sessions: rows,
+            pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
+        });
     } catch (error) {
         console.error('Error al obtener el historial de cajas:', error);
         res.status(500).json({ error: 'Error interno del servidor.' });
@@ -224,12 +244,12 @@ exports.createCashMovement = async (req, res) => {
     if (type === 'income' && numericAmount < 0) { numericAmount = Math.abs(numericAmount); }
     try {
         const openSession = await prisma.cash_sessions.findFirst({
-            where: { tenant_id, status: 'OPEN' },
+            where: { tenant_id, status: 'OPEN', opened_by_user_id: user_id },
             select: { id: true }
         });
         const cash_session_id = openSession ? openSession.id : null;
         if (!cash_session_id && (payment_method === 'cash')) {
-            return res.status(400).json({ error: 'No se puede registrar un movimiento en efectivo porque no hay una sesi\u00f3n de caja abierta.' });
+            return res.status(400).json({ error: 'No se puede registrar un movimiento en efectivo porque no tienes una sesi\u00f3n de caja abierta.' });
         }
         const newMovement = await prisma.cash_movements.create({
             data: {
@@ -275,6 +295,180 @@ exports.getCashMovements = async (req, res) => {
         res.status(200).json(rows);
     } catch (error) {
         console.error('Error al obtener movimientos de caja:', error);
+        res.status(500).json({ error: 'Error interno del servidor.' });
+    }
+};
+
+// GET /api/cash/session/:id - Detalle de sesión con todos sus movimientos
+exports.getSessionDetail = async (req, res) => {
+    const { tenant_id } = req.user;
+    const { id } = req.params;
+    try {
+        // Obtener la sesión
+        const sessionRows = await prisma.$queryRawUnsafe(
+            `SELECT s.*,
+                    opener.first_name || ' ' || opener.last_name as opened_by_name,
+                    closer.first_name || ' ' || closer.last_name as closed_by_name
+             FROM cash_sessions s
+             LEFT JOIN users opener ON s.opened_by_user_id = opener.id
+             LEFT JOIN users closer ON s.closed_by_user_id = closer.id
+             WHERE s.id = $1::uuid AND s.tenant_id = $2::uuid`,
+            id, tenant_id
+        );
+        if (!sessionRows || sessionRows.length === 0) {
+            return res.status(404).json({ error: 'Sesión no encontrada.' });
+        }
+        const session = sessionRows[0];
+
+        // Obtener todos los movimientos de esa sesión
+        const movements = await prisma.$queryRawUnsafe(
+            `SELECT cm.*,
+                    u.first_name || ' ' || u.last_name as registered_by_name,
+                    ru.first_name || ' ' || ru.last_name as related_to_name,
+                    eu.first_name || ' ' || eu.last_name as edited_by_name
+             FROM cash_movements cm
+             LEFT JOIN users u ON cm.user_id = u.id
+             LEFT JOIN users ru ON cm.related_user_id = ru.id
+             LEFT JOIN users eu ON cm.edited_by_user_id = eu.id
+             WHERE cm.cash_session_id = $1::uuid
+             ORDER BY cm.created_at ASC`,
+            id
+        );
+
+        // Calcular resumen
+        let totalIncome = 0, totalExpense = 0, totalCashIncome = 0, totalCashExpense = 0;
+        for (const m of movements) {
+            const amt = Number(m.amount);
+            if (m.type === 'income') {
+                totalIncome += amt;
+                if (m.payment_method === 'cash') totalCashIncome += amt;
+            } else {
+                totalExpense += amt; // ya es negativo
+                if (m.payment_method === 'cash') totalCashExpense += amt;
+            }
+        }
+
+        const expectedCash = Number(session.initial_amount) + totalCashIncome + totalCashExpense;
+
+        res.status(200).json({
+            session,
+            movements,
+            summary: {
+                total_income: totalIncome,
+                total_expense: totalExpense,
+                total_cash_income: totalCashIncome,
+                total_cash_expense: totalCashExpense,
+                expected_cash: expectedCash,
+                movement_count: movements.length
+            }
+        });
+    } catch (error) {
+        console.error('Error al obtener detalle de sesión:', error);
+        res.status(500).json({ error: 'Error interno del servidor.' });
+    }
+};
+
+// Helper: verificar si un movimiento está protegido
+function getMovementProtection(movement) {
+    if (movement.status === 'deducted') {
+        return 'Este movimiento ya fue procesado en nómina y no puede modificarse.';
+    }
+    if (movement.invoice_id) {
+        return 'Este movimiento fue generado por una venta y no puede modificarse directamente.';
+    }
+    if (movement.category === 'loan_to_staff') {
+        return 'Este movimiento es un desembolso de préstamo y no puede modificarse.';
+    }
+    return null; // no está protegido
+}
+
+// PUT /api/cash/movements/:id - Editar un movimiento de caja (auditoría)
+exports.updateCashMovement = async (req, res) => {
+    const { id } = req.params;
+    const { amount, description, category, edit_reason } = req.body;
+    const { tenant_id, id: user_id } = req.user;
+
+    if (!edit_reason) {
+        return res.status(400).json({ error: 'Debe proporcionar una razón para la edición.' });
+    }
+
+    try {
+        const existing = await prisma.cash_movements.findFirst({
+            where: { id, tenant_id }
+        });
+        if (!existing) {
+            return res.status(404).json({ error: 'Movimiento no encontrado.' });
+        }
+
+        // Verificar protecciones
+        const protection = getMovementProtection(existing);
+        if (protection) {
+            return res.status(403).json({ error: protection });
+        }
+
+        const updateData = {
+            edited_by_user_id: user_id,
+            edited_at: new Date(),
+            edit_reason
+        };
+
+        // Guardar monto original solo la primera vez que se edita
+        if (!existing.original_amount) {
+            updateData.original_amount = existing.amount;
+        }
+
+        if (amount !== undefined) {
+            let numericAmount = Number(amount);
+            if (!Number.isFinite(numericAmount)) {
+                return res.status(400).json({ error: 'El monto debe ser un número válido.' });
+            }
+            if ((existing.type === 'payroll_advance' || existing.type === 'expense') && numericAmount > 0) {
+                numericAmount = -Math.abs(numericAmount);
+            }
+            if (existing.type === 'income' && numericAmount < 0) {
+                numericAmount = Math.abs(numericAmount);
+            }
+            updateData.amount = numericAmount;
+        }
+
+        if (description !== undefined) updateData.description = description;
+        if (category !== undefined) updateData.category = category;
+
+        const updated = await prisma.cash_movements.update({
+            where: { id },
+            data: updateData
+        });
+
+        res.status(200).json(updated);
+    } catch (error) {
+        console.error('Error al editar movimiento de caja:', error);
+        res.status(500).json({ error: 'Error interno del servidor.' });
+    }
+};
+
+// DELETE /api/cash/movements/:id - Eliminar un movimiento de caja
+exports.deleteCashMovement = async (req, res) => {
+    const { id } = req.params;
+    const { tenant_id } = req.user;
+
+    try {
+        const existing = await prisma.cash_movements.findFirst({
+            where: { id, tenant_id }
+        });
+        if (!existing) {
+            return res.status(404).json({ error: 'Movimiento no encontrado.' });
+        }
+
+        // Verificar protecciones
+        const protection = getMovementProtection(existing);
+        if (protection) {
+            return res.status(403).json({ error: protection });
+        }
+
+        await prisma.cash_movements.delete({ where: { id } });
+        res.status(200).json({ message: 'Movimiento eliminado correctamente.' });
+    } catch (error) {
+        console.error('Error al eliminar movimiento de caja:', error);
         res.status(500).json({ error: 'Error interno del servidor.' });
     }
 };
@@ -326,8 +520,8 @@ exports.getAllBranchesCash = async (req, res) => {
         );
 
         const result = branches.map(branch => {
-            const session = sessions.find(s => s.tenant_id === branch.id);
-            if (!session) {
+            const branchSessions = sessions.filter(s => s.tenant_id === branch.id);
+            if (branchSessions.length === 0) {
                 return {
                     tenant_id: branch.id,
                     branch_name: branch.name,
@@ -337,7 +531,13 @@ exports.getAllBranchesCash = async (req, res) => {
                 };
             }
 
-            const expectedCash = Number(session.initial_amount) + Number(session.cash_incomes) + Number(session.cash_expenses);
+            // Agregar todas las sesiones abiertas de la sucursal
+            const openerNames = branchSessions.map(s => s.opener_name).join(', ');
+            const totalInitial = branchSessions.reduce((sum, s) => sum + Number(s.initial_amount), 0);
+            const totalCashIncomes = branchSessions.reduce((sum, s) => sum + Number(s.cash_incomes), 0);
+            const totalCashExpenses = branchSessions.reduce((sum, s) => sum + Number(s.cash_expenses), 0);
+            const totalInvoices = branchSessions.reduce((sum, s) => sum + s.invoice_count, 0);
+            const expectedCash = totalInitial + totalCashIncomes + totalCashExpenses;
 
             return {
                 tenant_id: branch.id,
@@ -345,12 +545,13 @@ exports.getAllBranchesCash = async (req, res) => {
                 branch_color: branch.branch_color,
                 status: 'OPEN',
                 session: {
-                    id: session.id,
-                    opened_at: session.opened_at,
-                    opener_name: session.opener_name,
-                    initial_amount: Number(session.initial_amount),
+                    id: branchSessions[0].id,
+                    opened_at: branchSessions[0].opened_at,
+                    opener_name: openerNames,
+                    initial_amount: totalInitial,
                     expected_cash_amount: expectedCash,
-                    invoice_count: session.invoice_count
+                    invoice_count: totalInvoices,
+                    active_sessions: branchSessions.length
                 }
             };
         });
