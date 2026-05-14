@@ -22,8 +22,8 @@ import { sileo } from "sileo";
 import { useDispatch, useSelector } from "react-redux";
 import { unwrapResult } from '@reduxjs/toolkit';
 import Swal from 'sweetalert2';
-import axios from 'axios';
 import Select from 'react-select';
+import { useTranslation } from 'react-i18next';
 
 // Thunks
 import {
@@ -54,15 +54,6 @@ type Stylist = {
 };
 
 type ExtraRow = { service_id: string; stylist_id: string };
-
-interface DigiturnoQueueItem {
-  service_id: string;
-  stylist_id: string;
-  stylist_name: string;
-  order: number;
-  last_completed_at: string | null;
-  total_completed: number;
-}
 
 interface AppointmentModalProps {
   isOpen: boolean;
@@ -98,6 +89,14 @@ const isSameDayLocal = (a: Date, b: Date) => {
 const hhmmToMinutes = (hhmm: string) => {
   const [h, m] = hhmm.split(":").map(Number);
   return h * 60 + m;
+};
+
+/** Convierte "HH:mm" (24h) a "h:mm AM/PM" */
+const hhmmTo12h = (hhmm: string): string => {
+  const [h, m] = hhmm.split(":").map(Number);
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
 };
 
 const isDateInPast = (date: Date): boolean => {
@@ -146,6 +145,7 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
   targetTenantId,
 }) => {
   const dispatch: any = useDispatch();
+  const { t } = useTranslation();
   const { clients = [], services = [] } =
     useSelector((state: any) => state.calendar || state.Calendar || {}) || {};
 
@@ -163,7 +163,6 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
   const [isLoadingStylistsRows, setIsLoadingStylistsRows] = useState<Record<number, boolean>>({});
   const [isSuggestingMain, setIsSuggestingMain] = useState<boolean>(false);
   const [isSuggestingRow, setIsSuggestingRow] = useState<Record<number, boolean>>({});
-  const [digiturnoQueue, setDigiturnoQueue] = useState<DigiturnoQueueItem[]>([]);
   const [createdClientsMap, setCreatedClientsMap] = useState<Record<string, { first_name: string; last_name?: string }>>({});
   const [closeClientModalOnSave, setCloseClientModalOnSave] = useState<boolean>(true);
   const [newClientData, setNewClientData] = useState({ first_name: '', last_name: '', phone: '' });
@@ -178,24 +177,15 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
   const canCancelOrReschedule = isEditMode && selectedEvent &&
     ['scheduled', 'rescheduled', 'pending_approval'].includes(selectedEvent.status);
 
-  // Cargar cola de digiturno (informativo)
-  useEffect(() => {
-    if (isOpen && tenantId) {
-      axios.get(`/api/appointments/digiturno/queue/${tenantId}`)
-        .then((response) => setDigiturnoQueue(response.data.queue || []))
-        .catch((err) => console.error('Error Digiturno Queue:', err));
-    }
-  }, [isOpen, tenantId]);
-
   useEffect(() => {
     if (!isOpen) return;
     if (!isEditMode && defaultDate && !allowPastAppointments) {
       if (isDateInPast(defaultDate)) {
         Swal.fire({
-          title: "Fecha no válida",
-          html: "No se pueden crear citas en fechas pasadas.",
+          title: t("past_date"),
+          html: t("no_past_appointments"),
           icon: "warning",
-          confirmButtonText: "Entendido",
+          confirmButtonText: t("got_it"),
         });
         onClose();
       }
@@ -206,13 +196,13 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
   const validation = useFormik<AppointmentFormValues>({
     enableReinitialize: true,
     validationSchema: Yup.object({
-      service_id: Yup.string().required("Seleccione un servicio."),
-      date: Yup.mixed().required("Seleccione una fecha."),
-      start_time: Yup.string().required("Seleccione un horario."),
-      stylist_id: Yup.string().required("Seleccione un estilista."),
+      service_id: Yup.string().required(t("select")),
+      date: Yup.mixed().required(t("select")),
+      start_time: Yup.string().required(t("select")),
+      stylist_id: Yup.string().required(t("select")),
       client_id: Yup.string().when([], {
         is: () => !selectedEvent,
-        then: (schema: any) => schema.required("Seleccione un cliente."),
+        then: (schema: any) => schema.required(t("select")),
         otherwise: (schema: any) => schema.notRequired(),
       }),
     }),
@@ -236,7 +226,7 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
           setSubmitting(false);
           return;
         }
-        if (!values.client_id && !selectedEvent) throw new Error("Seleccione un cliente.");
+        if (!values.client_id && !selectedEvent) throw new Error(t("select"));
 
         if (selectedEvent) {
           await dispatch(onUpdateAppointment({
@@ -303,19 +293,30 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
       const dateStr = toYyyyMmDd(date);
       dispatch(fetchTenantSlots(dateStr, service_id, targetTenantId))
         .then((payload: any) => {
-          const fetched = normalizeSlotsPayload(payload);
-          let filtered = fetched;
-          if (!allowPastAppointments) {
-            const selectedDate = new Date(date as any);
-            const now = new Date();
-            if (isSameDayLocal(selectedDate, now)) {
-              const currentMins = now.getHours() * 60 + now.getMinutes();
-              filtered = fetched.filter((t) => hhmmToMinutes(t) > currentMins);
-            }
-          }
+          // El backend ya filtra horarios pasados correctamente con timezone Colombia
+          const slotsRaw = payload?.slots ?? payload;
+          const fetched = normalizeSlotsPayload(slotsRaw);
+          const message = payload?.message || '';
           const current = validation.values.start_time;
-          if (!filtered.includes(current) && current) validation.setFieldValue("start_time", "");
-          setTimeSlots(filtered);
+          if (!fetched.includes(current) && current) validation.setFieldValue("start_time", "");
+          setTimeSlots(fetched);
+
+          // Si no hay slots y el backend envió un mensaje (día cerrado, horarios pasados, etc.)
+          if (fetched.length === 0 && message) {
+            Swal.fire({
+              icon: 'info',
+              title: t('closed_day'),
+              text: message,
+              confirmButtonText: t('got_it'),
+              showCancelButton: true,
+              cancelButtonText: t('go_to_settings'),
+              confirmButtonColor: '#438eff',
+            }).then((result) => {
+              if (result.dismiss === Swal.DismissReason.cancel) {
+                window.open('/settings?tab=2', '_blank');
+              }
+            });
+          }
         })
         .finally(() => setIsLoadingTimeSlots(false));
     } else {
@@ -349,34 +350,16 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
     }
   }, [validation.values.service_id, validation.values.date, validation.values.start_time, dispatch]);
 
-  // =========================================================
-  // 🔥 ORDENAMIENTO VISUAL FORZADO (MEMOIZADO) 🔥
-  // =========================================================
+  // Ordenamos: libres primero, ocupados al final (estable)
   const sortedStylistsForDropdown = useMemo(() => {
     if (!availableStylists || availableStylists.length === 0) return [];
-
-    // Creamos una copia para ordenar
-    const sorted = [...availableStylists].sort((a, b) => {
-      // Convertimos a booleano seguro
+    return [...availableStylists].sort((a, b) => {
       const aBusy = Boolean(a.is_busy);
       const bBusy = Boolean(b.is_busy);
-
-      // Queremos: Falsos (Libres) primero, Verdaderos (Ocupados) después
-      if (aBusy === bBusy) return 0; // Si son iguales, respeta orden del backend
-      return aBusy ? 1 : -1; // True va al final (1), False al principio (-1)
+      if (aBusy === bBusy) return 0;
+      return aBusy ? 1 : -1;
     });
-
-    console.log("🔄 Lista Reordenada para UI (Libres primero):", sorted.map(s => `${s.first_name} (${s.is_busy})`));
-
-    // Si hay un estilista seleccionado, lo ponemos al principio siempre (para que aparezca seleccionado)
-    const currentId = validation.values.stylist_id;
-    if (currentId && !sorted.find(s => String(s.id) === String(currentId))) {
-      // Si el seleccionado no está en la lista (raro), no hacemos nada especial
-      return sorted;
-    }
-
-    return sorted;
-  }, [availableStylists, validation.values.stylist_id]);
+  }, [availableStylists]);
 
   // Helpers
   const isStylistUsedElsewhere = (stylistId: string | number) => {
@@ -407,13 +390,6 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
 
   // UI Helpers
   const canSubmit = useMemo(() => validation.isValid && !validation.isSubmitting, [validation.isValid, validation.isSubmitting]);
-  const currentStylistLabel = (() => {
-    const id = validation.values.stylist_id;
-    if (!id) return "";
-    const found = availableStylists.find((s) => String(s.id) === String(id));
-    if (found) return `${found.first_name || ""} ${found.last_name || ""}`;
-    return `Estilista Seleccionado`;
-  })();
 
   // Deduplicar clientes por id y formatear para react-select
   const clientOptions = useMemo(() => {
@@ -479,7 +455,7 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
   return (
     <Modal isOpen={isOpen} toggle={onClose} centered size="lg">
       <ModalHeader toggle={onClose} className="bg-light">
-        {isEditMode ? "Detalle de Cita" : "Agendar Cita"}
+        {isEditMode ? t("appointment_details") : t("schedule_appointment")}
       </ModalHeader>
       <ModalBody>
         {/* Info card when viewing/editing existing appointment */}
@@ -488,33 +464,33 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
             <Row>
               <Col xs={6}>
                 <div className="mb-2">
-                  <small className="text-muted d-block">Servicio</small>
-                  <strong>{selectedEvent.service_name || 'Sin servicio'}</strong>
+                  <small className="text-muted d-block">{t("service")}</small>
+                  <strong>{selectedEvent.service_name || t('no_service')}</strong>
                 </div>
               </Col>
               <Col xs={6}>
                 <div className="mb-2">
-                  <small className="text-muted d-block">Estado</small>
+                  <small className="text-muted d-block">{t("status")}</small>
                   <span className={`badge ${selectedEvent.status === 'completed' ? 'bg-success' : selectedEvent.status === 'cancelled' ? 'bg-danger' : selectedEvent.status === 'checked_in' ? 'bg-info' : 'bg-primary'}`}>
-                    {selectedEvent.status === 'scheduled' ? 'Agendada' : selectedEvent.status === 'completed' ? 'Completada' : selectedEvent.status === 'cancelled' ? 'Cancelada' : selectedEvent.status === 'checked_in' ? 'En atención' : selectedEvent.status === 'checked_out' ? 'Finalizada' : selectedEvent.status || 'Agendada'}
+                    {selectedEvent.status === 'scheduled' ? t('status_scheduled') : selectedEvent.status === 'completed' ? t('status_completed') : selectedEvent.status === 'cancelled' ? t('status_cancelled') : selectedEvent.status === 'checked_in' ? t('status_in_service') : selectedEvent.status === 'checked_out' ? t('status_finished') : selectedEvent.status || t('status_scheduled')}
                   </span>
                 </div>
               </Col>
               <Col xs={6}>
                 <div className="mb-2">
-                  <small className="text-muted d-block">Cliente</small>
+                  <small className="text-muted d-block">{t("client")}</small>
                   <strong><i className="ri-user-line me-1"></i>{selectedEvent.client_first_name || ''} {selectedEvent.client_last_name || ''}</strong>
                 </div>
               </Col>
               <Col xs={6}>
                 <div className="mb-2">
-                  <small className="text-muted d-block">Estilista</small>
+                  <small className="text-muted d-block">{t("stylist")}</small>
                   <strong><i className="ri-scissors-line me-1"></i>{selectedEvent.stylist_first_name || ''} {selectedEvent.stylist_last_name || ''}</strong>
                 </div>
               </Col>
               <Col xs={6}>
                 <div>
-                  <small className="text-muted d-block">Hora</small>
+                  <small className="text-muted d-block">{t("time")}</small>
                   <strong><i className="ri-time-line me-1"></i>
                     {selectedEvent.start_time ? new Date(selectedEvent.start_time).toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit', hour12: true }) : ''}
                     {selectedEvent.end_time ? ` - ${new Date(selectedEvent.end_time).toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}
@@ -523,7 +499,7 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
               </Col>
               <Col xs={6}>
                 <div>
-                  <small className="text-muted d-block">Fecha</small>
+                  <small className="text-muted d-block">{t("date")}</small>
                   <strong><i className="ri-calendar-line me-1"></i>
                     {selectedEvent.start_time ? new Date(selectedEvent.start_time).toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' }) : ''}
                   </strong>
@@ -535,7 +511,7 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
             {canCancelOrReschedule && (
               <div className="mt-3 pt-2 border-top">
                 <Button color="danger" outline size="sm" onClick={() => setShowCancelModal(true)}>
-                  <i className="ri-close-circle-line me-1"></i>Cancelar / Reagendar Cita
+                  <i className="ri-close-circle-line me-1"></i>{t("cancel_reschedule")}
                 </Button>
               </div>
             )}
@@ -547,7 +523,7 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
             {/* Cliente */}
             <Col xs={12}>
               <FormGroup>
-                <Label>Cliente*</Label>
+                <Label>{t("client")}*</Label>
                 <div className="d-flex gap-2">
                   <div className="flex-grow-1">
                     <Select
@@ -556,8 +532,8 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
                       onChange={(opt: any) => validation.setFieldValue('client_id', opt?.value || '')}
                       isDisabled={isEditMode}
                       isClearable
-                      placeholder="Buscar cliente..."
-                      noOptionsMessage={() => 'No se encontraron clientes'}
+                      placeholder={t("search_client")}
+                      noOptionsMessage={() => t('no_clients_found')}
                       styles={{
                         control: (base: any) => ({ ...base, minHeight: 38 }),
                         menu: (base: any) => ({ ...base, zIndex: 9999 }),
@@ -565,7 +541,7 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
                     />
                   </div>
                   {!isEditMode && (
-                    <Button color="success" outline onClick={() => setShowClientModal(true)} title="Crear nuevo cliente">
+                    <Button color="success" outline onClick={() => setShowClientModal(true)} title={t("create_new_client")}>
                       <i className="ri-user-add-line"></i>
                     </Button>
                   )}
@@ -576,7 +552,7 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
             {/* Servicio */}
             <Col xs={12}>
               <FormGroup>
-                <Label>Servicio*</Label>
+                <Label>{t("service")}*</Label>
                 {services.length === 0 ? (
                   <div className="alert alert-warning py-2 mb-0">
                     <i className="ri-information-line me-1"></i>
@@ -584,7 +560,7 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
                   </div>
                 ) : (
                   <Input type="select" name="service_id" onChange={validation.handleChange} value={validation.values.service_id}>
-                    <option value="">Seleccione...</option>
+                    <option value="">{t("select")}...</option>
                     {services.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </Input>
                 )}
@@ -594,16 +570,16 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
             {/* Fecha/Hora */}
             <Col md={6}>
               <FormGroup>
-                <Label>Fecha*</Label>
-                <Flatpickr className="form-control" value={validation.values.date as any} onChange={([d]) => validation.setFieldValue("date", d)} options={{ dateFormat: "Y-m-d", minDate: "today" }} />
+                <Label>{t("date")}*</Label>
+                <Flatpickr key={`fp-${allowPastAppointments ? 'past' : 'nopast'}`} className="form-control" value={validation.values.date as any} onChange={([d]) => validation.setFieldValue("date", d)} options={{ dateFormat: "Y-m-d", ...(allowPastAppointments ? {} : { minDate: "today" }) }} />
               </FormGroup>
             </Col>
             <Col md={6}>
               <FormGroup>
-                <Label>Hora*</Label>
+                <Label>{t("time")}*</Label>
                 <Input type="select" name="start_time" onChange={validation.handleChange} value={validation.values.start_time} disabled={isLoadingTimeSlots}>
-                  <option value="">Seleccione...</option>
-                  {timeSlots.map(t => <option key={t} value={t}>{t}</option>)}
+                  <option value="">{t("select")}...</option>
+                  {timeSlots.map(t => <option key={t} value={t}>{hhmmTo12h(t)}</option>)}
                 </Input>
               </FormGroup>
             </Col>
@@ -611,40 +587,136 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
             {/* Estilista */}
             <Col xs={12}>
               <FormGroup>
-                <Label>Estilista*</Label>
+                <Label>{t("stylist")}*</Label>
                 <div className="d-flex gap-2">
-                  <Input type="select" name="stylist_id" onChange={validation.handleChange} value={validation.values.stylist_id} disabled={isLoadingStylists}>
-                    <option value="">{isLoadingStylists ? "Cargando..." : "Seleccione..."}</option>
-
-                    {/* Opción Actual si existe y no está en la lista */}
-                    {validation.values.stylist_id && !sortedStylistsForDropdown.find(s => String(s.id) === String(validation.values.stylist_id)) && (
-                      <option value={validation.values.stylist_id}>{currentStylistLabel}</option>
-                    )}
-
-                    {/* ✅ LISTA ORDENADA CON INDICADORES VISUALES */}
+                  <Input
+                    type="select"
+                    name="stylist_id"
+                    onChange={(e) => validation.setFieldValue("stylist_id", e.target.value)}
+                    value={validation.values.stylist_id || ""}
+                    disabled={isLoadingStylists}
+                  >
+                    <option value="">{isLoadingStylists ? t("loading") : `${t("select")}...`}</option>
                     {sortedStylistsForDropdown.map((s) => (
-                      <option
-                        key={s.id}
-                        value={s.id}
-                        className={s.is_busy ? "text-danger bg-light fw-bold" : "text-success fw-bold"}
-                      >
-                        {/* Iconos para depurar visualmente */}
-                        {s.is_busy ? `🔴 (Ocupado)` : `🟢 (Libre)`} - {s.first_name} {s.last_name}
+                      <option key={String(s.id)} value={String(s.id)}>
+                        {s.is_busy ? "🔴" : "🟢"} {s.first_name || ""} {s.last_name || ""} {s.is_busy ? `(${t("busy") || "Ocupado"})` : `(${t("available") || "Libre"})`}
                       </option>
                     ))}
                   </Input>
 
-                  <Button color="info" outline onClick={handleSuggestMain} disabled={isSuggestingMain} title="Asignación Inteligente">
-                    {isSuggestingMain ? <Spinner size="sm" /> : <><i className="ri-magic-line me-1"></i>Digiturno</>}
+                  <Button color="info" outline onClick={handleSuggestMain} disabled={isSuggestingMain} title={t("smart_assignment")}>
+                    {isSuggestingMain ? <Spinner size="sm" /> : <><i className="ri-magic-line me-1"></i>{t("smart_assignment")}</>}
                   </Button>
                 </div>
               </FormGroup>
             </Col>
           </Row>
 
+          {/* Servicios adicionales */}
+          {!isEditMode && (
+            <div className="mt-3">
+              {extraRows.map((row, idx) => (
+                <div key={idx} className="border rounded p-3 mb-2 position-relative bg-light">
+                  {/* Botón eliminar arriba a la derecha */}
+                  <button
+                    type="button"
+                    className="btn-close position-absolute"
+                    style={{ top: 8, right: 8 }}
+                    onClick={() => {
+                      setExtraRows(extraRows.filter((_, i) => i !== idx));
+                      setAvailableStylistsRows(prev => { const n = { ...prev }; delete n[idx]; return n; });
+                    }}
+                  />
+                  <small className="text-muted fw-semibold d-block mb-2">Servicio adicional {idx + 1}</small>
+                  {/* Servicio - full width */}
+                  <FormGroup className="mb-2">
+                    <Input
+                      type="select"
+                      value={row.service_id}
+                      onChange={(e) => {
+                        const updated = [...extraRows];
+                        updated[idx] = { ...updated[idx], service_id: e.target.value, stylist_id: '' };
+                        setExtraRows(updated);
+                        if (e.target.value && validation.values.date && validation.values.start_time) {
+                          setIsLoadingStylistsRows(prev => ({ ...prev, [idx]: true }));
+                          const dateStr = toYyyyMmDd(validation.values.date);
+                          dispatch(fetchAvailableStylists(dateStr, validation.values.start_time, e.target.value, targetTenantId))
+                            .then((stylists: Stylist[]) => setAvailableStylistsRows(prev => ({ ...prev, [idx]: stylists })))
+                            .catch(() => setAvailableStylistsRows(prev => ({ ...prev, [idx]: [] })))
+                            .finally(() => setIsLoadingStylistsRows(prev => ({ ...prev, [idx]: false })));
+                        }
+                      }}
+                    >
+                      <option value="">{t("select")} {t("service").toLowerCase()}...</option>
+                      {services.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </Input>
+                  </FormGroup>
+                  {/* Estilista - full width con botón inteligente */}
+                  <div className="d-flex gap-2">
+                    <Input
+                      type="select"
+                      className="flex-grow-1"
+                      value={row.stylist_id}
+                      disabled={isLoadingStylistsRows[idx] || !row.service_id}
+                      onChange={(e) => {
+                        const updated = [...extraRows];
+                        updated[idx] = { ...updated[idx], stylist_id: e.target.value };
+                        setExtraRows(updated);
+                      }}
+                    >
+                      <option value="">{isLoadingStylistsRows[idx] ? t("loading") : `${t("select")} ${t("stylist").toLowerCase()}...`}</option>
+                      {(availableStylistsRows[idx] || []).map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.is_busy ? '🔴 (Ocupado)' : '🟢 (Libre)'} - {s.first_name} {s.last_name}
+                        </option>
+                      ))}
+                    </Input>
+                    <Button
+                      color="info"
+                      outline
+                      disabled={isSuggestingRow[idx] || !row.service_id}
+                      title={t("smart_assignment")}
+                      onClick={async () => {
+                        if (!row.service_id || !validation.values.date || !validation.values.start_time) return;
+                        setIsSuggestingRow(prev => ({ ...prev, [idx]: true }));
+                        try {
+                          const dateStr = toYyyyMmDd(validation.values.date);
+                          const stylists: Stylist[] = await dispatch(fetchAvailableStylists(dateStr, validation.values.start_time, row.service_id, targetTenantId));
+                          const usedIds = [validation.values.stylist_id, ...extraRows.map(r => r.stylist_id)].filter(Boolean);
+                          const next = stylists.find(s => !s.is_busy && !usedIds.includes(String(s.id)));
+                          if (next) {
+                            const updated = [...extraRows];
+                            updated[idx] = { ...updated[idx], stylist_id: String(next.id) };
+                            setExtraRows(updated);
+                            sileo.success({ title: `Asignado: ${next.first_name}` });
+                          } else {
+                            sileo.warning({ title: "No hay estilistas disponibles." });
+                          }
+                        } catch { sileo.error({ title: "Error" }); }
+                        finally { setIsSuggestingRow(prev => ({ ...prev, [idx]: false })); }
+                      }}
+                    >
+                      {isSuggestingRow[idx] ? <Spinner size="sm" /> : <><i className="ri-magic-line me-1"></i>{t("smart_assignment")}</>}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              <button
+                type="button"
+                className="btn btn-light border border-dashed w-100 mt-2 py-2 text-muted fw-medium"
+                onClick={() => setExtraRows([...extraRows, { service_id: '', stylist_id: '' }])}
+                disabled={!validation.values.start_time}
+                style={{ borderStyle: 'dashed', fontSize: '0.9rem' }}
+              >
+                <i className="ri-add-circle-line me-1 align-middle" style={{ fontSize: '1.1rem' }}></i>
+                Agregar otro servicio
+              </button>
+            </div>
+          )}
+
           <div className="hstack gap-2 justify-content-end mt-4">
-            <Button color="light" onClick={onClose}>Cancelar</Button>
-            <Button type="submit" color="success" disabled={!canSubmit}>Agendar</Button>
+            <Button color="light" onClick={onClose}>{t("cancel")}</Button>
+            <Button type="submit" color="success" disabled={!canSubmit}>{t("schedule")}</Button>
           </div>
         </Form>
       </ModalBody>
@@ -652,7 +724,7 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
       {/* Modal Cancelar / Reagendar */}
       <Modal isOpen={showCancelModal} toggle={() => setShowCancelModal(false)} centered size="sm">
         <ModalHeader toggle={() => setShowCancelModal(false)} className="bg-light">
-          <i className="ri-question-line me-1"></i> ¿Qué deseas hacer con esta cita?
+          <i className="ri-question-line me-1"></i> {t("what_to_do_appointment")}
         </ModalHeader>
         <ModalBody className="text-center">
           {selectedEvent && (
@@ -670,10 +742,10 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
           <hr />
           <div className="d-grid gap-2">
             <Button color="warning" onClick={handleReschedule} className="d-flex align-items-center justify-content-center gap-2">
-              <i className="ri-calendar-event-line"></i> Reagendar Cita
+              <i className="ri-calendar-event-line"></i> {t("reschedule")}
             </Button>
             <Button color="danger" onClick={handleCancelAppointment} disabled={isCancelling} className="d-flex align-items-center justify-content-center gap-2">
-              {isCancelling ? <Spinner size="sm" /> : <><i className="ri-close-circle-line"></i> Cancelar Cita</>}
+              {isCancelling ? <Spinner size="sm" /> : <><i className="ri-close-circle-line"></i> {t("cancel_appointment")}</>}
             </Button>
           </div>
         </ModalBody>
@@ -682,27 +754,27 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
       {/* Modal Crear Cliente */}
       <Modal isOpen={showClientModal} toggle={() => setShowClientModal(false)} centered size="sm">
         <ModalHeader toggle={() => setShowClientModal(false)} className="bg-light">
-          Nuevo Cliente
+          {t("new_client")}
         </ModalHeader>
         <ModalBody>
           <FormGroup>
-            <Label>Nombre*</Label>
+            <Label>{t("name")}*</Label>
             <Input
               value={newClientData.first_name}
               onChange={(e) => setNewClientData(prev => ({ ...prev, first_name: e.target.value }))}
-              placeholder="Nombre"
+              placeholder={t("name")}
             />
           </FormGroup>
           <FormGroup>
-            <Label>Apellido</Label>
+            <Label>{t("last_name")}</Label>
             <Input
               value={newClientData.last_name}
               onChange={(e) => setNewClientData(prev => ({ ...prev, last_name: e.target.value }))}
-              placeholder="Apellido"
+              placeholder={t("last_name")}
             />
           </FormGroup>
           <FormGroup>
-            <Label>Teléfono</Label>
+            <Label>{t("phone")}</Label>
             <Input
               value={newClientData.phone}
               onChange={(e) => setNewClientData(prev => ({ ...prev, phone: e.target.value }))}
@@ -711,7 +783,7 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({
           </FormGroup>
         </ModalBody>
         <ModalFooter>
-          <Button color="light" onClick={() => setShowClientModal(false)}>Cancelar</Button>
+          <Button color="light" onClick={() => setShowClientModal(false)}>{t("cancel")}</Button>
           <Button color="success" onClick={handleCreateClient} disabled={isCreatingClient}>
             {isCreatingClient ? <Spinner size="sm" /> : 'Crear'}
           </Button>

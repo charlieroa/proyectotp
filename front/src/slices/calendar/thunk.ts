@@ -103,21 +103,24 @@ export const getCalendarData = (targetTenantId?: string) => async (dispatch: any
       api.get(`/services/tenant/${tenantId}`),
       api.get(`/users/tenant/${tenantId}`, { params: { role_id: 3 } }),
       api.get(`/stylists/next-available`),
+      api.get(`/tickets/active`).catch((e) => { throw e; }),
     ]);
 
-    const [rApps, rClients, rServices, rStylists, rNext] = results;
+    const [rApps, rClients, rServices, rStylists, rNext, rTickets] = results;
 
     const appointments = rApps.status === "fulfilled" ? rApps.value.data : [];
     const clients = rClients.status === "fulfilled" ? rClients.value.data : [];
     const services = rServices.status === "fulfilled" ? rServices.value.data : [];
     const stylists = rStylists.status === "fulfilled" ? rStylists.value.data : [];
     const nextAvail = rNext.status === "fulfilled" ? rNext.value.data : null;
+    // 403 = feature flag off → simplemente no hay tickets para pintar
+    const tickets = rTickets.status === "fulfilled" ? rTickets.value.data : [];
 
     if (rNext.status === "rejected") {
       console.warn("[getCalendarData] next-available falló:", rNext.reason?.response?.status || rNext.reason?.message);
     }
 
-    const formattedEvents = (Array.isArray(appointments) ? appointments : []).map((cita: any) => ({
+    const formattedAppointments = (Array.isArray(appointments) ? appointments : []).map((cita: any) => ({
       id: cita.id,
       title: `${cita.service_name} - ${cita.client_first_name || ""}`,
       start: cita.start_time,
@@ -125,6 +128,34 @@ export const getCalendarData = (targetTenantId?: string) => async (dispatch: any
       className: getClassNameForStatus(cita.status),
       extendedProps: { ...cita },
     }));
+
+    // Tickets virtuales → eventos all-day del día en que se abrieron, en morado.
+    const formattedTickets = (Array.isArray(tickets) ? tickets : []).map((tk: any) => {
+      const clientName = tk.users
+        ? `${tk.users.first_name || ""} ${tk.users.last_name || ""}`.trim()
+        : tk.client_name_adhoc || "Walk-in";
+      const itemCount = Array.isArray(tk.invoice_items) ? tk.invoice_items.length : 0;
+      const dayISO = (tk.created_at || new Date().toISOString()).slice(0, 10);
+      return {
+        id: `ticket-${tk.id}`,
+        title: `🎫 ${clientName}`,
+        start: dayISO,
+        allDay: true,
+        backgroundColor: "#7c3aed",
+        borderColor: "#6d28d9",
+        textColor: "#ffffff",
+        extendedProps: {
+          _isTicket: true,
+          ticket_id: tk.id,
+          client_name: clientName,
+          item_count: itemCount,
+          total_amount: tk.total_amount,
+          ...tk,
+        },
+      };
+    });
+
+    const formattedEvents = [...formattedAppointments, ...formattedTickets];
 
     dispatch(
       getCalendarDataSuccess({
@@ -158,7 +189,7 @@ export const fetchTenantSlots = (date: string, serviceId: string, targetTenantId
     });
     const slots = data?.slots || [];
     dispatch(fetchSlotsSuccess(slots));
-    return Promise.resolve(slots);
+    return Promise.resolve({ slots, message: data?.message || '' });
   } catch (error: any) {
     dispatch(fetchSlotsFail(error?.message || "Error al buscar horarios"));
     sileo.error({ title: "No se pudieron cargar los horarios disponibles." });

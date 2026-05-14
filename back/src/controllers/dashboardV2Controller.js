@@ -480,3 +480,99 @@ exports.getBranchesDay = async (req, res) => {
     return res.status(500).json({ error: err.message || 'Error interno.' });
   }
 };
+
+// GET /api/dashboard-v2/branch-tickets?tenant_id=<uuid>&date=YYYY-MM-DD
+// Lista de tickets (invoices) reales de una sucursal:
+//   - open: todas las invoices status='open' (sin filtro de fecha)
+//   - paid_today: invoices status in ('paid','closed','completed') con created_at del día
+// Validación: tenant_id debe pertenecer al mismo grupo que el usuario autenticado.
+exports.getBranchTickets = async (req, res) => {
+  try {
+    const userTenantId = req.user.tenant_id;
+    const overrideId = req.query.tenant_id ? String(req.query.tenant_id) : null;
+    let tenant_id = userTenantId;
+
+    if (overrideId && /^[0-9a-f-]{36}$/i.test(overrideId) && overrideId !== userTenantId) {
+      const userT = await prisma.tenants.findUnique({
+        where: { id: userTenantId },
+        select: { id: true, parent_tenant_id: true },
+      });
+      const overrideT = await prisma.tenants.findUnique({
+        where: { id: overrideId },
+        select: { id: true, parent_tenant_id: true },
+      });
+      if (!overrideT) return res.status(404).json({ error: 'Sucursal no encontrada.' });
+      const userGroupId = userT?.parent_tenant_id || userT?.id;
+      const overrideGroupId = overrideT.parent_tenant_id || overrideT.id;
+      if (userGroupId !== overrideGroupId) {
+        return res.status(403).json({ error: 'Sucursal fuera del grupo.' });
+      }
+      tenant_id = overrideId;
+    }
+
+    const date = String(req.query.date || '').slice(0, 10);
+    const validDate = /^\d{4}-\d{2}-\d{2}$/.test(date);
+    const dayStartUTC = validDate ? new Date(`${date}T05:00:00.000Z`) : null;
+    const dayEndUTC = dayStartUTC ? new Date(dayStartUTC.getTime() + 24 * 60 * 60 * 1000) : null;
+
+    // Query open + recently paid invoices con sellers y client name
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT i.id, i.status, i.total_amount, i.created_at, i.appointment_id,
+              i.client_name_adhoc,
+              c.first_name AS client_first_name, c.last_name AS client_last_name,
+              (SELECT COUNT(*)::int FROM invoice_items WHERE invoice_id = i.id) AS item_count,
+              (SELECT json_agg(DISTINCT u.first_name) FROM invoice_items ii
+                LEFT JOIN users u ON ii.seller_id = u.id
+                WHERE ii.invoice_id = i.id AND u.id IS NOT NULL) AS seller_first_names,
+              (SELECT json_agg(DISTINCT (u.first_name || ' ' || COALESCE(u.last_name, ''))) FROM invoice_items ii
+                LEFT JOIN users u ON ii.seller_id = u.id
+                WHERE ii.invoice_id = i.id AND u.id IS NOT NULL) AS seller_full_names
+         FROM invoices i
+         LEFT JOIN users c ON i.client_id = c.id
+        WHERE i.tenant_id = $1::uuid
+          AND (
+            i.status = 'open'
+            ${dayStartUTC ? 'OR (i.status IN (\'paid\',\'closed\',\'completed\') AND i.created_at >= $2::timestamptz AND i.created_at < $3::timestamptz)' : ''}
+          )
+        ORDER BY i.created_at DESC`,
+      ...(dayStartUTC
+        ? [tenant_id, dayStartUTC.toISOString(), dayEndUTC.toISOString()]
+        : [tenant_id])
+    );
+
+    const mapTicket = (r) => ({
+      id: r.id,
+      ref: r.id.slice(0, 8).toUpperCase(),
+      status: r.status,
+      total_amount: Number(r.total_amount || 0),
+      created_at: r.created_at,
+      appointment_id: r.appointment_id,
+      client_name:
+        (`${r.client_first_name || ''} ${r.client_last_name || ''}`.trim()) ||
+        r.client_name_adhoc ||
+        'Walk-in',
+      item_count: Number(r.item_count || 0),
+      seller_first_names: Array.isArray(r.seller_first_names) ? r.seller_first_names.filter(Boolean) : [],
+      seller_full_names: Array.isArray(r.seller_full_names) ? r.seller_full_names.filter(Boolean) : [],
+    });
+
+    const open = rows.filter(r => r.status === 'open').map(mapTicket);
+    const paidToday = rows.filter(r => ['paid','closed','completed'].includes(r.status)).map(mapTicket);
+
+    return res.json({
+      tenant_id,
+      date: validDate ? date : null,
+      open,
+      paid_today: paidToday,
+      summary: {
+        open_count: open.length,
+        open_total: open.reduce((s, t) => s + t.total_amount, 0),
+        paid_today_count: paidToday.length,
+        paid_today_total: paidToday.reduce((s, t) => s + t.total_amount, 0),
+      },
+    });
+  } catch (err) {
+    console.error('dashboardV2.getBranchTickets error:', err);
+    return res.status(500).json({ error: err.message || 'Error interno.' });
+  }
+};
