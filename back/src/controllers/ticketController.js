@@ -41,6 +41,98 @@ async function recalcTotal(invoice_id) {
   return total;
 }
 
+// Helper compartido: al hacer check-in de una cita, el peluquería "confirma"
+// y aquí nace el ticket virtual con la línea del servicio. Si ya existe un
+// ticket abierto para esa cita (reabre el mismo). Idempotente.
+async function openTicketForAppointmentCheckin({ tenant_id, appointment_id, user_id }) {
+  const t = await prisma.tenants.findUnique({
+    where: { id: tenant_id },
+    select: { ticket_virtual_enabled: true }
+  });
+  if (!t?.ticket_virtual_enabled) return null; // feature off → no ticket
+
+  // Ya existe un ticket abierto para esta cita?
+  const existing = await prisma.invoices.findFirst({
+    where: { tenant_id, appointment_id, status: OPEN_STATUS },
+    select: { id: true }
+  });
+  if (existing) return existing.id;
+
+  // Traer la cita con servicio y estilista
+  const appt = await prisma.appointments.findFirst({
+    where: { id: appointment_id, tenant_id },
+    include: {
+      services: { select: { id: true, name: true, price: true, commission_percent: true } },
+      users_appointments_client_idTousers: {
+        select: { id: true, first_name: true, last_name: true, phone: true }
+      },
+    },
+  });
+  if (!appt) return null;
+
+  const svc = appt.services;
+  const unitPrice = Number(svc?.price || 0);
+
+  // Comisión: par estilista+servicio tiene prioridad; si no, la del servicio
+  let commissionPct = null;
+  if (appt.stylist_id && svc?.id) {
+    const styl = await prisma.stylist_services.findUnique({
+      where: { user_id_service_id: { user_id: appt.stylist_id, service_id: svc.id } },
+      select: { commission_percent: true }
+    }).catch(() => null);
+    if (styl?.commission_percent != null) commissionPct = Number(styl.commission_percent);
+    else if (svc?.commission_percent != null) commissionPct = Number(svc.commission_percent);
+  }
+  const commissionValue = commissionPct != null
+    ? Math.round((unitPrice * commissionPct / 100) * 100) / 100
+    : null;
+
+  const invoice = await prisma.invoices.create({
+    data: {
+      tenant_id,
+      client_id: appt.client_id || null,
+      appointment_id,
+      opened_by_user_id: user_id,
+      status: OPEN_STATUS,
+      total_amount: unitPrice,
+    },
+    select: { id: true },
+  });
+
+  // Insertar línea del servicio vía SQL crudo (igual que addItem, para evitar
+  // la serialización Decimal de Prisma contra columnas text).
+  if (svc) {
+    await prisma.$queryRaw`
+      INSERT INTO invoice_items (
+        invoice_id, tenant_id, item_type, related_id, description,
+        quantity, unit_price, total_price, seller_id,
+        commission_percent, commission_value, commission_source, commission_locked,
+        original_unit_price
+      ) VALUES (
+        ${invoice.id}::uuid,
+        ${tenant_id}::uuid,
+        'service',
+        ${svc.id}::uuid,
+        ${svc.name},
+        1,
+        ${unitPrice},
+        ${unitPrice},
+        ${appt.stylist_id || null}::uuid,
+        ${commissionPct != null ? String(commissionPct) : null},
+        ${commissionValue}::numeric,
+        ${commissionPct != null ? 'appointment' : null},
+        false,
+        ${unitPrice}
+      )`;
+  }
+
+  try { getIO().to(`tenant:${tenant_id}`).emit('ticket:opened', { id: invoice.id, appointment_id }); }
+  catch (_) {}
+
+  return invoice.id;
+}
+exports.openTicketForAppointmentCheckin = openTicketForAppointmentCheckin;
+
 async function loadTicket(invoice_id, tenant_id) {
   const inv = await prisma.invoices.findFirst({
     where: { id: invoice_id, tenant_id },
@@ -224,6 +316,17 @@ exports.addItem = async (req, res) => {
 
     const total_price = Math.round(qty * price * 100) / 100;
     const isOverride = originalUnitPrice != null && originalUnitPrice !== price;
+    if (isOverride) {
+      const t = await prisma.tenants.findUnique({
+        where: { id: tenant_id },
+        select: { price_override_enabled: true },
+      });
+      if (!t?.price_override_enabled) {
+        return res.status(403).json({
+          error: 'La modificación de precios en tickets está deshabilitada. Actívala en Configuración > Datos del negocio.',
+        });
+      }
+    }
     const commission_value = resolvedCommissionPct != null
       ? Math.round((total_price * Number(resolvedCommissionPct) / 100) * 100) / 100
       : null;
@@ -303,6 +406,20 @@ exports.patchItem = async (req, res) => {
     if (req.body.unit_price !== undefined) {
       price = Number(req.body.unit_price);
       if (!Number.isFinite(price) || price < 0) return res.status(400).json({ error: 'unit_price inválido.' });
+      // Solo se permite modificar el precio si el tenant lo habilitó en Settings
+      // y solo si el precio realmente cambia respecto al original del catálogo.
+      const original = item.original_unit_price != null ? Number(item.original_unit_price) : null;
+      if (original != null && price !== original) {
+        const t = await prisma.tenants.findUnique({
+          where: { id: tenant_id },
+          select: { price_override_enabled: true },
+        });
+        if (!t?.price_override_enabled) {
+          return res.status(403).json({
+            error: 'La modificación de precios en tickets está deshabilitada. Actívala en Configuración > Datos del negocio.',
+          });
+        }
+      }
     }
     const total_price = Math.round(qty * price * 100) / 100;
 
@@ -391,8 +508,8 @@ exports.deleteItem = async (req, res) => {
 
 // -----------------------------------------------------------------------------
 // POST /tickets/:id/close   Cobrar: pasa a status 'paid', congela comisiones,
-// vincula cash_session, opcional tip_amount.
-// Body: { cash_session_id?, tip_amount?, payment_method? }
+// vincula cash_session, registra payment + cash_movement + split propina salón.
+// Body: { tip_amount?, payment_method? }  // cash_session_id se deriva del cajero
 // -----------------------------------------------------------------------------
 exports.closeTicket = async (req, res) => {
   try {
@@ -411,50 +528,113 @@ exports.closeTicket = async (req, res) => {
       return res.status(400).json({ error: 'No se puede cobrar un ticket sin líneas.' });
     }
 
-    const { cash_session_id, tip_amount, payment_method } = req.body || {};
+    const { tip_amount, payment_method, tip_recipient_user_id } = req.body || {};
     const tip = Number.isFinite(Number(tip_amount)) ? Number(tip_amount) : 0;
+    const method = String(payment_method || 'cash').toLowerCase();
+    const tipRecipientId = tip_recipient_user_id && String(tip_recipient_user_id).trim()
+      ? String(tip_recipient_user_id).trim()
+      : null;
+
+    // El destinatario de la propina puede ser cualquier estilista del salón
+    // (no se restringe a sellers del ticket).
+
+    // Caja: para método 'cash' es obligatorio que el cajero tenga sesión abierta.
+    // Para tarjeta/transferencia se intenta vincular a la sesión abierta pero no es
+    // bloqueante (el movimiento no entra a caja efectivo).
+    const openSession = await prisma.cash_sessions.findFirst({
+      where: { tenant_id, status: 'OPEN', opened_by_user_id: user_id },
+      select: { id: true }
+    });
+    if (method === 'cash' && !openSession) {
+      return res.status(400).json({
+        error: 'No tienes una sesión de caja abierta. Abre tu caja antes de cobrar en efectivo.'
+      });
+    }
+    const cash_session_id = openSession ? openSession.id : null;
+
+    // Leer % propina del salón para el split
+    const tenantRow = await prisma.tenants.findUnique({
+      where: { id: tenant_id },
+      select: { tip_salon_percent: true }
+    });
+    const tipSalonPercent = Number(tenantRow?.tip_salon_percent ?? 10);
+    const salonTip = tip > 0 ? Math.round(tip * (tipSalonPercent / 100)) : 0;
 
     const result = await prisma.$transaction(async (tx) => {
-      // Congelar comisiones en cada línea (commission_frozen_at es TEXT en BD,
-      // evitamos la serialización DateTime de Prisma que introduce bytes 0x00).
+      // 1) Congelar comisiones en cada línea (commission_frozen_at es TEXT en BD)
       await tx.$executeRawUnsafe(
         `UPDATE invoice_items SET commission_locked = true, commission_frozen_at = $1 WHERE invoice_id = $2::uuid`,
         new Date().toISOString(),
         invoice.id
       );
 
-      // Recalcular total (por si hubo algún cambio sin recalc)
+      // 2) Recalcular total por si hubo cambios sin recalc
       const agg = await tx.invoice_items.aggregate({
         where: { invoice_id: invoice.id },
         _sum: { total_price: true }
       });
       const total = Number(agg._sum.total_price || 0);
 
+      // 3) Marcar ticket como paid + vincular cash_session
       const updated = await tx.invoices.update({
         where: { id: invoice.id },
         data: {
           status: PAID_STATUS,
           total_amount: total,
           tip_amount: tip,
-          cash_session_id: cash_session_id || invoice.cash_session_id || null,
+          tip_recipient_user_id: tip > 0 ? tipRecipientId : null,
+          cash_session_id,
           closed_at: new Date(),
           updated_at: new Date()
         }
       });
 
-      // Registrar pago asociado (no rompe si no viene método: queda como 'cash' por defecto)
+      // 4) Registrar payment (amount incluye propina)
       await tx.payments.create({
         data: {
           tenant_id,
           invoice_id: invoice.id,
           amount: total + tip,
-          payment_method: payment_method || 'cash',
-          payment_date: new Date(),
-          cash_session_id: cash_session_id || invoice.cash_session_id || null
+          payment_method: method,
+          cashier_id: user_id,
+          cash_session_id
         }
-      }).catch((e) => {
-        console.log('payments.create falló, se ignora:', e.message);
       });
+
+      // 5) Si es efectivo, crear cash_movement de ingreso por la venta
+      if (method === 'cash' && cash_session_id) {
+        await tx.cash_movements.create({
+          data: {
+            tenant_id,
+            user_id,
+            invoice_id: invoice.id,
+            type: 'income',
+            description: `Ingreso por Ticket #${String(invoice.id).slice(0, 8)}`,
+            amount: total,
+            category: 'sale',
+            payment_method: 'cash',
+            cash_session_id
+          }
+        });
+
+        // 6) Si hay propina, registrar la parte del salón como ingreso de caja
+        //    (la parte del estilista no entra a caja — es del estilista)
+        if (salonTip > 0) {
+          await tx.cash_movements.create({
+            data: {
+              tenant_id,
+              user_id,
+              invoice_id: invoice.id,
+              type: 'income',
+              description: `Propina salón (${tipSalonPercent}%) - Ticket #${String(invoice.id).slice(0, 8)}`,
+              amount: salonTip,
+              category: 'propina_salon',
+              payment_method: 'cash',
+              cash_session_id
+            }
+          });
+        }
+      }
 
       return updated;
     });

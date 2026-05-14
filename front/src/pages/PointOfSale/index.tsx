@@ -38,13 +38,20 @@ const statusLabel: Record<string, string> = {
   completed: "Pagado", cancelled: "Cancelado",
 };
 
-const PointOfSale = () => {
+interface PointOfSaleProps {
+    embedded?: { ticketId: string; targetTenantId?: string; onClose: () => void };
+}
+
+const PointOfSale: React.FC<PointOfSaleProps> = ({ embedded }) => {
     const { t } = useTranslation();
     const { formatCurrency } = useCurrency();
     const navigate = useNavigate();
     const dispatch: AppDispatch = useDispatch();
     const location = useLocation();
-    const locationState = location.state as LocationState | undefined;
+    const locationState = (embedded
+        ? { ticketId: embedded.ticketId, targetTenantId: embedded.targetTenantId }
+        : (location.state as LocationState | undefined)) as LocationState | undefined;
+    const isEmbedded = !!embedded;
 
     const { events: calendarEvents, clients: allClients } = useSelector((state: RootState) => state.Calendar);
 
@@ -82,6 +89,7 @@ const PointOfSale = () => {
     const ticketId = locationState?.ticketId;
     const isTicketMode = !!ticketId;
     const targetTenantId = locationState?.targetTenantId;
+    const handleBack = () => embedded ? embedded.onClose() : navigate(isTicketMode ? "/dashboard-v2" : "/calendar");
     const initialCartLoaded = useRef(false);
     const [ticketData, setTicketData] = useState<any>(null);
     const [walkInName, setWalkInName] = useState<string>("");
@@ -111,9 +119,11 @@ const PointOfSale = () => {
                 setAvailableProducts(Array.isArray(productsRes.data) ? productsRes.data : []);
                 setStylists(Array.isArray(stylistsRes.data) ? stylistsRes.data : []);
                 setAvailableServices(Array.isArray(servicesRes.data) ? servicesRes.data.map((s: any) => ({ id: s.id, name: s.name, price: Number(s.price || 0) })) : []);
-                // Get tip_salon_percent and price_override flag from first business (current tenant)
+                // Get tip_salon_percent and price_override flag from the right tenant.
+                // Si vienes de Dashboard V2 con targetTenantId, usar las settings de esa sucursal,
+                // no del primer business listado (que puede ser otra sede).
                 if (Array.isArray(tenantRes.data) && tenantRes.data.length > 0) {
-                    const myTenant = tenantRes.data[0];
+                    const myTenant = (targetTenantId && tenantRes.data.find((t: any) => t.id === targetTenantId)) || tenantRes.data[0];
                     if (myTenant?.tip_salon_percent != null) setTipSalonPercent(Number(myTenant.tip_salon_percent));
                     setPriceOverrideEnabled(!!myTenant?.price_override_enabled);
                 }
@@ -199,7 +209,7 @@ const PointOfSale = () => {
                 initialCartLoaded.current = true;
             } catch (err: any) {
                 Swal.fire('Error', err?.response?.data?.error || 'No se pudo cargar el ticket.', 'error');
-                navigate('/calendar');
+                if (embedded) embedded.onClose(); else navigate('/calendar');
             }
         })();
         return () => { cancelled = true; };
@@ -517,21 +527,18 @@ const PointOfSale = () => {
     const change = paidTotal - totalWithTip;
     const canPay = selectedClient && total > 0 && paidTotal >= totalWithTip && !isProcessingPayment;
 
-    // Estilistas con servicios en este ticket: opciones para "Propina para..."
+    // Estilistas con items (servicios o productos) en este ticket: opciones para "Propina para..."
     const tipRecipientOptions = useMemo(() => {
         const seen = new Map<string, string>();
         for (const s of cart.services) {
             if (s.stylistId && !seen.has(s.stylistId)) seen.set(s.stylistId, s.stylist);
         }
-        return Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
-    }, [cart.services]);
-
-    // Si el estilista seleccionado deja de estar en el ticket, resetear a "todos"
-    useEffect(() => {
-        if (tipRecipientId && !tipRecipientOptions.some(o => o.id === tipRecipientId)) {
-            setTipRecipientId("");
+        for (const p of cart.products) {
+            if (p.seller_id && !seen.has(p.seller_id)) seen.set(p.seller_id, p.seller_name || 'Estilista');
         }
-    }, [tipRecipientOptions, tipRecipientId]);
+        return Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
+    }, [cart.services, cart.products]);
+
 
     const handlePayNow = async () => {
         setIsProcessingPayment(true);
@@ -597,13 +604,33 @@ const PointOfSale = () => {
     };
 
     if (loading) {
-        return (<div className="page-content"><Container fluid><div className="text-center p-5"><Spinner /> <span className="ms-2 fs-5">{t("loading")}</span></div></Container></div>);
+        return (<div className={isEmbedded ? "" : "page-content"}><Container fluid><div className="text-center p-5"><Spinner /> <span className="ms-2 fs-5">{t("loading")}</span></div></Container></div>);
     }
-    
+
     return (
-        <div className="page-content">
+        <div className={isEmbedded ? "" : "page-content"}>
             <Container fluid>
-                <BreadCrumb title={t("point_of_sale")} pageTitle={t("checkout")} />
+                {!isEmbedded && (
+                    <Row>
+                        <Col xs={12}>
+                            <div className="page-title-box d-flex align-items-center justify-content-between flex-wrap gap-2">
+                                <div className="d-flex align-items-center gap-2">
+                                    <h4 className="mb-sm-0">{t("point_of_sale")}</h4>
+                                    <Button color="soft-secondary" size="sm" onClick={handleBack} title="Volver">
+                                        <i className={`${isTicketMode ? 'ri-dashboard-line' : 'ri-calendar-line'} me-1`}></i>
+                                        {isTicketMode ? "Volver al dashboard" : t("back_to_calendar")}
+                                    </Button>
+                                </div>
+                                <div className="page-title-right">
+                                    <ol className="breadcrumb m-0">
+                                        <li className="breadcrumb-item">{t("checkout")}</li>
+                                        <li className="breadcrumb-item active">{t("point_of_sale")}</li>
+                                    </ol>
+                                </div>
+                            </div>
+                        </Col>
+                    </Row>
+                )}
 
                 {isTicketMode && !paymentSuccess && (
                     <div
@@ -682,7 +709,7 @@ const PointOfSale = () => {
                                                 </Button>
                                             </InputGroup>
                                         </div>
-                                        <Button color="success" onClick={() => navigate("/calendar")}>{t("back_to_calendar")}</Button>
+                                        <Button color="success" onClick={handleBack}>{isEmbedded ? "Cerrar" : (isTicketMode ? "Volver al dashboard" : t("back_to_calendar"))}</Button>
                                     </div>
                                 </CardBody>
                             </Card>
@@ -693,10 +720,6 @@ const PointOfSale = () => {
                     <Col xl={7}>
                         <Card>
                             <CardBody>
-                                <div className="d-flex justify-content-between align-items-center mb-4">
-                                    <div className="d-flex align-items-center gap-2"><h4 className="mb-0">{t("point_of_sale")}</h4></div>
-                                    <Button color="soft-secondary" onClick={() => navigate("/calendar")} title={t("back_to_calendar")}><i className="ri-calendar-line me-1"></i> {t("back_to_calendar")}</Button>
-                                </div>
                                 <div className="mb-4">
                                     <div className="d-flex align-items-center mb-3"><span className="me-2 text-primary fw-bold">1</span><h5 className="mb-0">{t("client")}</h5></div>
                                     <InputGroup>
@@ -792,35 +815,29 @@ const PointOfSale = () => {
                                         <Col md={12}>
                                             <hr className="my-2" />
                                             <h6 className="mb-2">{t("tip_optional")}</h6>
-                                            <Row className="align-items-end g-2">
-                                                <Col md={4}>
-                                                    <Label className="form-label">{t("tip_amount")}</Label>
-                                                    <CurrencyInput className="form-control" placeholder="$ 0" value={tipText} onValueChange={(value) => setTipText(value || "")} prefix="$ " groupSeparator="." decimalSeparator="," />
-                                                </Col>
-                                                {tipAmountNum > 0 && (
-                                                    <Col md={4}>
-                                                        <Label className="form-label">{t("tip_recipient") || "Propina para"}</Label>
-                                                        <Input type="select" value={tipRecipientId} onChange={(e) => setTipRecipientId(e.target.value)}>
-                                                            <option value="">{t("tip_for_all") || "Todos los estilistas"}</option>
-                                                            {tipRecipientOptions.map(opt => (
-                                                                <option key={opt.id} value={opt.id}>{opt.name}</option>
-                                                            ))}
-                                                        </Input>
-                                                    </Col>
-                                                )}
-                                                {tipAmountNum > 0 && (
-                                                    <Col md={4}>
-                                                        <div className="text-muted small">
-                                                            <div>{t("salon_pct")} ({tipSalonPercent}%): <strong>{formatCurrency(Math.round(tipAmountNum * tipSalonPercent / 100))}</strong></div>
-                                                            <div>
-                                                                {tipRecipientId
-                                                                    ? <>Estilista: <strong>{formatCurrency(Math.round(tipAmountNum * (1 - tipSalonPercent / 100)))}</strong></>
-                                                                    : <>{t("stylist_pct")} ({100 - tipSalonPercent}%): <strong>{formatCurrency(Math.round(tipAmountNum * (1 - tipSalonPercent / 100)))}</strong></>}
-                                                            </div>
-                                                        </div>
-                                                    </Col>
-                                                )}
-                                            </Row>
+                                            <div className="mb-2">
+                                                <Label className="form-label">{t("tip_amount")}</Label>
+                                                <CurrencyInput className="form-control" placeholder="$ 0" value={tipText} onValueChange={(value) => setTipText(value || "")} prefix="$ " groupSeparator="." decimalSeparator="," />
+                                            </div>
+                                            <div className="mb-2">
+                                                <Label className="form-label">Propina para</Label>
+                                                <Input type="select" value={tipRecipientId} onChange={(e) => setTipRecipientId(e.target.value)}>
+                                                    <option value="">Todos los estilistas</option>
+                                                    {stylistOptions.map(opt => (
+                                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                                    ))}
+                                                </Input>
+                                            </div>
+                                            {tipAmountNum > 0 && (
+                                                <div className="text-muted small p-2 rounded bg-light border">
+                                                    <div>Salón ({tipSalonPercent}%): <strong>{formatCurrency(Math.round(tipAmountNum * tipSalonPercent / 100))}</strong></div>
+                                                    <div>
+                                                        {tipRecipientId
+                                                            ? <>Estilista: <strong>{formatCurrency(Math.round(tipAmountNum * (1 - tipSalonPercent / 100)))}</strong></>
+                                                            : <>Estilistas ({100 - tipSalonPercent}%): <strong>{formatCurrency(Math.round(tipAmountNum * (1 - tipSalonPercent / 100)))}</strong></>}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </Col>
                                     </Row></Card>
                                 </div>
@@ -832,93 +849,139 @@ const PointOfSale = () => {
                         <Card>
                             <CardBody>
                                 <div className="d-flex align-items-center mb-3"><h5 className="card-title mb-0 flex-grow-1">{t("sales_summary")}</h5><Badge color="dark" pill>{cart.services.length + cart.products.length} {t("items")}</Badge></div>
-                                <div className="table-responsive table-card" style={{minHeight: "150px"}}>
-                                    {cart.services.length === 0 && cart.products.length === 0 ? (<p className="text-center text-muted p-4">{t("cart_empty")}</p>) : (
-                                    <Table borderless className="align-middle mb-0">
-                                        <thead className="table-light text-muted"><tr><th>{t("description")}</th><th style={{width: 140}}>{t("status_quantity")}</th><th className="text-end">{t("total")}</th><th></th></tr></thead>
-                                        <tbody>
-                                            {cart.services.map(item => {
-                                                const isBusy = !!updatingStatus[item.id];
-                                                let buttonText = statusLabel[item.status] || item.status;
-                                                let buttonAction = () => {};
-                                                let buttonDisabled = true;
+                                <div style={{minHeight: "150px"}}>
+                                    {cart.services.length === 0 && cart.products.length === 0 ? (
+                                        <p className="text-center text-muted p-4">{t("cart_empty")}</p>
+                                    ) : (
+                                    <div className="d-flex flex-column gap-2">
+                                        {cart.services.map(item => {
+                                            const isBusy = !!updatingStatus[item.id];
+                                            let buttonText = statusLabel[item.status] || item.status;
+                                            let buttonAction = () => {};
+                                            let buttonDisabled = true;
 
-                                                if(item.status === 'scheduled') { buttonText = t("check_in"); buttonAction = () => handleServiceStatusChange(item.id, 'checked_in'); buttonDisabled = false; }
-                                                else if (item.status === 'checked_in') { buttonText = t("finish"); buttonAction = () => handleServiceStatusChange(item.id, 'checked_out'); buttonDisabled = false; }
+                                            if(item.status === 'scheduled') { buttonText = t("check_in"); buttonAction = () => handleServiceStatusChange(item.id, 'checked_in'); buttonDisabled = false; }
+                                            else if (item.status === 'checked_in') { buttonText = t("finish"); buttonAction = () => handleServiceStatusChange(item.id, 'checked_out'); buttonDisabled = false; }
 
-                                                return (
-                                                    <tr key={`s-${item.id}`}>
-                                                        <td><span className="fw-semibold">{item.name}</span><small className="d-block text-muted">(Servicio con {item.stylist})</small>{item.batchId && <Badge color="soft-info" className="mt-1" pill><i className="ri-links-line me-1"></i>Agrupado</Badge>}</td>
-                                                        <td>
-                                                            <div className="d-flex align-items-center gap-1">
-                                                                <Button size="sm" color={statusColor(item.status)} onClick={buttonAction} disabled={buttonDisabled || isBusy} className="flex-grow-1">{isBusy ? <Spinner size="sm" /> : buttonText}</Button>
-                                                                <UncontrolledDropdown>
-                                                                    <DropdownToggle tag="button" className="btn btn-sm btn-soft-secondary"><i className="ri-more-2-fill"></i></DropdownToggle>
-                                                                    <DropdownMenu>
-                                                                        <DropdownItem onClick={() => openRescheduleModal(item)} disabled={isBusy || item.status === 'completed'}>{t("reschedule")}</DropdownItem>
-                                                                        <DropdownItem onClick={() => handleServiceStatusChange(item.id, 'cancelled')} disabled={isBusy || item.status === 'completed' || item.status === 'cancelled'}>{t("cancel_appointment")}</DropdownItem>
-                                                                    </DropdownMenu>
-                                                                </UncontrolledDropdown>
+                                            return (
+                                                <div key={`s-${item.id}`} className="border rounded p-3 position-relative" style={{borderLeft: '4px solid #0ab39c'}}>
+                                                    <Button close size="sm" onClick={() => removeCartItem('service', item.id)} style={{position: 'absolute', top: 8, right: 8}}/>
+                                                    <div className="d-flex justify-content-between align-items-start gap-2 mb-2 pe-4">
+                                                        <div className="flex-grow-1" style={{minWidth: 0}}>
+                                                            <div className="d-flex align-items-center gap-2 mb-1">
+                                                                <Badge color="success" pill style={{fontSize: 10}}><i className="ri-scissors-line me-1"></i>SERVICIO</Badge>
+                                                                {item.batchId && <Badge color="soft-info" pill style={{fontSize: 10}}><i className="ri-links-line me-1"></i>Agrupado</Badge>}
                                                             </div>
-                                                        </td>
-                                                        <td className="text-end">
+                                                            <h6 className="mb-1 fw-bold">{item.name}</h6>
+                                                            <div className="text-muted small">
+                                                                <i className="ri-user-line me-1"></i>{item.stylist}
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-end" style={{flexShrink: 0}}>
                                                             {item.priceOverride != null ? (
                                                                 <>
                                                                     <div className="text-muted small text-decoration-line-through">{formatCurrency(item.price)}</div>
-                                                                    <div className="fw-semibold text-warning">{formatCurrency(item.priceOverride)}</div>
-                                                                    {item.overrideReason && <div className="text-muted fs-11 fst-italic">{item.overrideReason}</div>}
+                                                                    <div className="fw-bold text-warning fs-5">{formatCurrency(item.priceOverride)}</div>
                                                                 </>
                                                             ) : (
-                                                                formatCurrency(item.price)
+                                                                <div className="fw-bold fs-5">{formatCurrency(item.price)}</div>
                                                             )}
-                                                            {priceOverrideEnabled && (
-                                                                <div className="mt-1 d-flex justify-content-end gap-1">
-                                                                    <Button size="sm" color="soft-warning" className="btn-icon" onClick={() => openPriceModal(item)} title={t("edit_price") || "Editar precio"}>
-                                                                        <i className="ri-price-tag-3-line"></i>
-                                                                    </Button>
-                                                                    {item.priceOverride != null && (
-                                                                        <Button size="sm" color="soft-secondary" className="btn-icon" onClick={() => clearPriceOverride(item.id)} title={t("reset_price") || "Restaurar precio"}>
-                                                                            <i className="ri-refresh-line"></i>
-                                                                        </Button>
-                                                                    )}
-                                                                </div>
-                                                            )}
-                                                        </td>
-                                                        <td><Button close size="sm" onClick={() => removeCartItem('service', item.id)}/></td>
-                                                    </tr>
-                                                );
-                                            })}
-                                            {cart.products.map(item => (
-                                                <tr key={`p-${item.id}`}>
-                                                    <td><span className="fw-semibold">{item.name}</span><small className="d-block text-muted">{t("sold_by")}: {item.seller_name}</small></td>
-                                                    <td>
-                                                        <InputGroup size="sm" style={{width: "110px"}}>
-                                                            <Button outline color="primary" onClick={() => handleQuantityChange(item.id, item.quantity - 1)}>-</Button>
-                                                            <Input type="number" className="text-center" value={item.quantity} onChange={(e: ChangeEvent<HTMLInputElement>) => handleQuantityChange(item.id, parseInt(e.target.value, 10))} min={1} max={item.stock} />
-                                                            <Button outline color="primary" onClick={() => handleQuantityChange(item.id, item.quantity + 1)}>+</Button>
-                                                        </InputGroup>
-                                                    </td>
-                                                    <td className="text-end">{formatCurrency(item.price * item.quantity)}</td>
-                                                    <td><Button close size="sm" onClick={() => removeCartItem('product', item.id)}/></td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </Table>
+                                                        </div>
+                                                    </div>
+                                                    {item.overrideReason && (
+                                                        <div className="text-muted fs-11 fst-italic mb-2"><i className="ri-information-line me-1"></i>{item.overrideReason}</div>
+                                                    )}
+                                                    <div className="d-flex align-items-center gap-2 flex-wrap">
+                                                        <Button size="sm" color={statusColor(item.status)} onClick={buttonAction} disabled={buttonDisabled || isBusy}>
+                                                            {isBusy ? <Spinner size="sm" /> : buttonText}
+                                                        </Button>
+                                                        <Button size="sm" color="warning" outline onClick={() => openPriceModal(item)}>
+                                                            <i className="ri-edit-2-line me-1"></i>Editar precio
+                                                        </Button>
+                                                        {item.priceOverride != null && (
+                                                            <Button size="sm" color="secondary" outline onClick={() => clearPriceOverride(item.id)} title="Restaurar precio">
+                                                                <i className="ri-refresh-line"></i>
+                                                            </Button>
+                                                        )}
+                                                        <UncontrolledDropdown>
+                                                            <DropdownToggle tag="button" className="btn btn-sm btn-soft-secondary"><i className="ri-more-2-fill"></i></DropdownToggle>
+                                                            <DropdownMenu>
+                                                                <DropdownItem onClick={() => openRescheduleModal(item)} disabled={isBusy || item.status === 'completed'}>{t("reschedule")}</DropdownItem>
+                                                                <DropdownItem onClick={() => handleServiceStatusChange(item.id, 'cancelled')} disabled={isBusy || item.status === 'completed' || item.status === 'cancelled'}>{t("cancel_appointment")}</DropdownItem>
+                                                            </DropdownMenu>
+                                                        </UncontrolledDropdown>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                        {cart.products.map(item => (
+                                            <div key={`p-${item.id}`} className="border rounded p-3 position-relative" style={{borderLeft: '4px solid #6f42c1'}}>
+                                                <Button close size="sm" onClick={() => removeCartItem('product', item.id)} style={{position: 'absolute', top: 8, right: 8}}/>
+                                                <div className="d-flex justify-content-between align-items-start gap-2 mb-2 pe-4">
+                                                    <div className="flex-grow-1" style={{minWidth: 0}}>
+                                                        <Badge color="primary" pill className="mb-1" style={{fontSize: 10}}><i className="ri-shopping-bag-line me-1"></i>PRODUCTO</Badge>
+                                                        <h6 className="mb-1 fw-bold">{item.name}</h6>
+                                                        <div className="text-muted small">
+                                                            <i className="ri-user-line me-1"></i>{t("sold_by")}: {item.seller_name}
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-end" style={{flexShrink: 0}}>
+                                                        <div className="fw-bold fs-5">{formatCurrency(item.price * item.quantity)}</div>
+                                                        <div className="text-muted small">{formatCurrency(item.price)} c/u</div>
+                                                    </div>
+                                                </div>
+                                                <div className="d-flex align-items-center gap-2">
+                                                    <span className="text-muted small">Cantidad:</span>
+                                                    <InputGroup size="sm" style={{width: "120px"}}>
+                                                        <Button outline color="primary" onClick={() => handleQuantityChange(item.id, item.quantity - 1)}>-</Button>
+                                                        <Input type="number" className="text-center" value={item.quantity} onChange={(e: ChangeEvent<HTMLInputElement>) => handleQuantityChange(item.id, parseInt(e.target.value, 10))} min={1} max={item.stock} />
+                                                        <Button outline color="primary" onClick={() => handleQuantityChange(item.id, item.quantity + 1)}>+</Button>
+                                                    </InputGroup>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
                                     )}
                                 </div>
-                                <hr />
-                                <div className="d-flex justify-content-between"><span>{t("subtotal_all")}</span><span className="fw-medium">{formatCurrency(cart.services.reduce((s,i)=>s+effectivePrice(i),0) + cart.products.reduce((s,i)=>s+(i.price*i.quantity),0))}</span></div>
-                                <div className="d-flex justify-content-between text-success"><strong>{t("total_to_pay_finished")}</strong><strong className="text-success">{formatCurrency(total)}</strong></div>
-                                {tipAmountNum > 0 && (
-                                    <div className="d-flex justify-content-between"><span>{t("tip_amount")}</span><span className="fw-medium">{formatCurrency(tipAmountNum)}</span></div>
-                                )}
-                                {tipAmountNum > 0 && (
-                                    <div className="d-flex justify-content-between fw-bold"><span>{t("total_with_tip") || "Total con propina"}</span><span>{formatCurrency(totalWithTip)}</span></div>
-                                )}
-                                <hr className="my-2"/>
-                                <div className="d-flex justify-content-between fs-5"><strong>{t("paid")}</strong><strong>{formatCurrency(paidTotal)}</strong></div>
-                                {change > 0 && <div className="d-flex justify-content-between text-info"><span>{t("change")}</span><span>{formatCurrency(change)}</span></div>}
-                                <div className="d-grid mt-3"><Button color="primary" size="lg" disabled={!canPay} onClick={handlePayNow}>{isProcessingPayment && <Spinner size="sm" className="me-2"/>}{t("pay_now")}</Button></div>
+                                <div className="mt-3 p-3 rounded bg-light border">
+                                    <div className="d-flex justify-content-between mb-2">
+                                        <span className="text-muted">{t("subtotal_all")}</span>
+                                        <span className="fw-medium">{formatCurrency(cart.services.reduce((s,i)=>s+effectivePrice(i),0) + cart.products.reduce((s,i)=>s+(i.price*i.quantity),0))}</span>
+                                    </div>
+                                    <div className="d-flex justify-content-between mb-2 pb-2 border-bottom">
+                                        <strong>{t("total_to_pay_finished")}</strong>
+                                        <strong className="text-success fs-5">{formatCurrency(total)}</strong>
+                                    </div>
+                                    {tipAmountNum > 0 && (
+                                        <>
+                                            <div className="d-flex justify-content-between mb-1">
+                                                <span className="text-muted">{t("tip_amount")}</span>
+                                                <span className="fw-medium">{formatCurrency(tipAmountNum)}</span>
+                                            </div>
+                                            <div className="d-flex justify-content-between mb-2 pb-2 border-bottom">
+                                                <strong>{t("total_with_tip") || "Total con propina"}</strong>
+                                                <strong className="fs-5">{formatCurrency(totalWithTip)}</strong>
+                                            </div>
+                                        </>
+                                    )}
+                                    <div className="d-flex justify-content-between mb-1">
+                                        <strong>{t("paid")}</strong>
+                                        <strong>{formatCurrency(paidTotal)}</strong>
+                                    </div>
+                                    {change > 0 && (
+                                        <div className="d-flex justify-content-between text-info">
+                                            <span>{t("change")}</span>
+                                            <strong>{formatCurrency(change)}</strong>
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="d-grid mt-3">
+                                    <Button color="primary" size="lg" disabled={!canPay} onClick={handlePayNow}>
+                                        {isProcessingPayment && <Spinner size="sm" className="me-2"/>}
+                                        <i className="ri-bank-card-line me-2"></i>
+                                        {t("pay_now")}
+                                    </Button>
+                                </div>
                             </CardBody>
                         </Card>
                     </Col>
@@ -934,15 +997,15 @@ const PointOfSale = () => {
             
             <Modal isOpen={priceModalOpen} toggle={() => setPriceModalOpen(false)} centered>
                 <ModalHeader toggle={() => setPriceModalOpen(false)}>
-                    {t("edit_price") || "Editar precio"}{priceEditItem ? ` — ${priceEditItem.name}` : ""}
+                    Editar precio{priceEditItem ? ` — ${priceEditItem.name}` : ""}
                 </ModalHeader>
                 <ModalBody>
                     <div className="mb-3">
-                        <Label className="form-label">{t("original_price") || "Precio del catalogo"}</Label>
+                        <Label className="form-label">Precio del catálogo</Label>
                         <Input value={priceEditItem ? formatCurrency(priceEditItem.price) : ""} disabled />
                     </div>
                     <div className="mb-3">
-                        <Label className="form-label">{t("new_price") || "Precio a cobrar"}</Label>
+                        <Label className="form-label">Precio a cobrar</Label>
                         <CurrencyInput
                             className="form-control"
                             value={priceEditValue}
@@ -951,21 +1014,21 @@ const PointOfSale = () => {
                         />
                     </div>
                     <div>
-                        <Label className="form-label">{t("override_reason") || "Motivo"}</Label>
+                        <Label className="form-label">Motivo</Label>
                         <Input
                             type="textarea"
                             rows={2}
                             maxLength={255}
                             value={priceEditReason}
                             onChange={(e) => setPriceEditReason(e.target.value)}
-                            placeholder={t("override_reason_placeholder") || "Ej: solo se hizo flequillo, descuento por fidelidad..."}
+                            placeholder="Ej: solo se hizo flequillo, descuento por fidelidad..."
                         />
-                        <small className="text-muted">{t("override_reason_hint") || "Obligatorio si el precio cambia. Queda auditado."}</small>
+                        <small className="text-muted">Obligatorio si el precio cambia. Queda auditado.</small>
                     </div>
                 </ModalBody>
                 <ModalFooter>
-                    <Button color="light" onClick={() => setPriceModalOpen(false)}>{t("cancel_appointment")}</Button>
-                    <Button color="primary" onClick={submitPriceOverride}>{t("save") || "Guardar"}</Button>
+                    <Button color="light" onClick={() => setPriceModalOpen(false)}>Cancelar</Button>
+                    <Button color="primary" onClick={submitPriceOverride}>Guardar</Button>
                 </ModalFooter>
             </Modal>
 
