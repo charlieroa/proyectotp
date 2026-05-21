@@ -31,6 +31,9 @@ const dbToApiUser = (row) => ({
   working_hours: typeof row.working_hours === 'string'
     ? safeJSON(row.working_hours)
     : row.working_hours ?? null,
+  employment_type: row.employment_type ?? null,
+  rental_status: row.rental_status ?? null,
+  monthly_rent_cop: row.monthly_rent_cop ?? null,
 });
 
 const minutesFromHHMM = (hhmm) => {

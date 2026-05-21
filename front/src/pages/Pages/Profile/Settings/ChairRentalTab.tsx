@@ -82,7 +82,28 @@ const ChairRentalTab: React.FC = () => {
       const { data } = await api.post<{ url: string }>('/chair-rentals/connect', {});
       window.location.href = data.url;
     } catch (e: any) {
-      Swal.fire('Error', e?.response?.data?.error || 'No se pudo iniciar el onboarding de Stripe', 'error');
+      const payload = e?.response?.data || {};
+      if (payload.action === 'enable_platform_connect' && payload.platform_setup_url) {
+        await Swal.fire({
+          icon: 'warning',
+          title: 'Activa Connect en Stripe primero',
+          html: `
+            <div style="text-align:left">
+              <p>${payload.error}</p>
+              <p class="text-muted" style="font-size:13px">
+                Esto es una sola vez por toda la plataforma — después de activarlo, cualquier peluquería podrá conectar su Stripe directamente desde esta pantalla.
+              </p>
+            </div>
+          `,
+          confirmButtonText: 'Abrir Stripe Connect',
+          showCancelButton: true,
+          cancelButtonText: 'Después',
+        }).then((r) => {
+          if (r.isConfirmed) window.open(payload.platform_setup_url, '_blank', 'noopener');
+        });
+      } else {
+        Swal.fire('Error', payload.error || 'No se pudo iniciar el onboarding de Stripe', 'error');
+      }
       setConnecting(false);
     }
   };
@@ -150,7 +171,7 @@ const ChairRentalTab: React.FC = () => {
   const onRemove = async (r: Renter) => {
     const conf = await Swal.fire({
       icon: 'warning',
-      title: `Quitar arriendo de ${r.first_name}?`,
+      title: `Quitar de coworking a ${r.first_name}?`,
       text: 'Se cancela la suscripción al final del período actual y vuelve a empleado.',
       showCancelButton: true,
       confirmButtonText: 'Sí, quitar',
@@ -203,11 +224,12 @@ const ChairRentalTab: React.FC = () => {
     <div>
       <Row className="mb-4">
         <Col md={12}>
-          <h4 className="mb-3">Arriendo de sillas</h4>
+          <h4 className="mb-3">Coworking</h4>
           <p className="text-muted mb-3">
-            Cobra a estilistas independientes que usan tus instalaciones. Tú defines el precio mensual,
-            Stripe cobra automáticamente cada día. Si fallan los pagos, después de <strong>{status?.grace_days ?? 3} días</strong> el estilista
-            queda bloqueado y no puede recibir citas ni entrar a la app.
+            Cobra a estilistas independientes que usan tus instalaciones bajo modalidad de coworking.
+            Tú defines el precio mensual, Stripe cobra automáticamente cada día. Si fallan los pagos,
+            después de <strong>{status?.grace_days ?? 3} días</strong> el estilista queda bloqueado y
+            no puede recibir citas ni entrar a la app.
           </p>
         </Col>
       </Row>
@@ -228,7 +250,7 @@ const ChairRentalTab: React.FC = () => {
                   onChange={(e) => setEnabledDraft(e.target.checked)}
                 />
                 <Label check for="cr-enabled" className="ms-2">
-                  Activar arriendo de sillas
+                  Activar coworking
                 </Label>
               </FormGroup>
               <FormGroup className="mb-2">
@@ -254,7 +276,7 @@ const ChairRentalTab: React.FC = () => {
 
           <Row className="mb-3">
             <Col md={8}>
-              <h5>Estilistas con cupo arrendado</h5>
+              <h5>Estilistas en coworking</h5>
             </Col>
             <Col md={4} className="text-end">
               <Button color="success" size="sm" onClick={() => setAddOpen(true)} disabled={!status?.chair_rental_enabled}>
@@ -266,7 +288,7 @@ const ChairRentalTab: React.FC = () => {
             <Col md={12}>
               {renters.length === 0 ? (
                 <Alert color="light">
-                  Aún no hay estilistas con cupo arrendado.
+                  Aún no hay estilistas en coworking.
                   {!status?.chair_rental_enabled && ' Activa el switch arriba para empezar.'}
                 </Alert>
               ) : (
@@ -306,7 +328,7 @@ const ChairRentalTab: React.FC = () => {
       )}
 
       <Modal isOpen={addOpen} toggle={() => setAddOpen(!addOpen)}>
-        <ModalHeader toggle={() => setAddOpen(false)}>Agregar estilista con cupo</ModalHeader>
+        <ModalHeader toggle={() => setAddOpen(false)}>Agregar estilista al coworking</ModalHeader>
         <ModalBody>
           <Form>
             <FormGroup>

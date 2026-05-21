@@ -24,6 +24,23 @@ type Staff = {
   payment_type?: PaymentType;
   base_salary?: number | null;
   commission_rate?: number | null;
+  employment_type?: 'employee' | 'renter' | null;
+  rental_status?: 'active' | 'past_due' | 'blocked' | null;
+};
+
+const coworkingBadge = (u: Staff) => {
+  if (u.employment_type !== 'renter') return null;
+  const map: Record<string, { label: string; cls: string }> = {
+    active:   { label: 'Coworking · Activo',         cls: 'bg-success-subtle text-success' },
+    past_due: { label: 'Coworking · Pago pendiente', cls: 'bg-warning-subtle text-warning' },
+    blocked:  { label: 'Coworking · Bloqueado',      cls: 'bg-danger-subtle text-danger' },
+  };
+  const m = map[u.rental_status || 'past_due'] || map.past_due;
+  return (
+    <span className={`badge ${m.cls} rounded-pill ms-2`} title="Estilista en modalidad coworking">
+      <i className="ri-armchair-line me-1" />{m.label}
+    </span>
+  );
 };
 
 type Category = { id: string; name: string; created_at?: string; updated_at?: string; };
@@ -930,6 +947,7 @@ const Personal: React.FC<PersonalProps> = ({ services, categories, onStaffChange
                             </span>
                           </div>
                           <span className="fw-medium">{u.first_name} {u.last_name || ""}</span>
+                          {coworkingBadge(u)}
                         </div>
                       </td>
                       <td>

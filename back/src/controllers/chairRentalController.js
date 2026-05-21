@@ -55,6 +55,16 @@ exports.connectStripe = async (req, res) => {
     const link = await connect.createOnboardingLink(accountId);
     return res.json({ url: link.url, account_id: accountId });
   } catch (e) {
+    // Caso: la cuenta plataforma de Stripe aún no tiene Connect activado.
+    // Stripe responde con un StripeInvalidRequestError mencionando "signed up for Connect".
+    const msg = String(e?.message || '');
+    if (/sign(ed)? up for Connect/i.test(msg)) {
+      return res.status(409).json({
+        error: 'La plataforma de Stripe de Tupelukeria aún no tiene Connect habilitado. Activa Connect en tu dashboard para empezar a aceptar peluquerías como Connected Accounts.',
+        action: 'enable_platform_connect',
+        platform_setup_url: 'https://dashboard.stripe.com/connect',
+      });
+    }
     return fail(res, e);
   }
 };

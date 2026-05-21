@@ -1127,7 +1127,7 @@ const Settings: React.FC = () => {
                         style={{ cursor: 'pointer' }}
                       >
                         <i className="ri-armchair-line me-1"></i>
-                        Arriendo de sillas
+                        Coworking
                       </NavLink>
                     </NavItem>
                   </Nav>

@@ -135,6 +135,9 @@ const Calendar = () => {
   const [selectedEvent, setSelectedEvent] = useState<any>(null);
   const [defaultDate, setDefaultDate] = useState<Date | null>(null);
 
+  // Map stylist_id -> rental_status para marcar visualmente a renters (coworking)
+  const [rentersMap, setRentersMap] = useState<Record<string, 'active' | 'past_due' | 'blocked'>>({});
+
   // Drawer de detalle de cita (reemplaza los SweetAlerts de antes)
   const [drawerAppt, setDrawerAppt] = useState<ApptDetail | null>(null);
   const drawerOpen = drawerAppt !== null;
@@ -201,6 +204,22 @@ const Calendar = () => {
     dispatch(onGetCalendarData(targetTenantId || undefined));
     dispatch(fetchTenantSettings(targetTenantId || undefined));
   }, [dispatch, targetTenantId]);
+
+  // Cargar estilistas y armar map de renters (employment_type='renter') para badges visuales
+  useEffect(() => {
+    if (!effectiveTenantId) return;
+    api.get(`/users/tenant/${effectiveTenantId}?role_id=3`)
+      .then(({ data }) => {
+        const map: Record<string, 'active' | 'past_due' | 'blocked'> = {};
+        (Array.isArray(data) ? data : []).forEach((u: any) => {
+          if (u.employment_type === 'renter' && u.id) {
+            map[u.id] = (u.rental_status as any) || 'past_due';
+          }
+        });
+        setRentersMap(map);
+      })
+      .catch(() => setRentersMap({}));
+  }, [effectiveTenantId]);
 
   // Ticket recién creado desde el topbar → recargar eventos
   useEffect(() => {
@@ -500,9 +519,37 @@ const Calendar = () => {
                       const timeStr = startDate
                         ? startDate.toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit', hour12: true })
                         : '';
+                      const rentalStatus = ext.stylist_id ? rentersMap[ext.stylist_id] : undefined;
+                      const rentalColor =
+                        rentalStatus === 'active'   ? '#0ab39c' :
+                        rentalStatus === 'past_due' ? '#f7b84b' :
+                        rentalStatus === 'blocked'  ? '#f06548' :
+                        undefined;
+                      const rentalTitle =
+                        rentalStatus === 'active'   ? 'Coworking · al día' :
+                        rentalStatus === 'past_due' ? 'Coworking · pago pendiente' :
+                        rentalStatus === 'blocked'  ? 'Coworking · bloqueado' :
+                        '';
                       return (
-                        <div className="p-1" style={{ fontSize: '0.73rem', lineHeight: 1.25, overflow: 'hidden' }}>
-                          <div className="fw-semibold text-truncate">{ext.service_name || arg.event.title}</div>
+                        <div
+                          className="p-1"
+                          style={{
+                            fontSize: '0.73rem',
+                            lineHeight: 1.25,
+                            overflow: 'hidden',
+                            ...(rentalColor ? { borderLeft: `3px solid ${rentalColor}`, paddingLeft: 6 } : {}),
+                          }}
+                        >
+                          <div className="fw-semibold text-truncate">
+                            {rentalStatus && (
+                              <i
+                                className="ri-armchair-line me-1"
+                                style={{ color: rentalColor }}
+                                title={rentalTitle}
+                              />
+                            )}
+                            {ext.service_name || arg.event.title}
+                          </div>
                           <div className="text-truncate" style={{ opacity: 0.9 }}>{ext.client_first_name || ''}</div>
                           <div className="text-truncate" style={{ opacity: 0.8 }}>{ext.stylist_first_name || ''} &middot; {timeStr}</div>
                         </div>
