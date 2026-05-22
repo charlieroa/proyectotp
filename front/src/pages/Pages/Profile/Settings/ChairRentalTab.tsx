@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Row, Col, Button, Badge, Spinner, Table, Input, Label, Alert,
+  Row, Col, Button, Badge, Spinner, Input, Label, Alert,
   Modal, ModalHeader, ModalBody, ModalFooter, Form, FormGroup,
+  Card, CardBody, InputGroup, InputGroupText,
 } from 'reactstrap';
 import Swal from 'sweetalert2';
 import { api } from '../../../../services/api';
@@ -79,23 +80,69 @@ const fmtCop = (v: any) => {
 };
 
 const fmtStripeAmount = (cents: number, currency: string) => {
-  // Stripe COP usa centavos (×100). Mostrar dividiendo /100.
   const v = (cents || 0) / 100;
   return v.toLocaleString('es-CO', { style: 'currency', currency: (currency || 'cop').toUpperCase(), maximumFractionDigits: 0 });
 };
 
-const fmtUnixDate = (ts?: number | null) => {
+const fmtUnixDate = (ts?: number | null, withTime = false) => {
   if (!ts) return '—';
-  return new Date(ts * 1000).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' });
+  const opts: Intl.DateTimeFormatOptions = withTime
+    ? { dateStyle: 'medium', timeStyle: 'short' }
+    : { dateStyle: 'medium' };
+  return new Date(ts * 1000).toLocaleString('es-CO', opts);
+};
+
+const initials = (firstName?: string | null, lastName?: string | null) => {
+  const a = (firstName || '').trim().charAt(0).toUpperCase();
+  const b = (lastName || '').trim().charAt(0).toUpperCase();
+  return (a + b) || a || '?';
+};
+
+// Color de avatar a partir del nombre — determinista.
+const avatarColor = (key: string) => {
+  const palette = ['#0ab39c', '#3577f1', '#f7b84b', '#f06548', '#405189', '#299cdb', '#6f42c1', '#d63384'];
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return palette[h % palette.length];
+};
+
+const Avatar: React.FC<{ first?: string | null; last?: string | null; size?: number; id?: string }> = ({ first, last, size = 36, id }) => (
+  <div
+    style={{
+      width: size,
+      height: size,
+      borderRadius: '50%',
+      background: avatarColor(id || `${first}${last}`),
+      color: 'white',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontWeight: 600,
+      fontSize: size * 0.4,
+      flexShrink: 0,
+    }}
+  >
+    {initials(first, last)}
+  </div>
+);
+
+const statusInfo = (s: Renter['rental_status']) => {
+  switch (s) {
+    case 'active': return { color: 'success', icon: 'ri-checkbox-circle-fill', text: 'Al día' };
+    case 'past_due': return { color: 'warning', icon: 'ri-error-warning-fill', text: 'En mora' };
+    case 'blocked': return { color: 'danger', icon: 'ri-forbid-fill', text: 'Bloqueado' };
+    default: return { color: 'secondary', icon: 'ri-time-line', text: 'Pendiente' };
+  }
 };
 
 const statusBadge = (s: Renter['rental_status']) => {
-  switch (s) {
-    case 'active': return <Badge color="success">Activo</Badge>;
-    case 'past_due': return <Badge color="warning">Pago pendiente</Badge>;
-    case 'blocked': return <Badge color="danger">Bloqueado</Badge>;
-    default: return <Badge color="secondary">—</Badge>;
-  }
+  const i = statusInfo(s);
+  return (
+    <Badge color={i.color} className="d-inline-flex align-items-center gap-1" style={{ padding: '6px 10px' }}>
+      <i className={i.icon} style={{ fontSize: 12 }}></i>
+      {i.text}
+    </Badge>
+  );
 };
 
 const invoiceStatusBadge = (s: string) => {
@@ -108,6 +155,33 @@ const invoiceStatusBadge = (s: string) => {
     default: return <Badge color="secondary">{s}</Badge>;
   }
 };
+
+const cardBrandIcon = (brand?: string) => {
+  const b = (brand || '').toLowerCase();
+  if (b.includes('visa')) return 'ri-visa-line';
+  if (b.includes('master')) return 'ri-mastercard-line';
+  return 'ri-bank-card-line';
+};
+
+const KpiCard: React.FC<{ icon: string; label: string; value: React.ReactNode; color: string; subtitle?: string }> = ({ icon, label, value, color, subtitle }) => (
+  <Card className="card-animate h-100 mb-0">
+    <CardBody>
+      <div className="d-flex align-items-center">
+        <div
+          className="avatar-sm flex-shrink-0 me-3"
+          style={{ width: 48, height: 48, borderRadius: 12, background: `${color}15`, color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <i className={icon} style={{ fontSize: 22 }}></i>
+        </div>
+        <div className="flex-grow-1 overflow-hidden">
+          <p className="text-uppercase text-muted fs-12 mb-1 fw-medium">{label}</p>
+          <h4 className="mb-0 fw-semibold">{value}</h4>
+          {subtitle && <small className="text-muted">{subtitle}</small>}
+        </div>
+      </div>
+    </CardBody>
+  </Card>
+);
 
 const ChairRentalTab: React.FC = () => {
   const [status, setStatus] = useState<StatusResp | null>(null);
@@ -158,6 +232,19 @@ const ChairRentalTab: React.FC = () => {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
+  const kpis = useMemo(() => {
+    let activos = 0, mora = 0, bloqueados = 0, ingresoMensual = 0;
+    for (const r of renters) {
+      if (r.rental_status === 'active') activos++;
+      else if (r.rental_status === 'past_due') mora++;
+      else if (r.rental_status === 'blocked') bloqueados++;
+      if (r.rental_status === 'active' && r.monthly_rent_cop) {
+        ingresoMensual += Number(r.monthly_rent_cop) || 0;
+      }
+    }
+    return { activos, mora, bloqueados, ingresoMensual, total: renters.length };
+  }, [renters]);
+
   const onConnect = async () => {
     setConnecting(true);
     try {
@@ -169,14 +256,7 @@ const ChairRentalTab: React.FC = () => {
         await Swal.fire({
           icon: 'warning',
           title: 'Activa Connect en Stripe primero',
-          html: `
-            <div style="text-align:left">
-              <p>${payload.error}</p>
-              <p class="text-muted" style="font-size:13px">
-                Esto es una sola vez por toda la plataforma — después de activarlo, cualquier peluquería podrá conectar su Stripe directamente desde esta pantalla.
-              </p>
-            </div>
-          `,
+          html: `<div style="text-align:left"><p>${payload.error}</p></div>`,
           confirmButtonText: 'Abrir Stripe Connect',
           showCancelButton: true,
           cancelButtonText: 'Después',
@@ -363,7 +443,6 @@ const ChairRentalTab: React.FC = () => {
         title: 'Cobro exitoso',
         html: `Se cobraron <strong>${fmtCop(amount)}</strong> a la tarjeta del estilista.<br/><small class="text-muted">${(data as any).payment_intent_id || ''}</small>`,
       });
-      // Recargar el detalle para que aparezca la nueva transacción
       try {
         const { data: fresh } = await api.get<RenterDetail>(`/chair-rentals/renters/${detail.renter.id}`);
         setDetail(fresh);
@@ -386,421 +465,583 @@ const ChairRentalTab: React.FC = () => {
     if (loading) return <Spinner size="sm" />;
     if (!status?.connected) {
       return (
-        <div>
-          <Alert color="info">
-            <strong>Conecta tu cuenta Stripe</strong> para cobrarles directamente a los estilistas que arriendan cupo.
-            El dinero llega a tu cuenta — Tupelukeria solo orquesta el cobro diario.
-          </Alert>
-          <Button color="primary" onClick={onConnect} disabled={connecting}>
-            {connecting ? <Spinner size="sm" /> : 'Conectar Stripe'}
-          </Button>
-        </div>
+        <Card className="border border-info-subtle">
+          <CardBody>
+            <div className="d-flex align-items-start gap-3">
+              <div style={{ fontSize: 28, color: '#0ab39c' }}><i className="ri-bank-card-2-line"></i></div>
+              <div className="flex-grow-1">
+                <h6 className="mb-1">Conecta tu cuenta Stripe</h6>
+                <p className="text-muted mb-3 fs-13">El dinero llega directo a tu cuenta. Tupelukeria solo orquesta el cobro diario.</p>
+                <Button color="primary" onClick={onConnect} disabled={connecting} size="sm">
+                  {connecting ? <Spinner size="sm" /> : <><i className="ri-link me-1"></i> Conectar Stripe</>}
+                </Button>
+              </div>
+            </div>
+          </CardBody>
+        </Card>
       );
     }
     if (!status.charges_enabled) {
       return (
-        <Alert color="warning">
-          <strong>Onboarding incompleto.</strong> Termina el proceso en Stripe para empezar a cobrar.{' '}
-          <Button size="sm" color="primary" onClick={onConnect} disabled={connecting}>
-            {connecting ? <Spinner size="sm" /> : 'Continuar onboarding'}
+        <Alert color="warning" className="d-flex align-items-center gap-2 mb-0">
+          <i className="ri-error-warning-line fs-20"></i>
+          <div className="flex-grow-1">
+            <strong>Onboarding incompleto.</strong> Termina el proceso en Stripe.
+          </div>
+          <Button size="sm" color="warning" onClick={onConnect} disabled={connecting}>
+            {connecting ? <Spinner size="sm" /> : 'Continuar'}
           </Button>
         </Alert>
       );
     }
     return (
-      <Alert color="success">
-        <strong>Stripe conectado.</strong> Tu cuenta está lista para recibir cobros.
-        {status.payouts_enabled ? ' Payouts activos.' : ' Payouts pendientes.'}
+      <Alert color="success" className="d-flex align-items-center gap-2 mb-0">
+        <i className="ri-checkbox-circle-fill fs-20"></i>
+        <div className="flex-grow-1">
+          <strong>Stripe conectado.</strong> {status.payouts_enabled ? 'Payouts activos.' : 'Payouts pendientes.'}
+        </div>
       </Alert>
     );
   };
 
   return (
     <div>
-      <Row className="mb-4">
-        <Col md={12}>
-          <h4 className="mb-3">Coworking</h4>
-          <p className="text-muted mb-3">
-            Cobra a estilistas independientes que usan tus instalaciones bajo modalidad de coworking.
-            Tú defines el precio mensual, Stripe cobra automáticamente cada día. Si fallan los pagos,
-            después de <strong>{status?.grace_days ?? 3} días</strong> el estilista queda bloqueado y
-            no puede recibir citas ni entrar a la app.
+      {/* Header */}
+      <Row className="mb-3 align-items-center">
+        <Col>
+          <h4 className="mb-1 d-flex align-items-center gap-2">
+            <i className="ri-store-2-line text-primary"></i> Coworking
+          </h4>
+          <p className="text-muted mb-0 fs-13">
+            Cobra a estilistas independientes que usan tus instalaciones. Stripe cobra el equivalente diario.
+            Tras <strong>{status?.grace_days ?? 3}</strong> días con pago fallido, se bloquean.
           </p>
         </Col>
       </Row>
 
-      <Row className="mb-4">
+      <Row className="mb-3">
         <Col md={12}>{renderConnectSection()}</Col>
       </Row>
 
       {connectedAndReady && (
         <>
-          <Row className="mb-4">
-            <Col md={6}>
-              <FormGroup check className="mb-2">
-                <Input
-                  type="switch"
-                  id="cr-enabled"
-                  checked={enabledDraft}
-                  onChange={(e) => setEnabledDraft(e.target.checked)}
-                />
-                <Label check for="cr-enabled" className="ms-2">
-                  Activar coworking
-                </Label>
-              </FormGroup>
-              <FormGroup className="mb-2">
-                <Label for="cr-grace">Días de gracia antes de bloquear</Label>
-                <Input
-                  id="cr-grace"
-                  type="number"
-                  min={0}
-                  max={30}
-                  value={graceDraft}
-                  onChange={(e) => setGraceDraft(Number(e.target.value))}
-                  style={{ maxWidth: 120 }}
-                />
-                <small className="text-muted">
-                  Días con pago fallido antes de marcar al estilista como bloqueado.
-                </small>
-              </FormGroup>
-              <Button color="primary" size="sm" onClick={onSaveSettings} disabled={savingSettings}>
-                {savingSettings ? <Spinner size="sm" /> : 'Guardar configuración'}
-              </Button>
+          {/* KPIs */}
+          <Row className="g-3 mb-4">
+            <Col xs={6} md={3}>
+              <KpiCard
+                icon="ri-money-dollar-circle-fill"
+                label="Ingreso mensual"
+                value={fmtCop(kpis.ingresoMensual)}
+                color="#0ab39c"
+                subtitle={kpis.activos === 1 ? '1 activo' : `${kpis.activos} activos`}
+              />
+            </Col>
+            <Col xs={6} md={3}>
+              <KpiCard
+                icon="ri-team-fill"
+                label="Total renters"
+                value={kpis.total}
+                color="#3577f1"
+                subtitle={kpis.total === 1 ? '1 estilista' : `${kpis.total} estilistas`}
+              />
+            </Col>
+            <Col xs={6} md={3}>
+              <KpiCard
+                icon="ri-error-warning-fill"
+                label="En mora"
+                value={kpis.mora}
+                color="#f7b84b"
+                subtitle={kpis.mora ? 'Atención requerida' : 'Todo al día'}
+              />
+            </Col>
+            <Col xs={6} md={3}>
+              <KpiCard
+                icon="ri-forbid-fill"
+                label="Bloqueados"
+                value={kpis.bloqueados}
+                color="#f06548"
+                subtitle={kpis.bloqueados ? 'Sin acceso al salón' : 'Ninguno'}
+              />
             </Col>
           </Row>
 
-          <Row className="mb-3">
-            <Col md={8}>
-              <h5>Estilistas en coworking</h5>
-            </Col>
-            <Col md={4} className="text-end">
-              <Button color="success" size="sm" onClick={openAddModal} disabled={!status?.chair_rental_enabled}>
-                + Agregar estilista
-              </Button>
-            </Col>
-          </Row>
-          <Row>
-            <Col md={12}>
+          {/* Settings */}
+          <Card className="mb-4">
+            <CardBody>
+              <Row>
+                <Col md={6}>
+                  <h6 className="mb-3 d-flex align-items-center gap-2">
+                    <i className="ri-settings-3-line"></i> Configuración
+                  </h6>
+                  <FormGroup check className="mb-3 form-switch">
+                    <Input
+                      type="switch"
+                      id="cr-enabled"
+                      checked={enabledDraft}
+                      onChange={(e) => setEnabledDraft(e.target.checked)}
+                    />
+                    <Label check for="cr-enabled" className="ms-2">
+                      Coworking activo
+                    </Label>
+                  </FormGroup>
+                  <FormGroup className="mb-3">
+                    <Label for="cr-grace" className="mb-1 fs-13 fw-medium">
+                      <i className="ri-time-line me-1"></i> Días de gracia antes de bloquear
+                    </Label>
+                    <Input
+                      id="cr-grace"
+                      type="number"
+                      min={0}
+                      max={30}
+                      value={graceDraft}
+                      onChange={(e) => setGraceDraft(Number(e.target.value))}
+                      style={{ maxWidth: 120 }}
+                    />
+                  </FormGroup>
+                  <Button color="primary" size="sm" onClick={onSaveSettings} disabled={savingSettings}>
+                    {savingSettings ? <Spinner size="sm" /> : <><i className="ri-save-line me-1"></i> Guardar</>}
+                  </Button>
+                </Col>
+              </Row>
+            </CardBody>
+          </Card>
+
+          {/* Lista de renters */}
+          <Card>
+            <CardBody>
+              <div className="d-flex justify-content-between align-items-center mb-3">
+                <h6 className="mb-0 d-flex align-items-center gap-2">
+                  <i className="ri-user-star-line"></i> Estilistas en coworking
+                </h6>
+                <Button color="success" size="sm" onClick={openAddModal} disabled={!status?.chair_rental_enabled}>
+                  <i className="ri-user-add-line me-1"></i> Agregar estilista
+                </Button>
+              </div>
+
               {renters.length === 0 ? (
-                <Alert color="light">
-                  Aún no hay estilistas en coworking.
-                  {!status?.chair_rental_enabled && ' Activa el switch arriba para empezar.'}
-                </Alert>
+                <div className="text-center py-5">
+                  <i className="ri-store-2-line" style={{ fontSize: 48, color: '#dee2e6' }}></i>
+                  <p className="text-muted mt-3 mb-0">
+                    Aún no hay estilistas en coworking.
+                    {!status?.chair_rental_enabled && <><br/><small>Activa el switch para empezar.</small></>}
+                  </p>
+                </div>
               ) : (
-                <Table responsive bordered>
-                  <thead>
-                    <tr>
-                      <th>Estilista</th>
-                      <th>Email</th>
-                      <th>Mensual</th>
-                      <th>Estado</th>
-                      <th>Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {renters.map((r) => (
-                      <tr key={r.id}>
-                        <td>{[r.first_name, r.last_name].filter(Boolean).join(' ')}</td>
-                        <td>{r.email}</td>
-                        <td>{fmtCop(r.monthly_rent_cop)}</td>
-                        <td>{statusBadge(r.rental_status)}</td>
-                        <td>
-                          <Button size="sm" color="link" onClick={() => openDetail(r)}>
-                            Ver detalle
-                          </Button>
-                          <Button size="sm" color="link" onClick={() => onResendLink(r)}>
-                            Enlace de pago
-                          </Button>
-                          <Button size="sm" color="link" className="text-danger" onClick={() => onRemove(r)}>
-                            Quitar
-                          </Button>
-                        </td>
+                <div className="table-responsive">
+                  <table className="table align-middle table-hover mb-0">
+                    <thead className="table-light">
+                      <tr>
+                        <th>Estilista</th>
+                        <th>Contacto</th>
+                        <th>Mensualidad</th>
+                        <th>Estado</th>
+                        <th className="text-end">Acciones</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </Table>
+                    </thead>
+                    <tbody>
+                      {renters.map((r) => (
+                        <tr key={r.id}>
+                          <td>
+                            <div className="d-flex align-items-center gap-2">
+                              <Avatar first={r.first_name} last={r.last_name} id={r.id} />
+                              <div>
+                                <div className="fw-medium">{[r.first_name, r.last_name].filter(Boolean).join(' ')}</div>
+                                {!r.rental_stripe_subscription_id && (
+                                  <small className="text-muted">
+                                    <i className="ri-time-line me-1"></i> Sin tarjeta guardada
+                                  </small>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="fs-13"><i className="ri-mail-line me-1 text-muted"></i> {r.email}</div>
+                            {r.phone && <div className="fs-13"><i className="ri-phone-line me-1 text-muted"></i> {r.phone}</div>}
+                          </td>
+                          <td className="fw-medium">{fmtCop(r.monthly_rent_cop)}</td>
+                          <td>{statusBadge(r.rental_status)}</td>
+                          <td className="text-end">
+                            <Button size="sm" color="light" className="me-1" onClick={() => openDetail(r)} title="Ver detalle">
+                              <i className="ri-eye-line"></i>
+                            </Button>
+                            <Button size="sm" color="light" className="me-1" onClick={() => onResendLink(r)} title="Enlace de pago">
+                              <i className="ri-link"></i>
+                            </Button>
+                            <Button size="sm" color="light" className="text-danger" onClick={() => onRemove(r)} title="Quitar">
+                              <i className="ri-delete-bin-line"></i>
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
-            </Col>
-          </Row>
+            </CardBody>
+          </Card>
         </>
       )}
 
-      {/* Modal Agregar */}
-      <Modal isOpen={addOpen} toggle={() => setAddOpen(!addOpen)} size="lg">
-        <ModalHeader toggle={() => setAddOpen(false)}>Agregar estilista al coworking</ModalHeader>
+      {/* ========= Modal Agregar ========= */}
+      <Modal isOpen={addOpen} toggle={() => setAddOpen(!addOpen)} size="lg" centered>
+        <ModalHeader toggle={() => setAddOpen(false)}>
+          <i className="ri-user-add-line me-2"></i> Agregar estilista al coworking
+        </ModalHeader>
         <ModalBody>
-          <div className="mb-3 d-flex gap-2">
+          <div className="d-flex gap-2 mb-3 p-1 bg-light rounded" style={{ width: 'fit-content' }}>
             <Button
               color={addMode === 'existing' ? 'primary' : 'light'}
               size="sm"
               onClick={() => setAddMode('existing')}
+              className="rounded-pill px-3"
             >
-              Desde mi personal
+              <i className="ri-team-line me-1"></i> Desde mi personal
             </Button>
             <Button
               color={addMode === 'new' ? 'primary' : 'light'}
               size="sm"
               onClick={() => setAddMode('new')}
+              className="rounded-pill px-3"
             >
-              Crear nuevo
+              <i className="ri-user-add-line me-1"></i> Crear nuevo
             </Button>
           </div>
 
           {addMode === 'existing' ? (
             <>
               <FormGroup>
-                <Label>Buscar estilista</Label>
-                <Input
-                  placeholder="Nombre, email o teléfono…"
-                  value={staffSearch}
-                  onChange={(e) => setStaffSearch(e.target.value)}
-                />
+                <InputGroup>
+                  <InputGroupText className="bg-light"><i className="ri-search-line"></i></InputGroupText>
+                  <Input
+                    placeholder="Buscar por nombre, email o teléfono…"
+                    value={staffSearch}
+                    onChange={(e) => setStaffSearch(e.target.value)}
+                  />
+                </InputGroup>
               </FormGroup>
-              <div style={{ maxHeight: 280, overflowY: 'auto', border: '1px solid #eee', borderRadius: 4 }}>
+              <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid #e9ebec', borderRadius: 8 }}>
                 {staffLoading ? (
-                  <div className="text-center p-3"><Spinner size="sm" /></div>
+                  <div className="text-center p-4"><Spinner size="sm" /></div>
                 ) : filteredStaff.length === 0 ? (
-                  <div className="text-muted text-center p-3">
-                    {eligibleStaff.length === 0
-                      ? 'No hay estilistas disponibles. Crea uno nuevo.'
-                      : 'Sin resultados para esa búsqueda.'}
+                  <div className="text-center p-4 text-muted">
+                    <i className="ri-team-line" style={{ fontSize: 32, color: '#dee2e6' }}></i>
+                    <p className="mb-0 mt-2">
+                      {eligibleStaff.length === 0
+                        ? 'No hay estilistas elegibles. Usa "Crear nuevo".'
+                        : 'Sin resultados para esa búsqueda.'}
+                    </p>
                   </div>
                 ) : (
-                  <Table className="mb-0" hover>
-                    <tbody>
-                      {filteredStaff.map((s) => (
-                        <tr
-                          key={s.id}
-                          onClick={() => setSelectedStaffId(s.id)}
-                          style={{
-                            cursor: 'pointer',
-                            background: selectedStaffId === s.id ? '#e7f5ff' : undefined,
-                          }}
-                        >
-                          <td style={{ width: 30 }}>
-                            <Input
-                              type="radio"
-                              checked={selectedStaffId === s.id}
-                              onChange={() => setSelectedStaffId(s.id)}
-                            />
-                          </td>
-                          <td>
-                            <div><strong>{[s.first_name, s.last_name].filter(Boolean).join(' ')}</strong></div>
-                            <small className="text-muted">{s.email}{s.phone ? ` · ${s.phone}` : ''}</small>
-                          </td>
-                          <td>
-                            {s.employment_type === 'renter' && s.rental_status ? (
-                              <Badge color="warning">renter previo</Badge>
-                            ) : null}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </Table>
+                  filteredStaff.map((s, idx) => {
+                    const selected = selectedStaffId === s.id;
+                    return (
+                      <div
+                        key={s.id}
+                        onClick={() => setSelectedStaffId(s.id)}
+                        style={{
+                          padding: '10px 14px',
+                          cursor: 'pointer',
+                          background: selected ? '#e7f5ff' : (idx % 2 ? '#fafbfc' : 'white'),
+                          borderBottom: idx === filteredStaff.length - 1 ? 'none' : '1px solid #f1f3f5',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 12,
+                          transition: 'background 0.15s',
+                        }}
+                      >
+                        <Avatar first={s.first_name} last={s.last_name} id={s.id} size={40} />
+                        <div className="flex-grow-1">
+                          <div className="fw-medium">{[s.first_name, s.last_name].filter(Boolean).join(' ')}</div>
+                          <small className="text-muted">
+                            <i className="ri-mail-line me-1"></i>{s.email}
+                            {s.phone && <> · <i className="ri-phone-line me-1"></i>{s.phone}</>}
+                          </small>
+                        </div>
+                        {s.employment_type === 'renter' && (
+                          <Badge color="warning" pill>renter previo</Badge>
+                        )}
+                        <div style={{ width: 24 }}>
+                          {selected && <i className="ri-check-line text-success" style={{ fontSize: 20 }}></i>}
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </div>
               <FormGroup className="mt-3">
-                <Label>Precio mensual (COP) *</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={addForm.monthly_rent_cop}
-                  onChange={(e) => setAddForm({ ...addForm, monthly_rent_cop: e.target.value })}
-                  placeholder="Ej: 600000"
-                />
+                <Label className="mb-1 fw-medium">Precio mensual</Label>
+                <InputGroup>
+                  <InputGroupText>$</InputGroupText>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={addForm.monthly_rent_cop}
+                    onChange={(e) => setAddForm({ ...addForm, monthly_rent_cop: e.target.value })}
+                    placeholder="600000"
+                  />
+                  <InputGroupText>COP</InputGroupText>
+                </InputGroup>
                 <small className="text-muted">
-                  Stripe cobra el equivalente diario ({addForm.monthly_rent_cop ? fmtCop(Number(addForm.monthly_rent_cop) / 30) : '—'}/día).
+                  Stripe cobra el equivalente diario: <strong>{addForm.monthly_rent_cop ? fmtCop(Number(addForm.monthly_rent_cop) / 30) : '—'}/día</strong>.
                 </small>
               </FormGroup>
             </>
           ) : (
             <Form>
+              <Row>
+                <Col md={6}>
+                  <FormGroup>
+                    <Label className="mb-1 fw-medium">Nombre *</Label>
+                    <Input value={addForm.first_name} onChange={(e) => setAddForm({ ...addForm, first_name: e.target.value })} />
+                  </FormGroup>
+                </Col>
+                <Col md={6}>
+                  <FormGroup>
+                    <Label className="mb-1 fw-medium">Apellido</Label>
+                    <Input value={addForm.last_name} onChange={(e) => setAddForm({ ...addForm, last_name: e.target.value })} />
+                  </FormGroup>
+                </Col>
+              </Row>
               <FormGroup>
-                <Label>Nombre *</Label>
-                <Input value={addForm.first_name} onChange={(e) => setAddForm({ ...addForm, first_name: e.target.value })} />
+                <Label className="mb-1 fw-medium">Email *</Label>
+                <InputGroup>
+                  <InputGroupText><i className="ri-mail-line"></i></InputGroupText>
+                  <Input type="email" value={addForm.email} onChange={(e) => setAddForm({ ...addForm, email: e.target.value })} />
+                </InputGroup>
               </FormGroup>
               <FormGroup>
-                <Label>Apellido</Label>
-                <Input value={addForm.last_name} onChange={(e) => setAddForm({ ...addForm, last_name: e.target.value })} />
+                <Label className="mb-1 fw-medium">Teléfono (WhatsApp)</Label>
+                <InputGroup>
+                  <InputGroupText><i className="ri-phone-line"></i></InputGroupText>
+                  <Input value={addForm.phone} onChange={(e) => setAddForm({ ...addForm, phone: e.target.value })} placeholder="+57 300 ..." />
+                </InputGroup>
               </FormGroup>
               <FormGroup>
-                <Label>Email *</Label>
-                <Input type="email" value={addForm.email} onChange={(e) => setAddForm({ ...addForm, email: e.target.value })} />
-              </FormGroup>
-              <FormGroup>
-                <Label>Teléfono (WhatsApp)</Label>
-                <Input value={addForm.phone} onChange={(e) => setAddForm({ ...addForm, phone: e.target.value })} />
-              </FormGroup>
-              <FormGroup>
-                <Label>Precio mensual (COP) *</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={addForm.monthly_rent_cop}
-                  onChange={(e) => setAddForm({ ...addForm, monthly_rent_cop: e.target.value })}
-                  placeholder="Ej: 600000"
-                />
+                <Label className="mb-1 fw-medium">Precio mensual</Label>
+                <InputGroup>
+                  <InputGroupText>$</InputGroupText>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={addForm.monthly_rent_cop}
+                    onChange={(e) => setAddForm({ ...addForm, monthly_rent_cop: e.target.value })}
+                    placeholder="600000"
+                  />
+                  <InputGroupText>COP</InputGroupText>
+                </InputGroup>
                 <small className="text-muted">
-                  Stripe cobra el equivalente diario ({addForm.monthly_rent_cop ? fmtCop(Number(addForm.monthly_rent_cop) / 30) : '—'}/día).
+                  Cobro diario: <strong>{addForm.monthly_rent_cop ? fmtCop(Number(addForm.monthly_rent_cop) / 30) : '—'}/día</strong>.
                 </small>
               </FormGroup>
             </Form>
           )}
         </ModalBody>
         <ModalFooter>
-          <Button color="secondary" onClick={() => setAddOpen(false)}>Cancelar</Button>
+          <Button color="light" onClick={() => setAddOpen(false)}>Cancelar</Button>
           <Button color="primary" onClick={onAddSubmit} disabled={addBusy}>
-            {addBusy ? <Spinner size="sm" /> : 'Crear y enviar link'}
+            {addBusy ? <Spinner size="sm" /> : <><i className="ri-send-plane-line me-1"></i> Crear y enviar link</>}
           </Button>
         </ModalFooter>
       </Modal>
 
-      {/* Modal Detalle */}
-      <Modal isOpen={detailOpen} toggle={() => setDetailOpen(!detailOpen)} size="lg">
+      {/* ========= Modal Detalle ========= */}
+      <Modal isOpen={detailOpen} toggle={() => setDetailOpen(!detailOpen)} size="lg" centered>
         <ModalHeader toggle={() => setDetailOpen(false)}>
-          {detail ? `Detalle de ${[detail.renter.first_name, detail.renter.last_name].filter(Boolean).join(' ')}` : 'Detalle'}
+          <i className="ri-file-user-line me-2"></i> Detalle del renter
         </ModalHeader>
-        <ModalBody>
+        <ModalBody className="p-4">
           {detailLoading || !detail ? (
-            <div className="text-center p-4"><Spinner /></div>
+            <div className="text-center py-5"><Spinner /></div>
           ) : (
             <>
-              <Row className="mb-3">
+              {/* Header con avatar + nombre + status */}
+              <div className="d-flex align-items-center gap-3 mb-4 pb-3 border-bottom">
+                <Avatar first={detail.renter.first_name} last={detail.renter.last_name} id={detail.renter.id} size={56} />
+                <div className="flex-grow-1">
+                  <h5 className="mb-1">{[detail.renter.first_name, detail.renter.last_name].filter(Boolean).join(' ')}</h5>
+                  <div className="d-flex gap-2 align-items-center">
+                    {statusBadge(detail.renter.rental_status)}
+                    <span className="text-muted fs-13">
+                      <i className="ri-calendar-line me-1"></i>
+                      Renter desde {new Date(detail.renter.created_at).toLocaleDateString('es-CO', { month: 'short', year: 'numeric' })}
+                    </span>
+                  </div>
+                </div>
+                <Button
+                  color="primary"
+                  size="sm"
+                  onClick={openChargeFromDetail}
+                  disabled={!detail.default_card}
+                  title={!detail.default_card ? 'El estilista debe guardar tarjeta primero' : ''}
+                >
+                  <i className="ri-money-dollar-circle-line me-1"></i> Cobrar extra
+                </Button>
+              </div>
+
+              {/* 2 cards: contacto + suscripción */}
+              <Row className="g-3 mb-4">
                 <Col md={6}>
-                  <h6 className="text-muted mb-2">Datos personales</h6>
-                  <div><strong>Email:</strong> {detail.renter.email}</div>
-                  <div><strong>Teléfono:</strong> {detail.renter.phone || '—'}</div>
-                  <div><strong>Estado:</strong> {statusBadge(detail.renter.rental_status)}</div>
-                  <div><strong>Mensualidad:</strong> {fmtCop(detail.renter.monthly_rent_cop)}</div>
+                  <Card className="bg-light border-0 h-100">
+                    <CardBody>
+                      <h6 className="text-muted text-uppercase fs-12 mb-3">
+                        <i className="ri-contacts-line me-1"></i> Contacto
+                      </h6>
+                      <div className="mb-2"><i className="ri-mail-line text-muted me-2"></i>{detail.renter.email}</div>
+                      <div><i className="ri-phone-line text-muted me-2"></i>{detail.renter.phone || '—'}</div>
+                    </CardBody>
+                  </Card>
                 </Col>
                 <Col md={6}>
-                  <h6 className="text-muted mb-2">Tarjeta y suscripción</h6>
-                  {detail.default_card ? (
-                    <div>
-                      <strong>Tarjeta:</strong> {detail.default_card.brand?.toUpperCase()} •••• {detail.default_card.last4}{' '}
-                      <small className="text-muted">
-                        (exp {String(detail.default_card.exp_month).padStart(2, '0')}/{String(detail.default_card.exp_year).slice(-2)})
-                      </small>
-                    </div>
-                  ) : (
-                    <div className="text-muted">Sin tarjeta guardada</div>
-                  )}
-                  {detail.subscription ? (
-                    <>
-                      <div className="mt-1">
-                        <strong>Sub:</strong> <Badge color={detail.subscription.status === 'active' ? 'success' : 'warning'}>{detail.subscription.status}</Badge>
+                  <Card className="bg-light border-0 h-100">
+                    <CardBody>
+                      <h6 className="text-muted text-uppercase fs-12 mb-3">
+                        <i className="ri-bank-card-line me-1"></i> Pago y suscripción
+                      </h6>
+                      <div className="mb-2 fs-14">
+                        <span className="text-muted">Mensualidad:</span>{' '}
+                        <strong>{fmtCop(detail.renter.monthly_rent_cop)}</strong>
                       </div>
-                      <div><small className="text-muted">Próximo cobro: {fmtUnixDate(detail.subscription.current_period_end)}</small></div>
-                      {detail.subscription.cancel_at_period_end && (
-                        <Badge color="danger" className="mt-1">Cancelará al cierre del período</Badge>
+                      {detail.default_card ? (
+                        <div className="d-flex align-items-center gap-2 mb-2">
+                          <i className={`${cardBrandIcon(detail.default_card.brand)} text-primary`} style={{ fontSize: 18 }}></i>
+                          <span>{detail.default_card.brand?.toUpperCase()} •••• {detail.default_card.last4}</span>
+                          <small className="text-muted">
+                            exp {String(detail.default_card.exp_month).padStart(2, '0')}/{String(detail.default_card.exp_year).slice(-2)}
+                          </small>
+                        </div>
+                      ) : (
+                        <div className="text-warning mb-2">
+                          <i className="ri-error-warning-line me-1"></i> Sin tarjeta guardada
+                        </div>
                       )}
-                    </>
-                  ) : (
-                    <div className="text-muted mt-1">Sin suscripción activa</div>
-                  )}
+                      {detail.subscription ? (
+                        <div className="fs-13 text-muted">
+                          <i className="ri-calendar-event-line me-1"></i>
+                          Próximo cobro: <strong>{fmtUnixDate(detail.subscription.current_period_end)}</strong>
+                          {detail.subscription.cancel_at_period_end && (
+                            <Badge color="danger" pill className="ms-2">Cancela al cierre</Badge>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-muted fs-13">Sin suscripción activa</div>
+                      )}
+                    </CardBody>
+                  </Card>
                 </Col>
               </Row>
 
-              <Row className="mb-3">
-                <Col md={12}>
-                  <div className="d-flex justify-content-between align-items-center mb-2">
-                    <h6 className="text-muted mb-0">Últimos cobros</h6>
-                    <Button
-                      size="sm"
-                      color="primary"
-                      onClick={openChargeFromDetail}
-                      disabled={!detail.default_card}
-                      title={!detail.default_card ? 'El estilista debe guardar tarjeta primero' : ''}
-                    >
-                      + Cobrar extra
-                    </Button>
-                  </div>
-                  {detail.invoices.length === 0 ? (
-                    <Alert color="light" className="mb-0">Sin facturas todavía.</Alert>
-                  ) : (
-                    <Table responsive size="sm" bordered>
-                      <thead>
-                        <tr>
-                          <th>Fecha</th>
-                          <th>#</th>
-                          <th>Concepto</th>
-                          <th>Monto</th>
-                          <th>Estado</th>
-                          <th></th>
+              {/* Historial */}
+              <h6 className="text-muted text-uppercase fs-12 mb-2 mt-3">
+                <i className="ri-history-line me-1"></i> Últimos cobros
+              </h6>
+              {detail.invoices.length === 0 ? (
+                <Alert color="light" className="mb-0 d-flex align-items-center gap-2">
+                  <i className="ri-information-line text-muted"></i>
+                  <span>Sin facturas todavía.</span>
+                </Alert>
+              ) : (
+                <div className="table-responsive">
+                  <table className="table table-sm align-middle mb-0">
+                    <thead className="table-light">
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Concepto</th>
+                        <th className="text-end">Monto</th>
+                        <th>Estado</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detail.invoices.map((i) => (
+                        <tr key={i.id}>
+                          <td className="fs-13">{fmtUnixDate(i.created, true)}</td>
+                          <td className="fs-13">{i.description || '—'}</td>
+                          <td className="text-end fw-medium">{fmtStripeAmount(i.amount_paid || i.amount_due, i.currency)}</td>
+                          <td>{invoiceStatusBadge(i.status)}</td>
+                          <td>
+                            {i.hosted_invoice_url && (
+                              <a href={i.hosted_invoice_url} target="_blank" rel="noopener noreferrer" className="text-primary" title="Ver recibo">
+                                <i className="ri-external-link-line"></i>
+                              </a>
+                            )}
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {detail.invoices.map((i) => (
-                          <tr key={i.id}>
-                            <td><small>{fmtUnixDate(i.created)}</small></td>
-                            <td><small>{i.number || '—'}</small></td>
-                            <td><small>{i.description || '—'}</small></td>
-                            <td>{fmtStripeAmount(i.amount_paid || i.amount_due, i.currency)}</td>
-                            <td>{invoiceStatusBadge(i.status)}</td>
-                            <td>
-                              {i.hosted_invoice_url && (
-                                <a href={i.hosted_invoice_url} target="_blank" rel="noopener noreferrer">
-                                  <small>Ver</small>
-                                </a>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </Table>
-                  )}
-                </Col>
-              </Row>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </>
           )}
         </ModalBody>
         <ModalFooter>
-          <Button color="secondary" onClick={() => setDetailOpen(false)}>Cerrar</Button>
+          <Button color="light" onClick={() => setDetailOpen(false)}>Cerrar</Button>
         </ModalFooter>
       </Modal>
 
-      {/* Modal Cobro ad-hoc */}
-      <Modal isOpen={chargeOpen} toggle={() => setChargeOpen(!chargeOpen)}>
-        <ModalHeader toggle={() => setChargeOpen(false)}>Cobrar a la tarjeta del estilista</ModalHeader>
-        <ModalBody>
+      {/* ========= Modal Cobro ad-hoc ========= */}
+      <Modal isOpen={chargeOpen} toggle={() => setChargeOpen(!chargeOpen)} centered>
+        <ModalHeader toggle={() => setChargeOpen(false)}>
+          <i className="ri-money-dollar-circle-line me-2"></i> Cobro extra
+        </ModalHeader>
+        <ModalBody className="p-4">
           {detail && (
             <>
-              <Alert color="info">
-                <small>
-                  Se cobrará a <strong>{[detail.renter.first_name, detail.renter.last_name].filter(Boolean).join(' ')}</strong>
-                  {detail.default_card ? ` (${detail.default_card.brand?.toUpperCase()} •••• ${detail.default_card.last4})` : ''}.
-                  El cobro es <strong>inmediato</strong> y se descuenta de la tarjeta guardada.
-                </small>
-              </Alert>
-              <FormGroup>
-                <Label>Monto (COP) *</Label>
-                <Input
-                  type="number"
-                  min={2000}
-                  value={chargeForm.amount_cop}
-                  onChange={(e) => setChargeForm({ ...chargeForm, amount_cop: e.target.value })}
-                  placeholder="Ej: 100000"
-                />
-                <small className="text-muted">Mínimo 2.000 COP.</small>
+              <div className="d-flex align-items-center gap-3 mb-4 p-3 bg-light rounded">
+                <Avatar first={detail.renter.first_name} last={detail.renter.last_name} id={detail.renter.id} size={44} />
+                <div className="flex-grow-1">
+                  <div className="fw-medium">{[detail.renter.first_name, detail.renter.last_name].filter(Boolean).join(' ')}</div>
+                  {detail.default_card && (
+                    <small className="text-muted">
+                      <i className={cardBrandIcon(detail.default_card.brand)}></i> {detail.default_card.brand?.toUpperCase()} •••• {detail.default_card.last4}
+                    </small>
+                  )}
+                </div>
+                <Badge color="info" pill><i className="ri-flashlight-line me-1"></i>Inmediato</Badge>
+              </div>
+
+              <FormGroup className="mb-3">
+                <Label className="mb-1 fw-medium">Monto a cobrar</Label>
+                <InputGroup size="lg">
+                  <InputGroupText>$</InputGroupText>
+                  <Input
+                    type="number"
+                    min={2000}
+                    value={chargeForm.amount_cop}
+                    onChange={(e) => setChargeForm({ ...chargeForm, amount_cop: e.target.value })}
+                    placeholder="100000"
+                    style={{ fontSize: 20, fontWeight: 500 }}
+                  />
+                  <InputGroupText>COP</InputGroupText>
+                </InputGroup>
+                {chargeForm.amount_cop && Number(chargeForm.amount_cop) >= 2000 && (
+                  <small className="text-success">
+                    <i className="ri-check-line"></i> Se cobrarán {fmtCop(chargeForm.amount_cop)}
+                  </small>
+                )}
               </FormGroup>
-              <FormGroup>
-                <Label>Concepto *</Label>
+
+              <FormGroup className="mb-0">
+                <Label className="mb-1 fw-medium">Concepto del cobro *</Label>
                 <Input
                   type="textarea"
                   rows={2}
                   value={chargeForm.description}
                   onChange={(e) => setChargeForm({ ...chargeForm, description: e.target.value })}
-                  placeholder="Ej: Producto vendido, multa por daño, servicio extra…"
+                  placeholder="Producto vendido, multa por daño, servicio extra…"
                 />
-                <small className="text-muted">Aparece en el recibo de Stripe del estilista.</small>
+                <small className="text-muted">
+                  <i className="ri-information-line me-1"></i>
+                  Aparece en el recibo de Stripe que recibe el estilista.
+                </small>
               </FormGroup>
             </>
           )}
         </ModalBody>
         <ModalFooter>
-          <Button color="secondary" onClick={() => setChargeOpen(false)}>Cancelar</Button>
-          <Button color="primary" onClick={onChargeSubmit} disabled={chargeBusy}>
-            {chargeBusy ? <Spinner size="sm" /> : 'Cobrar ahora'}
+          <Button color="light" onClick={() => setChargeOpen(false)}>Cancelar</Button>
+          <Button color="success" onClick={onChargeSubmit} disabled={chargeBusy}>
+            {chargeBusy ? <Spinner size="sm" /> : <><i className="ri-bank-card-line me-1"></i> Cobrar ahora</>}
           </Button>
         </ModalFooter>
       </Modal>

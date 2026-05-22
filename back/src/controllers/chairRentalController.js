@@ -207,11 +207,7 @@ exports.listEligibleStaff = async (req, res) => {
       where: {
         tenant_id: tenantId,
         role_id: 3,
-        OR: [
-          { employment_type: { not: 'renter' } },
-          { employment_type: null },
-          { rental_stripe_subscription_id: null },
-        ],
+        rental_stripe_subscription_id: null,
       },
       select: {
         id: true,
@@ -221,12 +217,10 @@ exports.listEligibleStaff = async (req, res) => {
         phone: true,
         employment_type: true,
         rental_status: true,
-        rental_stripe_subscription_id: true,
       },
       orderBy: [{ first_name: 'asc' }, { last_name: 'asc' }],
     });
-    const available = staff.filter((s) => !s.rental_stripe_subscription_id);
-    return res.json({ staff: available });
+    return res.json({ staff });
   } catch (e) {
     return fail(res, e);
   }
