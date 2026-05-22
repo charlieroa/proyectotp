@@ -83,7 +83,7 @@ exports.login = async (req, res) => {
     // ---------------- Renter bloqueado: no permitir login ----------------
     if (user.employment_type === 'renter' && user.rental_status === 'blocked') {
       return res.status(403).json({
-        error: 'Tu arriendo está suspendido por falta de pago. Actualiza tu método de pago para reactivar tu cuenta.',
+        error: 'Tu espacio de Coworking está suspendido por falta de pago. Actualiza tu método de pago para reactivar tu cuenta.',
         blocked: true,
         user_id: user.id,
         payment_link_path: `/api/chair-rentals/payment-link/${user.id}`,

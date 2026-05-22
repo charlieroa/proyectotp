@@ -452,7 +452,7 @@ async function createAppointmentRecord(tenantId, clientId, stylistId, serviceId,
     select: { employment_type: true, rental_status: true },
   });
   if (stylistGate?.employment_type === 'renter' && stylistGate?.rental_status === 'blocked') {
-    throw new Error('El estilista está suspendido por falta de pago del arriendo de su cupo. No puede recibir citas hasta que regularice.');
+    throw new Error('El estilista está suspendido por falta de pago de su espacio de Coworking. No puede recibir citas hasta que regularice.');
   }
 
   console.log('\n' + '📝'.repeat(40));

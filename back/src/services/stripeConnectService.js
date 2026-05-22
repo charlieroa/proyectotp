@@ -1,6 +1,6 @@
 'use strict';
 
-const { stripe } = require('../config/stripePrices');
+const { stripeConnect: stripe } = require('../config/stripeConnect');
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://app.tupelukeria.com';
 
@@ -17,6 +17,12 @@ function requireStripe() {
     err.status = 503;
     throw err;
   }
+}
+
+// Si connectedAccountId es falsy, omite el header stripeAccount → operación
+// directa en la cuenta principal (modo pasarela, sin Connect).
+function acctOpts(connectedAccountId) {
+  return connectedAccountId ? { stripeAccount: connectedAccountId } : undefined;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -74,7 +80,7 @@ async function findOrCreateDailyPrice({ connectedAccountId, monthlyCop, renterId
   // Producto idempotente por renter
   const products = await stripe.products.search(
     { query: `metadata["renter_id"]:"${renterId}"` },
-    { stripeAccount: connectedAccountId }
+    acctOpts(connectedAccountId)
   );
 
   let productId;
@@ -86,7 +92,7 @@ async function findOrCreateDailyPrice({ connectedAccountId, monthlyCop, renterId
         name: `Arriendo cupo estilista ${renterId.slice(0, 8)}`,
         metadata: { renter_id: renterId, tpia_resource: 'chair_rental' },
       },
-      { stripeAccount: connectedAccountId }
+      acctOpts(connectedAccountId)
     );
     productId = product.id;
   }
@@ -94,7 +100,7 @@ async function findOrCreateDailyPrice({ connectedAccountId, monthlyCop, renterId
   // Reusar precio si el monto coincide
   const existing = await stripe.prices.list(
     { product: productId, active: true, currency: 'cop', type: 'recurring', limit: 10 },
-    { stripeAccount: connectedAccountId }
+    acctOpts(connectedAccountId)
   );
   const match = existing.data.find(
     (p) => p.unit_amount === dailyCents && p.recurring?.interval === 'day'
@@ -109,7 +115,7 @@ async function findOrCreateDailyPrice({ connectedAccountId, monthlyCop, renterId
       recurring: { interval: 'day' },
       metadata: { renter_id: renterId, monthly_cop: String(monthlyCop) },
     },
-    { stripeAccount: connectedAccountId }
+    acctOpts(connectedAccountId)
   );
   return price.id;
 }
@@ -121,9 +127,7 @@ async function findOrCreateRenterCustomer({ connectedAccountId, renter, existing
   requireStripe();
   if (existingCustomerId) {
     try {
-      const c = await stripe.customers.retrieve(existingCustomerId, {
-        stripeAccount: connectedAccountId,
-      });
+      const c = await stripe.customers.retrieve(existingCustomerId, acctOpts(connectedAccountId));
       if (c && !c.deleted) return c.id;
     } catch (e) {
       if (e.code !== 'resource_missing') throw e;
@@ -136,7 +140,7 @@ async function findOrCreateRenterCustomer({ connectedAccountId, renter, existing
       phone: renter.phone || undefined,
       metadata: { renter_id: renter.id, tpia_resource: 'chair_rental' },
     },
-    { stripeAccount: connectedAccountId }
+    acctOpts(connectedAccountId)
   );
   return customer.id;
 }
@@ -152,7 +156,7 @@ async function createCheckoutForCardSetup({ connectedAccountId, customerId, rent
       cancel_url: `${FRONTEND_URL}/rental/onboarded?ok=0`,
       metadata: { renter_id: renterId, tpia_resource: 'chair_rental_setup' },
     },
-    { stripeAccount: connectedAccountId }
+    acctOpts(connectedAccountId)
   );
 }
 
@@ -169,19 +173,19 @@ async function createDailySubscription({ connectedAccountId, customerId, priceId
         tpia_resource: 'chair_rental',
       },
     },
-    { stripeAccount: connectedAccountId }
+    acctOpts(connectedAccountId)
   );
 }
 
 async function cancelSubscription({ connectedAccountId, subscriptionId, immediately = false }) {
   requireStripe();
   if (immediately) {
-    return stripe.subscriptions.cancel(subscriptionId, { stripeAccount: connectedAccountId });
+    return stripe.subscriptions.cancel(subscriptionId, acctOpts(connectedAccountId));
   }
   return stripe.subscriptions.update(
     subscriptionId,
     { cancel_at_period_end: true },
-    { stripeAccount: connectedAccountId }
+    acctOpts(connectedAccountId)
   );
 }
 
@@ -192,7 +196,28 @@ async function createBillingPortalForRenter({ connectedAccountId, customerId }) 
       customer: customerId,
       return_url: `${FRONTEND_URL}/rental/portal-return`,
     },
-    { stripeAccount: connectedAccountId }
+    acctOpts(connectedAccountId)
+  );
+}
+
+// Setea un payment_method como default en el customer (para que las invoices
+// recurrentes lo cobren automáticamente). Se llama después de un setup Checkout.
+async function setDefaultPaymentMethod({ connectedAccountId, customerId, paymentMethodId }) {
+  requireStripe();
+  return stripe.customers.update(
+    customerId,
+    { invoice_settings: { default_payment_method: paymentMethodId } },
+    acctOpts(connectedAccountId)
+  );
+}
+
+// Lee un Checkout Session expandido (incluye setup_intent.payment_method).
+async function retrieveCheckoutSession({ connectedAccountId, sessionId }) {
+  requireStripe();
+  return stripe.checkout.sessions.retrieve(
+    sessionId,
+    { expand: ['setup_intent'] },
+    acctOpts(connectedAccountId)
   );
 }
 
@@ -210,4 +235,6 @@ module.exports = {
   createDailySubscription,
   cancelSubscription,
   createBillingPortalForRenter,
+  setDefaultPaymentMethod,
+  retrieveCheckoutSession,
 };

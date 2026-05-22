@@ -4,6 +4,7 @@
 'use strict';
 
 const prisma = require('../config/prisma');
+const connect = require('../services/stripeConnectService');
 const { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } = require('date-fns');
 const { formatInTimeZone, utcToZonedTime } = require('date-fns-tz');
 
@@ -266,6 +267,30 @@ const STYLIST_TOOLS = [
                 required: ['ticket_id', 'item_id', 'nuevo_precio', 'motivo']
             }
         }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'configurar_pago_arriendo',
+            description: 'Inicia el flujo para que el estilista (usuario del Coworking) guarde su tarjeta y active la suscripción diaria de su espacio de Coworking. Devuelve un link de Stripe Checkout (modo setup) que el estilista abre para meter su tarjeta. Una vez guardada, la suscripción diaria queda activa automáticamente. SOLO úsalo si el estilista es renter (employment_type=renter) y todavía no tiene tarjeta guardada.',
+            parameters: { type: 'object', properties: {}, required: [] }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'ver_mi_arriendo',
+            description: 'Muestra al estilista renter el estado de su espacio de Coworking: mensualidad, tarifa diaria, estado de pago (active/past_due/blocked), días en mora si aplica, y si tiene tarjeta guardada. SOLO úsalo si el estilista es renter.',
+            parameters: { type: 'object', properties: {}, required: [] }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'actualizar_mi_tarjeta',
+            description: 'Devuelve un link al Customer Portal de Stripe para que el estilista del Coworking pueda cambiar/actualizar su tarjeta guardada. Útil cuando el cobro falló y hay que cambiar la tarjeta. SOLO úsalo si el estilista ya tiene una tarjeta previamente guardada.',
+            parameters: { type: 'object', properties: {}, required: [] }
+        }
     }
 ];
 
@@ -295,10 +320,18 @@ MULTI-SUCURSAL:
 - Si el estilista trabaja en varias peluquerías, usa "mis_sucursales" para listar a cuáles tiene acceso.
 - Para cambiar la sucursal donde está trabajando ahora: "cambiar_sucursal" con el id. Las próximas operaciones (abrir ticket, agregar items, ver agenda) se harán ahí.
 
+COWORKING — TU ESPACIO (solo si el estilista es renter):
+- Habla SIEMPRE de "tu espacio de Coworking" o simplemente "Coworking". NUNCA uses las palabras "arriendo", "alquiler" ni "arriendo de sitio/cupo/silla".
+- Si el estilista pregunta por su Coworking, mensualidad, cobro diario, tarjeta o estado de pago: usa "ver_mi_arriendo".
+- Si pregunta cómo pagar / cómo guardar tarjeta / activar pago (primera vez): usa "configurar_pago_arriendo" y MUÉSTRALE el link tal cual para que lo abra en el navegador.
+- Si su tarjeta falló o quiere cambiarla: usa "actualizar_mi_tarjeta" y muéstrale el link.
+- El cobro es DIARIO (mensualidad ÷ 30). Si entra en mora, después de unos días queda bloqueado del sistema completo (no puede ni loguearse). Si ya está bloqueado, lo único que destraba es actualizar la tarjeta y que se cobre.
+
 QUÉ NO HACES:
 - NO cobras (no cierras tickets, no recibes pagos, no haces vueltas).
 - NO agendas citas nuevas, no cancelas, no reprogramas.
 - NO modificas el precio de items de OTROS estilistas.
+- NO uses las tools de Coworking si el estilista NO es renter (no tiene employment_type=renter). Responde que el Coworking no aplica a empleados.
 
 EJEMPLOS:
 - "Hoy llevas 5 servicios y has facturado $250.000. Te toca aprox $87.500 en comisiones 💪"
@@ -1070,6 +1103,140 @@ async function modificarPrecioServicio({ stylist_id, tenant_id, ticket_id, item_
     };
 }
 
+// ─── Chair Rental (estilista renter) ───────────────────────────────────
+
+// Helper: carga el renter + tenant y valida. Devuelve { renter, tenant, acctId } o error.
+async function loadRenterContext(stylistId) {
+    const renter = await prisma.users.findUnique({
+        where: { id: stylistId },
+        select: {
+            id: true, tenant_id: true, first_name: true, last_name: true, email: true, phone: true,
+            employment_type: true, monthly_rent_cop: true, rental_status: true,
+            rental_past_due_since: true, rental_stripe_customer_id: true,
+            rental_stripe_subscription_id: true,
+        },
+    });
+    if (!renter || renter.employment_type !== 'renter') {
+        return { error: 'Tu cuenta no está marcada como usuario del Coworking. Habla con la dueña del salón si crees que es un error.' };
+    }
+    const tenant = await prisma.tenants.findUnique({
+        where: { id: renter.tenant_id },
+        select: {
+            id: true, name: true,
+            chair_rental_enabled: true, chair_rental_direct_mode: true,
+            stripe_connect_account_id: true, stripe_connect_charges_enabled: true,
+            rental_block_grace_days: true,
+        },
+    });
+    if (!tenant?.chair_rental_enabled) {
+        return { error: 'El Coworking no está activo en este salón todavía.' };
+    }
+    const acctId = tenant.chair_rental_direct_mode ? null : tenant.stripe_connect_account_id;
+    if (!tenant.chair_rental_direct_mode && !tenant.stripe_connect_charges_enabled) {
+        return { error: 'La pasarela de pagos del salón no está lista todavía. Avísale a la dueña.' };
+    }
+    if (!renter.monthly_rent_cop || Number(renter.monthly_rent_cop) <= 0) {
+        return { error: 'La dueña aún no te asignó la mensualidad de tu espacio de Coworking. Coordina con ella primero.' };
+    }
+    return { renter, tenant, acctId };
+}
+
+async function configurarPagoArriendo({ stylist_id }) {
+    const c = await loadRenterContext(stylist_id);
+    if (c.error) return { ok: false, message: c.error };
+    const { renter, tenant, acctId } = c;
+    if (renter.rental_stripe_subscription_id) {
+        return {
+            ok: false,
+            message: 'Ya tienes una suscripción activa. Si quieres cambiar tu tarjeta, usa "actualizar_mi_tarjeta".',
+        };
+    }
+    const customerId = await connect.findOrCreateRenterCustomer({
+        connectedAccountId: acctId,
+        renter,
+        existingCustomerId: renter.rental_stripe_customer_id,
+    });
+    if (customerId !== renter.rental_stripe_customer_id) {
+        await prisma.users.update({
+            where: { id: renter.id },
+            data: { rental_stripe_customer_id: customerId, updated_at: new Date() },
+        });
+    }
+    // Garantizar que el price exista (idempotente).
+    await connect.findOrCreateDailyPrice({
+        connectedAccountId: acctId,
+        monthlyCop: Number(renter.monthly_rent_cop),
+        renterId: renter.id,
+    });
+    const setupSession = await connect.createCheckoutForCardSetup({
+        connectedAccountId: acctId,
+        customerId,
+        renterId: renter.id,
+    });
+    const daily = Math.round(Number(renter.monthly_rent_cop) / 30);
+    return {
+        ok: true,
+        salon: tenant.name,
+        mensualidad: fmtCO(renter.monthly_rent_cop),
+        cobro_diario: fmtCO(daily),
+        link: setupSession.url,
+        message: `Para activar tu espacio de Coworking en ${tenant.name}: abre este link y guarda tu tarjeta. Una vez guardada, empezaremos a cobrarte ${fmtCO(daily)} diarios (mensualidad ${fmtCO(renter.monthly_rent_cop)} ÷ 30).`,
+    };
+}
+
+async function verMiArriendo({ stylist_id }) {
+    const c = await loadRenterContext(stylist_id);
+    if (c.error) return { ok: false, message: c.error };
+    const { renter, tenant } = c;
+    const daily = Math.round(Number(renter.monthly_rent_cop) / 30);
+    const tieneTarjeta = !!renter.rental_stripe_customer_id && !!renter.rental_stripe_subscription_id;
+    let diasEnMora = null;
+    if (renter.rental_status === 'past_due' && renter.rental_past_due_since) {
+        diasEnMora = Math.floor((Date.now() - new Date(renter.rental_past_due_since).getTime()) / 86400000);
+    }
+    return {
+        ok: true,
+        salon: tenant.name,
+        mensualidad: fmtCO(renter.monthly_rent_cop),
+        cobro_diario: fmtCO(daily),
+        estado: renter.rental_status || 'sin_activar',
+        tiene_tarjeta_guardada: tieneTarjeta,
+        suscripcion_activa: !!renter.rental_stripe_subscription_id,
+        dias_en_mora: diasEnMora,
+        dias_de_gracia_antes_bloqueo: tenant.rental_block_grace_days,
+        siguiente_paso: !renter.rental_stripe_customer_id
+            ? 'Usa "configurar_pago_arriendo" para guardar tu tarjeta y empezar.'
+            : !renter.rental_stripe_subscription_id
+                ? 'Tienes customer creado pero no suscripción activa. Vuelve a usar "configurar_pago_arriendo".'
+                : renter.rental_status === 'past_due'
+                    ? 'Tu último cobro falló. Usa "actualizar_mi_tarjeta" para cambiarla.'
+                    : renter.rental_status === 'blocked'
+                        ? 'Estás bloqueado. Actualiza tu tarjeta urgente con "actualizar_mi_tarjeta".'
+                        : 'Todo al día. Próximo cobro en las siguientes 24h.',
+    };
+}
+
+async function actualizarMiTarjeta({ stylist_id }) {
+    const c = await loadRenterContext(stylist_id);
+    if (c.error) return { ok: false, message: c.error };
+    const { renter, acctId } = c;
+    if (!renter.rental_stripe_customer_id) {
+        return {
+            ok: false,
+            message: 'Aún no tienes tarjeta guardada. Usa "configurar_pago_arriendo" para hacerlo por primera vez.',
+        };
+    }
+    const portal = await connect.createBillingPortalForRenter({
+        connectedAccountId: acctId,
+        customerId: renter.rental_stripe_customer_id,
+    });
+    return {
+        ok: true,
+        link: portal.url,
+        message: 'Abre este link para cambiar/actualizar tu tarjeta. Una vez guardada, el siguiente cobro se hará con ella.',
+    };
+}
+
 // ─── Dispatcher ────────────────────────────────────────────────────────
 // `session` permite a tools como cambiar_sucursal mutar la sesión en memoria.
 async function executeFunction(name, args, stylistId, homeTenantId, session) {
@@ -1103,6 +1270,9 @@ async function executeFunction(name, args, stylistId, homeTenantId, session) {
         case 'cambiar_sucursal': return cambiarSucursal(ctx);
         case 'listar_servicios_disponibles': return listarServiciosDisponibles(ctx);
         case 'listar_productos_disponibles': return listarProductosDisponibles(ctx);
+        case 'configurar_pago_arriendo': return configurarPagoArriendo(ctx);
+        case 'ver_mi_arriendo': return verMiArriendo(ctx);
+        case 'actualizar_mi_tarjeta': return actualizarMiTarjeta(ctx);
         default: throw new Error(`Función desconocida: ${name}`);
     }
 }

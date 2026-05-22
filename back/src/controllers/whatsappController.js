@@ -548,7 +548,7 @@ exports.handleWahaWebhook = async (req, res) => {
                 if (!stylistSession) {
                     try {
                         const stylistRows = await prisma.$queryRawUnsafe(
-                            `SELECT u.id, u.tenant_id, u.first_name, u.last_name
+                            `SELECT u.id, u.tenant_id, u.first_name, u.last_name, u.employment_type, u.rental_status
                              FROM users u
                              JOIN tenants t_user ON t_user.id = u.tenant_id
                              JOIN tenants t_wa   ON t_wa.id   = $1::uuid
@@ -575,7 +575,16 @@ exports.handleWahaWebhook = async (req, res) => {
                                 conversationHistory: []
                             };
                             stylistSessionCache.set(stylistCacheKey, stylistSession);
-                            console.log(`💇 [STYLIST WA] Estilista identificado: ${stylistSession.name} (id=${s.id}, tenant=${s.tenant_id})`);
+                            console.log(`💇 [STYLIST WA] Estilista identificado: ${stylistSession.name} (id=${s.id}, tenant=${s.tenant_id}, type=${s.employment_type})`);
+
+                            const isRenter = s.employment_type === 'renter';
+                            const rentalBlock = isRenter
+                                ? `\n*💳 TU ESPACIO DE COWORKING:*\n` +
+                                  `• "ver mi coworking" → estado, mensualidad y tarifa diaria\n` +
+                                  `• "configurar mi pago" → guardar tarjeta (primera vez)\n` +
+                                  `• "actualizar mi tarjeta" → cambiar tarjeta guardada\n\n`
+                                : '';
+
                             // Saludo de bienvenida en la PRIMERA interacción
                             await wahaService.sendMessage(tenantId, chatId,
                                 `Hola ${stylistSession.name.split(' ')[0]} 💇 Soy tu asistente.\n\n` +
@@ -591,6 +600,7 @@ exports.handleWahaWebhook = async (req, res) => {
                                 `• "mis comisiones del mes"\n` +
                                 `• "mi fichero" / "mis anticipos" / "mis préstamos"\n` +
                                 `• "resumen" → todo en uno\n\n` +
+                                rentalBlock +
                                 `_El cobro lo hace el cajero, tú solo armas el ticket._`
                             );
                             return res.status(200).send('OK');
