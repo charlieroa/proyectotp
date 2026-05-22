@@ -5,8 +5,18 @@
 
 const prisma = require('../config/prisma');
 const connect = require('../services/stripeConnectService');
+const { sendRenterStatusEmail } = require('../services/emailService');
 const { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth } = require('date-fns');
 const { formatInTimeZone, utcToZonedTime } = require('date-fns-tz');
+
+// Helper: ofusca un email para mostrarlo en mensajes públicos (e.g. j***@gmail.com).
+const maskEmail = (email) => {
+    if (!email || typeof email !== 'string') return '';
+    const [name, domain] = email.split('@');
+    if (!domain) return email;
+    const visible = name.slice(0, 1) || '';
+    return `${visible}***@${domain}`;
+};
 
 const TIME_ZONE = 'America/Bogota';
 
@@ -1141,14 +1151,24 @@ async function loadRenterContext(stylistId) {
     return { renter, tenant, acctId };
 }
 
+// IMPORTANTE - Privacidad en flujos de Coworking:
+// El teléfono físico del salón rota entre el personal, por lo que las
+// conversaciones del bot quedan visibles a varias personas. Las 3 tools
+// de Coworking devuelven SIN INFO SENSIBLE en el chat (sin montos, ni
+// estado, ni mora). El mensaje del estilista y la respuesta del bot
+// quedan marcados con `_private_coworking: true` para que el caller los
+// borre del chat tras procesar (delete-for-everyone en wahaService).
+// Para info detallada, ver_mi_arriendo envía email al estilista.
+
 async function configurarPagoArriendo({ stylist_id }) {
     const c = await loadRenterContext(stylist_id);
-    if (c.error) return { ok: false, message: c.error };
+    if (c.error) return { ok: false, message: c.error, _private_coworking: true };
     const { renter, tenant, acctId } = c;
     if (renter.rental_stripe_subscription_id) {
         return {
             ok: false,
-            message: 'Ya tienes una suscripción activa. Si quieres cambiar tu tarjeta, usa "actualizar_mi_tarjeta".',
+            message: 'Tu pago ya está activo. Para cambiar tu tarjeta, pídeme "actualizar mi tarjeta".',
+            _private_coworking: true,
         };
     }
     const customerId = await connect.findOrCreateRenterCustomer({
@@ -1162,7 +1182,6 @@ async function configurarPagoArriendo({ stylist_id }) {
             data: { rental_stripe_customer_id: customerId, updated_at: new Date() },
         });
     }
-    // Garantizar que el price exista (idempotente).
     await connect.findOrCreateDailyPrice({
         connectedAccountId: acctId,
         monthlyCop: Number(renter.monthly_rent_cop),
@@ -1173,57 +1192,84 @@ async function configurarPagoArriendo({ stylist_id }) {
         customerId,
         renterId: renter.id,
     });
-    const daily = Math.round(Number(renter.monthly_rent_cop) / 30);
     return {
         ok: true,
-        salon: tenant.name,
-        mensualidad: fmtCO(renter.monthly_rent_cop),
-        cobro_diario: fmtCO(daily),
         link: setupSession.url,
-        message: `Para activar tu espacio de Coworking en ${tenant.name}: abre este link y guarda tu tarjeta. Una vez guardada, empezaremos a cobrarte ${fmtCO(daily)} diarios (mensualidad ${fmtCO(renter.monthly_rent_cop)} ÷ 30).`,
+        message: `Hola, este es tu link privado para activar tu espacio: ${setupSession.url}\n\nAbrelo y guarda tu tarjeta. Te envié los detalles a tu correo. Por privacidad este mensaje se borrará pronto.`,
+        _private_coworking: true,
     };
 }
 
 async function verMiArriendo({ stylist_id }) {
     const c = await loadRenterContext(stylist_id);
-    if (c.error) return { ok: false, message: c.error };
-    const { renter, tenant } = c;
+    if (c.error) return { ok: false, message: c.error, _private_coworking: true };
+    const { renter, tenant, acctId } = c;
     const daily = Math.round(Number(renter.monthly_rent_cop) / 30);
-    const tieneTarjeta = !!renter.rental_stripe_customer_id && !!renter.rental_stripe_subscription_id;
     let diasEnMora = null;
     if (renter.rental_status === 'past_due' && renter.rental_past_due_since) {
         diasEnMora = Math.floor((Date.now() - new Date(renter.rental_past_due_since).getTime()) / 86400000);
     }
+    const nextStep = !renter.rental_stripe_customer_id
+        ? 'Pídele al bot "configurar mi pago" para guardar tu tarjeta y empezar.'
+        : !renter.rental_stripe_subscription_id
+            ? 'Tu tarjeta aún no está activa. Vuelve a pedirle al bot "configurar mi pago".'
+            : renter.rental_status === 'past_due'
+                ? 'Tu último cobro falló. Pídele al bot "actualizar mi tarjeta" o usa el link del correo.'
+                : renter.rental_status === 'blocked'
+                    ? 'Estás bloqueado por falta de pago. Actualiza tu tarjeta urgente.'
+                    : 'Todo al día. El próximo cobro será automático.';
+
+    let emailSent = false;
+    if (renter.email) {
+        try {
+            let portalUrl = null;
+            if (renter.rental_stripe_customer_id) {
+                try {
+                    const portal = await connect.createBillingPortalForRenter({
+                        connectedAccountId: acctId,
+                        customerId: renter.rental_stripe_customer_id,
+                    });
+                    portalUrl = portal.url;
+                } catch (e) {
+                    console.warn('[stylist coworking] no se pudo crear portal:', e.message);
+                }
+            }
+            await sendRenterStatusEmail({
+                to: renter.email,
+                firstName: renter.first_name,
+                tenantName: tenant.name,
+                monthlyCop: renter.monthly_rent_cop,
+                dailyCop: daily,
+                status: renter.rental_status,
+                daysOverdue: diasEnMora,
+                graceDays: tenant.rental_block_grace_days,
+                nextStep,
+                portalUrl,
+            });
+            emailSent = true;
+        } catch (e) {
+            console.error('[stylist coworking] email send failed:', e.message);
+        }
+    }
+
     return {
         ok: true,
-        salon: tenant.name,
-        mensualidad: fmtCO(renter.monthly_rent_cop),
-        cobro_diario: fmtCO(daily),
-        estado: renter.rental_status || 'sin_activar',
-        tiene_tarjeta_guardada: tieneTarjeta,
-        suscripcion_activa: !!renter.rental_stripe_subscription_id,
-        dias_en_mora: diasEnMora,
-        dias_de_gracia_antes_bloqueo: tenant.rental_block_grace_days,
-        siguiente_paso: !renter.rental_stripe_customer_id
-            ? 'Usa "configurar_pago_arriendo" para guardar tu tarjeta y empezar.'
-            : !renter.rental_stripe_subscription_id
-                ? 'Tienes customer creado pero no suscripción activa. Vuelve a usar "configurar_pago_arriendo".'
-                : renter.rental_status === 'past_due'
-                    ? 'Tu último cobro falló. Usa "actualizar_mi_tarjeta" para cambiarla.'
-                    : renter.rental_status === 'blocked'
-                        ? 'Estás bloqueado. Actualiza tu tarjeta urgente con "actualizar_mi_tarjeta".'
-                        : 'Todo al día. Próximo cobro en las siguientes 24h.',
+        message: emailSent
+            ? `Te envié los detalles privados a tu correo ${maskEmail(renter.email)}. Por privacidad no muestro esa información en este chat.`
+            : 'No pude enviarte el correo con los detalles ahora mismo. Avísale a la dueña para que verifique tu email registrado.',
+        _private_coworking: true,
     };
 }
 
 async function actualizarMiTarjeta({ stylist_id }) {
     const c = await loadRenterContext(stylist_id);
-    if (c.error) return { ok: false, message: c.error };
+    if (c.error) return { ok: false, message: c.error, _private_coworking: true };
     const { renter, acctId } = c;
     if (!renter.rental_stripe_customer_id) {
         return {
             ok: false,
-            message: 'Aún no tienes tarjeta guardada. Usa "configurar_pago_arriendo" para hacerlo por primera vez.',
+            message: 'Aún no tienes pago configurado. Pídele al bot "configurar mi pago" para empezar.',
+            _private_coworking: true,
         };
     }
     const portal = await connect.createBillingPortalForRenter({
@@ -1233,7 +1279,8 @@ async function actualizarMiTarjeta({ stylist_id }) {
     return {
         ok: true,
         link: portal.url,
-        message: 'Abre este link para cambiar/actualizar tu tarjeta. Una vez guardada, el siguiente cobro se hará con ella.',
+        message: `Tu link privado para cambiar la tarjeta: ${portal.url}\n\nDesde ahí actualizas tu método de pago. Por privacidad este mensaje se borrará pronto.`,
+        _private_coworking: true,
     };
 }
 

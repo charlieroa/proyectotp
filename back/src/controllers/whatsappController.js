@@ -642,8 +642,29 @@ exports.handleWahaWebhook = async (req, res) => {
                     }
                     stylistSession.lastActivity = Date.now();
                     try {
-                        const stylistReply = await processWithStylistAI(stylistSession, msgTrimmed, isVoiceMessage);
-                        await wahaService.sendMessage(tenantId, chatId, stylistReply);
+                        const stylistResult = await processWithStylistAI(stylistSession, msgTrimmed, isVoiceMessage);
+                        const stylistReply = typeof stylistResult === 'string' ? stylistResult : stylistResult.reply;
+                        const isPrivateCoworking = !!stylistResult.isPrivate;
+
+                        const sendResp = await wahaService.sendMessage(tenantId, chatId, stylistReply);
+
+                        // Auto-borrado: si la tool ejecutada fue de Coworking, borrar el
+                        // mensaje del estilista + el del bot tras 60s para que no queden
+                        // visibles en el teléfono físico del salón (que rota entre personal).
+                        if (isPrivateCoworking) {
+                            const incomingKey = payload.id ? {
+                                id: payload.id,
+                                remoteJid: chatId,
+                                fromMe: false,
+                            } : null;
+                            const outgoingKey = sendResp?.key || sendResp?.message?.key || null;
+                            const DELETE_DELAY_MS = 60 * 1000;
+                            console.log(`🔒 [COWORKING] Programando borrado en ${DELETE_DELAY_MS / 1000}s (incoming=${!!incomingKey}, outgoing=${!!outgoingKey})`);
+                            setTimeout(async () => {
+                                if (incomingKey) await wahaService.deleteMessageForEveryone(tenantId, incomingKey).catch(() => {});
+                                if (outgoingKey) await wahaService.deleteMessageForEveryone(tenantId, outgoingKey).catch(() => {});
+                            }, DELETE_DELAY_MS);
+                        }
                     } catch (stylAIErr) {
                         console.error('[STYLIST WA] Error procesando con IA:', stylAIErr.message);
                         await wahaService.sendMessage(tenantId, chatId, '😅 No pude procesar tu pregunta. Intenta de nuevo.');
@@ -2638,9 +2659,10 @@ async function processWithStylistAI(stylistSession, userMessage, isVoiceMessage 
         history.push({ role: 'user', content: userMessage });
         history.push({ role: 'assistant', content: reply });
         stylistSession.conversationHistory = history.slice(-20);
-        return reply;
+        return { reply, isPrivate: false };
     }
 
+    let hasPrivateCoworking = false;
     const toolResults = await Promise.all(
         assistantMessage.tool_calls.map(async (toolCall) => {
             const fnName = toolCall.function.name;
@@ -2653,6 +2675,7 @@ async function processWithStylistAI(stylistSession, userMessage, isVoiceMessage 
                 console.error(`   ❌ [STYLIST WA] Error en ${fnName}:`, err.message);
                 result = { error: `Error ejecutando ${fnName}: ${err.message}` };
             }
+            if (result && result._private_coworking) hasPrivateCoworking = true;
             return { role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify(result) };
         })
     );
@@ -2688,7 +2711,7 @@ async function processWithStylistAI(stylistSession, userMessage, isVoiceMessage 
 
     const executedFns = assistantMessage.tool_calls.map(tc => tc.function.name).join(', ');
     console.log(`   ✅ [STYLIST WA] Funciones ejecutadas: ${executedFns}`);
-    return finalContent;
+    return { reply: finalContent, isPrivate: hasPrivateCoworking };
 }
 
 /* =================================================================== */

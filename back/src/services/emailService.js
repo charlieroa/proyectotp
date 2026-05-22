@@ -263,6 +263,68 @@ async function sendCampaignEmail({ to, subject, html, recipientName }) {
   return sendEmail({ to, subject, html: personalizedHtml });
 }
 
+/**
+ * Email privado al estilista con el estado de su arriendo (coworking).
+ * Se usa cuando el bot quiere darle info sensible sin exponerla en WhatsApp.
+ */
+async function sendRenterStatusEmail({ to, firstName, tenantName, monthlyCop, dailyCop, status, daysOverdue, graceDays, nextStep, portalUrl }) {
+  const fmt = (v) => Number(v || 0).toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 });
+  const statusLabel = {
+    active: { text: 'Al día', color: '#16a34a' },
+    past_due: { text: 'Pago pendiente', color: '#f59e0b' },
+    blocked: { text: 'Bloqueado', color: '#dc2626' },
+  }[status] || { text: 'Sin activar', color: '#6b7280' };
+
+  const html = `
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff;">
+      <div style="background: linear-gradient(135deg, #438eff 0%, #6c5ce7 100%); padding: 32px 30px; text-align: center; border-radius: 8px 8px 0 0;">
+        <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Tu Coworking en ${tenantName || 'tu salón'}</h1>
+        <p style="color: rgba(255,255,255,0.9); margin: 6px 0 0; font-size: 14px;">Estado de tu arriendo</p>
+      </div>
+      <div style="padding: 30px;">
+        <p style="color: #666;">Hola${firstName ? ` <strong>${firstName}</strong>` : ''},</p>
+        <p style="color: #666;">Aquí tienes el estado actual de tu Coworking. <strong>No compartimos esto por WhatsApp por privacidad.</strong></p>
+
+        <div style="background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 25px 0; border-left: 4px solid ${statusLabel.color};">
+          <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+            <tr><td style="padding: 8px 0; color: #666;">Estado</td><td style="padding: 8px 0; text-align: right; font-weight: bold; color: ${statusLabel.color};">${statusLabel.text}</td></tr>
+            <tr><td style="padding: 8px 0; color: #666;">Mensualidad</td><td style="padding: 8px 0; text-align: right; font-weight: bold; color: #333;">${fmt(monthlyCop)}</td></tr>
+            <tr><td style="padding: 8px 0; color: #666;">Cobro diario</td><td style="padding: 8px 0; text-align: right; color: #333;">${fmt(dailyCop)}</td></tr>
+            ${daysOverdue != null ? `<tr><td style="padding: 8px 0; color: #666;">Días en mora</td><td style="padding: 8px 0; text-align: right; color: #dc2626; font-weight: bold;">${daysOverdue}</td></tr>` : ''}
+            ${graceDays != null ? `<tr><td style="padding: 8px 0; color: #666;">Días de gracia</td><td style="padding: 8px 0; text-align: right; color: #333;">${graceDays}</td></tr>` : ''}
+          </table>
+        </div>
+
+        ${nextStep ? `
+          <div style="background: #fff8e1; border-left: 4px solid #f59e0b; border-radius: 6px; padding: 14px 18px; margin: 20px 0; font-size: 14px; color: #5b3a00;">
+            <strong>Siguiente paso:</strong> ${nextStep}
+          </div>
+        ` : ''}
+
+        ${portalUrl ? `
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${portalUrl}" style="background-color: #438eff; color: white; padding: 14px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+              Abrir mi portal de pago
+            </a>
+          </div>
+        ` : ''}
+
+        <p style="color: #888; font-size: 13px;">Este correo es solo para ti. No compartas el link de tu portal con nadie — desde ahí se administra tu tarjeta de pago.</p>
+      </div>
+      <hr style="border: none; border-top: 1px solid #eee; margin: 0;" />
+      <p style="color: #999; font-size: 12px; text-align: center; padding: 20px;">
+        &copy; ${new Date().getFullYear()} Tupelukeria
+      </p>
+    </div>
+  `;
+
+  return sendEmail({
+    to,
+    subject: `Tu Coworking en ${tenantName || 'tu salón'} — estado actual`,
+    html,
+  });
+}
+
 module.exports = {
   sendEmail,
   sendPasswordResetEmail,
@@ -270,4 +332,5 @@ module.exports = {
   sendInvoiceEmail,
   sendStylistWelcomeEmail,
   sendCampaignEmail,
+  sendRenterStatusEmail,
 };

@@ -961,13 +961,19 @@ async function markRenterPaidBySubscription(subscriptionId) {
 async function markRenterPastDueBySubscription(subscriptionId) {
   const renter = await prisma.users.findFirst({
     where: { rental_stripe_subscription_id: subscriptionId },
-    select: { id: true, tenant_id: true, rental_past_due_since: true },
+    select: {
+      id: true, tenant_id: true, rental_past_due_since: true,
+      phone: true, first_name: true, rental_stripe_customer_id: true,
+    },
   });
   if (!renter) return;
 
   const tenant = await prisma.tenants.findUnique({
     where: { id: renter.tenant_id },
-    select: { rental_block_grace_days: true },
+    select: {
+      name: true, rental_block_grace_days: true,
+      stripe_connect_account_id: true, chair_rental_direct_mode: true,
+    },
   });
   const since = renter.rental_past_due_since || new Date();
   const graceMs = (tenant?.rental_block_grace_days ?? 3) * 24 * 60 * 60 * 1000;
@@ -982,6 +988,37 @@ async function markRenterPastDueBySubscription(subscriptionId) {
     },
   });
   console.log(`[chairRental] renter ${renter.id} → ${shouldBlock ? 'blocked' : 'past_due'}`);
+
+  notifyRenterPastDue(renter, tenant, shouldBlock).catch((e) => {
+    console.error('[chairRental] notifyRenterPastDue error:', e.message);
+  });
+}
+
+// Notificación WhatsApp privada al renter cuando entra en mora o queda bloqueado.
+// Sin info sensible: solo el aviso + link al portal para actualizar tarjeta.
+// El mensaje saldrá desde el bot del salón → aparecerá también en el teléfono
+// físico, pero el contenido es genérico (no expone monto ni historial).
+async function notifyRenterPastDue(renter, tenant, blocked) {
+  if (!renter.phone || !renter.rental_stripe_customer_id) return;
+  try {
+    const acctId = tenant?.chair_rental_direct_mode ? null : tenant?.stripe_connect_account_id;
+    const portal = await connect.createBillingPortalForRenter({
+      connectedAccountId: acctId,
+      customerId: renter.rental_stripe_customer_id,
+    });
+    const wahaService = require('../services/wahaService');
+    const cleanPhone = String(renter.phone).replace(/\D/g, '');
+    const chatId = `${cleanPhone}@s.whatsapp.net`;
+    const firstName = (renter.first_name || '').split(' ')[0] || '';
+    const salonName = tenant?.name || 'tu salón';
+    const message = blocked
+      ? `Hola${firstName ? ' ' + firstName : ''} 🔒 Tu acceso a ${salonName} fue suspendido porque tu pago de arriendo no se procesó. Actualiza tu método de pago aquí (privado): ${portal.url}`
+      : `Hola${firstName ? ' ' + firstName : ''} ⚠️ Tu pago de arriendo en ${salonName} no se procesó. Actualiza tu método de pago aquí (privado): ${portal.url}`;
+    await wahaService.sendMessage(renter.tenant_id, chatId, message);
+    console.log(`[chairRental] notif mora enviada a renter ${renter.id} (${blocked ? 'blocked' : 'past_due'})`);
+  } catch (e) {
+    console.warn('[chairRental] no se pudo enviar notif WA al renter:', e.message);
+  }
 }
 
 async function markRenterUnsubscribedBySubscription(subscriptionId) {

@@ -269,6 +269,40 @@ const sendStatus = async (sessionName, opts) => {
     }
 };
 
+/**
+ * Borra un mensaje "para todos" (delete-for-everyone). En WhatsApp esto
+ * elimina el mensaje en TODOS los dispositivos del chat — el del estilista
+ * (otro número) y el del salón (el teléfono físico linkado a la instancia).
+ * Deja el placeholder "Este mensaje fue eliminado".
+ *
+ * Lo usamos en flujos de coworking del bot para evitar que el personal que
+ * rota usando el teléfono físico vea las conversaciones privadas del renter.
+ *
+ * messageKey = { id, remoteJid, fromMe } como viene del webhook o del
+ * response al enviar (response.data.key).
+ */
+const deleteMessageForEveryone = async (sessionName, messageKey) => {
+    try {
+        if (!messageKey?.id || !messageKey?.remoteJid) {
+            console.warn(`[EVOLUTION] deleteMessageForEveryone sin key válida:`, messageKey);
+            return null;
+        }
+        const response = await apiClient.delete(`/chat/deleteMessageForEveryone/${sessionName}`, {
+            data: {
+                id: messageKey.id,
+                remoteJid: messageKey.remoteJid,
+                fromMe: !!messageKey.fromMe,
+                ...(messageKey.participant ? { participant: messageKey.participant } : {}),
+            },
+        });
+        console.log(`🗑️  [EVOLUTION] Mensaje ${messageKey.id} eliminado para todos`);
+        return response.data;
+    } catch (error) {
+        console.error(`❌ [EVOLUTION] Error borrando mensaje ${messageKey?.id}:`, error.response?.data || error.message);
+        return null;
+    }
+};
+
 module.exports = {
     startSession,
     getQrRawData,
@@ -281,5 +315,6 @@ module.exports = {
     getMediaBuffer,
     getInstanceOwnerJid,
     stripJidSuffix,
-    sendStatus
+    sendStatus,
+    deleteMessageForEveryone
 };
