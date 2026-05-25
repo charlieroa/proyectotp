@@ -24,6 +24,18 @@ const getRoleFromToken = (): number | null => {
     }
 };
 
+// Tipo de empleo desde el token ('employee' | 'renter')
+const getEmploymentTypeFromToken = (): string | null => {
+    try {
+        const token = getToken();
+        if (!token) return null;
+        const decoded: any = jwtDecode(token);
+        return decoded?.user?.employment_type || null;
+    } catch {
+        return null;
+    }
+};
+
 // Nombres legibles de los planes
 const PLAN_NAMES: Record<string, string> = {
     free: 'Free',
@@ -38,6 +50,8 @@ const LayoutMenuData = () => {
     const [iscurrentState, setIscurrentState] = useState("Dashboard");
 
     const userRole = getRoleFromToken();
+    const employmentType = getEmploymentTypeFromToken();
+    const isRenter = userRole === 3 && employmentType === "renter";
 
     // Leemos el estado directamente desde Redux de forma reactiva
     const isSetupComplete = useSelector(selectIsSetupComplete);
@@ -78,6 +92,15 @@ const LayoutMenuData = () => {
 
     // Step 1: Build static menu structure (filtered by role + plan + setup) — memoized
     const filteredMenuItems = useMemo(() => {
+        // Estilista de Coworking (renter): menú propio, sin acceso al resto del app.
+        if (isRenter) {
+            return [
+                { label: t("menu_main"), isHeader: true },
+                { id: "mi-coworking", label: "Mi Coworking", icon: "ri-store-2-line", link: "/mi-coworking" },
+                { id: "mi-agenda", label: "Mi Agenda", icon: "ri-calendar-line", link: "/mi-agenda" },
+            ];
+        }
+
         const menuItems: any[] = [
             { label: t("menu_main"), isHeader: true },
             { id: "dashboard-v2", label: t("menu_dashboard"), icon: "ri-dashboard-2-line", link: "/dashboard-v2", roles: [1, 2, 3, 6], minPlan: "free" },
@@ -165,7 +188,7 @@ const LayoutMenuData = () => {
 
             return processedItem;
         });
-    }, [userRole, isSetupComplete, tenantPlan]);
+    }, [userRole, isRenter, isSetupComplete, tenantPlan]);
 
     return <React.Fragment>{filteredMenuItems}</React.Fragment>;
 };

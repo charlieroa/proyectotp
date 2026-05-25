@@ -1038,6 +1038,45 @@ exports.getAppointmentsByTenant = async (req, res) => {
   }
 };
 
+// GET /api/appointments/me/agenda?startDate&endDate
+// Agenda del estilista logueado: solo sus citas (stylist_id = req.user.id),
+// dentro de su tenant. No expone las citas del resto del salón.
+exports.getMyAgenda = async (req, res) => {
+  const { startDate, endDate } = req.query;
+  const stylistId = req.user?.id;
+  const tenantId = req.user?.tenant_id;
+
+  if (!stylistId || !tenantId) {
+    return res.status(401).json({ error: 'No autorizado' });
+  }
+  if (!startDate || !endDate) {
+    return res.status(400).json({ error: 'Debe proporcionar un rango de fechas (startDate, endDate).' });
+  }
+
+  try {
+    const rows = await prisma.$queryRawUnsafe(
+      `SELECT a.id, a.start_time, a.end_time, a.status, a.service_id, a.stylist_id, a.client_id, a.batch_id,
+             s.name as service_name, s.price,
+             client.first_name as client_first_name, client.last_name as client_last_name,
+             stylist.first_name as stylist_first_name, stylist.last_name as stylist_last_name
+      FROM appointments a
+      JOIN services s    ON a.service_id = s.id
+      JOIN users client  ON a.client_id  = client.id
+      JOIN users stylist ON a.stylist_id = stylist.id
+      WHERE a.tenant_id = $1::uuid
+        AND a.stylist_id = $2::uuid
+        AND a.start_time >= $3::timestamptz
+        AND a.start_time <= $4::timestamptz
+      ORDER BY a.start_time`,
+      tenantId, stylistId, startDate, endDate
+    );
+    return res.status(200).json(rows);
+  } catch (error) {
+    console.error('Error al obtener agenda del estilista:', error);
+    return res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
 exports.getAvailability = async (req, res) => {
   const { stylist_id, date, service_id, duration_minutes } = req.query;
   const { tenant_id } = req.user;

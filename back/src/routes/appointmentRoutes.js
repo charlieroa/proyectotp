@@ -75,6 +75,9 @@ router.get('/public/tenant/:tenantId/slots', appointmentController.getTenantSlot
 // 🗓️ SUPER CALENDARIO: Vista consolidada multi-sede
 router.get('/super-calendar', authMiddleware, appointmentController.getSuperCalendar);
 
+// 💈 Agenda del estilista logueado (solo sus propias citas)
+router.get('/me/agenda', authMiddleware, appointmentController.getMyAgenda);
+
 router.get('/tenant/slots', authMiddleware, appointmentController.getTenantSlots);
 
 router.get('/stylists/available', authMiddleware, appointmentController.getAvailableStylistsByTime);

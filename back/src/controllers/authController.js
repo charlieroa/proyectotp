@@ -169,6 +169,7 @@ exports.login = async (req, res) => {
         tenant_id: user.tenant_id,
         tenant_name: tenantName,
         is_primary_branch: isPrimaryBranch,
+        employment_type: user.employment_type || 'employee',
       },
     };
 
@@ -187,6 +188,7 @@ exports.login = async (req, res) => {
           role_id: user.role_id,
           tenant_id: user.tenant_id,
           tenant_name: tenantName,
+          employment_type: user.employment_type || 'employee',
         };
 
         return res.json({

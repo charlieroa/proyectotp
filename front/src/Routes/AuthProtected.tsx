@@ -5,7 +5,7 @@ import { useDispatch, useSelector } from "react-redux";
 import { sileo } from 'sileo';
 
 import { useProfile } from "../Components/Hooks/UserHooks";
-import { getRoleFromToken } from "../services/auth";
+import { getRoleFromToken, isCoworkingRenter } from "../services/auth";
 
 import { logoutUser } from "../slices/auth/login/thunk";
 import { selectTenantPlan, isPlanAtLeast } from "../slices/Settings/settingsSlice";
@@ -63,6 +63,17 @@ const AuthProtected = (props : any) =>{
         <Navigate to={{ pathname: "/login"}} />
       </React.Fragment>
     );
+  }
+
+  // Estilista de Coworking (renter): solo accede a su propio espacio.
+  if (isCoworkingRenter()) {
+    const RENTER_ALLOWED = ["/mi-coworking", "/mi-agenda", "/profile", "/logout"];
+    const allowed = RENTER_ALLOWED.some(
+      (p) => location.pathname === p || location.pathname.startsWith(p + "/")
+    );
+    if (!allowed) {
+      return <Navigate to="/mi-coworking" replace />;
+    }
   }
 
   // Verificar restricción de rol para la ruta actual (ej: Cajera no puede acceder a /checkout)

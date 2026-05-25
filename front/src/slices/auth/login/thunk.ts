@@ -86,8 +86,11 @@ export const loginUser =
       // --- Navegación condicional por rol y estado de setup ---
       if (navigate) {
         const roleId = data?.user?.role_id;
+        const employmentType = data?.user?.employment_type;
         if (roleId === 5) {
           navigate("/super-admin"); // Super Admin va a su panel
+        } else if (roleId === 3 && employmentType === "renter") {
+          navigate("/mi-coworking"); // Estilista de Coworking va a su espacio
         } else if (roleId === 2 || roleId === 6) {
           navigate("/dashboard-v2"); // Cajeros y recepcionistas siempre al dashboard
         } else if (setup_complete === false) {

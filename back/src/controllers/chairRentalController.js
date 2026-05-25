@@ -789,6 +789,235 @@ exports.getPublicPaymentLink = async (req, res) => {
 };
 
 // ─────────────────────────────────────────────────────────────
+// SELF-SERVICE (estilista renter logueado) — scope = req.user.id
+// ─────────────────────────────────────────────────────────────
+
+// Resuelve al renter logueado o devuelve null si no aplica.
+async function selfRenterOrNull(userId) {
+  const renter = await prisma.users.findUnique({
+    where: { id: userId },
+    select: {
+      id: true, first_name: true, last_name: true, email: true, phone: true,
+      tenant_id: true, employment_type: true, monthly_rent_cop: true,
+      rental_status: true, rental_past_due_since: true, created_at: true,
+      rental_stripe_customer_id: true, rental_stripe_subscription_id: true,
+    },
+  });
+  if (!renter || renter.employment_type !== 'renter') return null;
+  return renter;
+}
+
+// GET /api/chair-rentals/me
+// Estado de Coworking del estilista logueado: mensualidad, cobro diario,
+// mora, días de gracia, tarjeta, suscripción e historial de pagos.
+exports.getMyRental = async (req, res) => {
+  try {
+    const renter = await selfRenterOrNull(req.user.id);
+    if (!renter) {
+      return res.status(404).json({ error: 'No tienes un espacio de Coworking activo.' });
+    }
+
+    const tenant = await tenantOrThrow(renter.tenant_id);
+    const acctId = acctIdFor(tenant);
+    const acctOpts = acctId ? { stripeAccount: acctId } : undefined;
+
+    let subscription = null;
+    let defaultCard = null;
+    let invoices = [];
+
+    if (renter.rental_stripe_customer_id) {
+      try {
+        const customer = await stripe.customers.retrieve(renter.rental_stripe_customer_id, acctOpts);
+        const pmId = customer?.invoice_settings?.default_payment_method;
+        if (pmId) {
+          const pm = await stripe.paymentMethods.retrieve(pmId, acctOpts);
+          if (pm?.card) {
+            defaultCard = {
+              brand: pm.card.brand, last4: pm.card.last4,
+              exp_month: pm.card.exp_month, exp_year: pm.card.exp_year,
+            };
+          }
+        }
+      } catch (e) {
+        console.warn('[chairRental/me] no se pudo leer customer/pm:', e.message);
+      }
+
+      try {
+        const list = await stripe.invoices.list(
+          { customer: renter.rental_stripe_customer_id, limit: 10 },
+          acctOpts
+        );
+        invoices = list.data.map((i) => ({
+          id: i.id, number: i.number, status: i.status,
+          amount_paid: i.amount_paid, amount_due: i.amount_due,
+          currency: i.currency, created: i.created,
+          hosted_invoice_url: i.hosted_invoice_url, description: i.description,
+        }));
+      } catch (e) {
+        console.warn('[chairRental/me] no se pudieron listar invoices:', e.message);
+      }
+    }
+
+    if (renter.rental_stripe_subscription_id) {
+      try {
+        const sub = await stripe.subscriptions.retrieve(renter.rental_stripe_subscription_id, acctOpts);
+        subscription = {
+          status: sub.status,
+          current_period_end: sub.current_period_end,
+          current_period_start: sub.current_period_start,
+          cancel_at_period_end: sub.cancel_at_period_end,
+        };
+      } catch (e) {
+        console.warn('[chairRental/me] no se pudo leer subscription:', e.message);
+      }
+    }
+
+    const graceDays = tenant.rental_block_grace_days ?? 3;
+    let daysPastDue = 0;
+    if (renter.rental_past_due_since) {
+      const ms = Date.now() - new Date(renter.rental_past_due_since).getTime();
+      daysPastDue = Math.max(0, Math.floor(ms / (24 * 60 * 60 * 1000)));
+    }
+    const dailyCents = renter.monthly_rent_cop
+      ? connect.calcDailyCentsFromMonthly(Number(renter.monthly_rent_cop))
+      : 0;
+
+    return res.json({
+      renter: {
+        id: renter.id,
+        first_name: renter.first_name,
+        last_name: renter.last_name,
+        email: renter.email,
+        rental_status: renter.rental_status,
+        rental_past_due_since: renter.rental_past_due_since,
+        monthly_rent_cop: renter.monthly_rent_cop,
+        daily_cop: Math.round(dailyCents / 100),
+        days_past_due: daysPastDue,
+        grace_days: graceDays,
+        has_subscription: !!renter.rental_stripe_subscription_id,
+        has_customer: !!renter.rental_stripe_customer_id,
+        created_at: renter.created_at,
+      },
+      tenant_name: tenant.name,
+      subscription,
+      default_card: defaultCard,
+      invoices,
+    });
+  } catch (e) {
+    return fail(res, e);
+  }
+};
+
+// POST /api/chair-rentals/me/payment-link
+// Customer Portal del propio renter para actualizar tarjeta.
+exports.getMyPaymentLink = async (req, res) => {
+  try {
+    const renter = await selfRenterOrNull(req.user.id);
+    if (!renter) return res.status(404).json({ error: 'No tienes un espacio de Coworking activo.' });
+    if (!renter.rental_stripe_customer_id) {
+      return res.status(400).json({ error: 'Aún no tienes método de pago configurado.' });
+    }
+    const tenant = await tenantOrThrow(renter.tenant_id);
+    const portal = await connect.createBillingPortalForRenter({
+      connectedAccountId: acctIdFor(tenant),
+      customerId: renter.rental_stripe_customer_id,
+    });
+    return res.json({ url: portal.url });
+  } catch (e) {
+    return fail(res, e);
+  }
+};
+
+// POST /api/chair-rentals/me/setup-link
+// Checkout Setup para registrar la PRIMERA tarjeta (renter sin suscripción).
+exports.getMySetupLink = async (req, res) => {
+  try {
+    const renter = await selfRenterOrNull(req.user.id);
+    if (!renter) return res.status(404).json({ error: 'No tienes un espacio de Coworking activo.' });
+    if (renter.rental_stripe_subscription_id) {
+      return res.status(409).json({
+        error: 'Ya tienes una suscripción activa. Usa "Actualizar tarjeta" para cambiar tu método de pago.',
+      });
+    }
+    const tenant = await tenantOrThrow(renter.tenant_id);
+    if (!tenant.chair_rental_direct_mode && !tenant.stripe_connect_charges_enabled) {
+      return res.status(400).json({ error: 'El salón aún no tiene los cobros habilitados.' });
+    }
+
+    const customerId = await connect.findOrCreateRenterCustomer({
+      connectedAccountId: acctIdFor(tenant),
+      renter,
+      existingCustomerId: renter.rental_stripe_customer_id,
+    });
+    if (customerId !== renter.rental_stripe_customer_id) {
+      await prisma.users.update({
+        where: { id: renter.id },
+        data: { rental_stripe_customer_id: customerId, updated_at: new Date() },
+      });
+    }
+
+    const setupSession = await connect.createCheckoutForCardSetup({
+      connectedAccountId: acctIdFor(tenant),
+      customerId,
+      renterId: renter.id,
+    });
+    return res.json({ url: setupSession.url });
+  } catch (e) {
+    return fail(res, e);
+  }
+};
+
+// POST /api/chair-rentals/renters/:id/invite   (owner / admin)
+// Envía email de activación de cuenta reusando el flujo de reset-password.
+exports.inviteRenter = async (req, res) => {
+  try {
+    const tenant = await tenantOrThrow(req.user.tenant_id);
+    if (![1, 2].includes(req.user.role_id)) {
+      return res.status(403).json({ error: 'No autorizado' });
+    }
+    const renter = await prisma.users.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true, tenant_id: true, employment_type: true,
+        email: true, first_name: true,
+      },
+    });
+    if (!renter || renter.tenant_id !== tenant.id || renter.employment_type !== 'renter') {
+      return res.status(404).json({ error: 'Renter no encontrado' });
+    }
+    if (!renter.email || renter.email.endsWith('@temp.tupelukeria.com')) {
+      return res.status(400).json({ error: 'El estilista no tiene un email válido para enviar la invitación.' });
+    }
+
+    const crypto = require('crypto');
+    const { sendCoworkingInviteEmail } = require('../services/emailService');
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 72 * 60 * 60 * 1000); // 72h para activar
+    await prisma.users.update({
+      where: { id: renter.id },
+      data: { password_reset_token: token, password_reset_expires: expires },
+    });
+
+    try {
+      await sendCoworkingInviteEmail({
+        email: renter.email,
+        token,
+        firstName: renter.first_name,
+        tenantName: tenant.name,
+      });
+    } catch (emailErr) {
+      console.error('[chairRental] error enviando invitación:', emailErr.message);
+      return res.status(502).json({ error: 'No se pudo enviar el email de invitación. Intenta de nuevo.' });
+    }
+
+    return res.json({ ok: true, message: `Invitación enviada a ${renter.email}` });
+  } catch (e) {
+    return fail(res, e);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
 // WEBHOOK: POST /api/chair-rentals/webhook
 // Recibe eventos de Connected Accounts (Connect webhook secret).
 // Maneja invoice.paid, invoice.payment_failed, subscription.deleted.

@@ -61,6 +61,18 @@ export const getRoleFromToken = (): number | null => {
 };
 
 
+// Tipo de empleo: 'employee' | 'renter' (estilista de Coworking)
+export const getEmploymentTypeFromToken = (): string | null => {
+  const dec = getDecodedToken();
+  return dec?.user?.employment_type || null;
+};
+
+// True si el usuario logueado es un estilista de Coworking (renter)
+export const isCoworkingRenter = (): boolean => {
+  const dec = getDecodedToken();
+  return dec?.user?.role_id === 3 && dec?.user?.employment_type === "renter";
+};
+
 export const getIsPrimaryBranch = (): boolean => {
   const dec = getDecodedToken();
   // Standalone salons (no parent) are always considered primary

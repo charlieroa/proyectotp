@@ -73,6 +73,10 @@ const AIAssistant = Loadable(React.lazy(() => import("../pages/AIAssistant")));
 // Super Admin
 const SuperAdminDashboard = Loadable(React.lazy(() => import("../pages/SuperAdmin")));
 
+// Portal del estilista de Coworking (renter)
+const MiCoworking = Loadable(React.lazy(() => import("../pages/StylistPortal/MiCoworking")));
+const MiAgenda = Loadable(React.lazy(() => import("../pages/StylistPortal/MiAgenda")));
+
 // --- NUESTRAS RUTAS PROTEGIDAS ---
 const authProtectedRoutes = [
   // Asistente IA
@@ -85,6 +89,10 @@ const authProtectedRoutes = [
 
   // Super Admin
   { path: "/super-admin", component: SuperAdminDashboard() },
+
+  // Portal del estilista de Coworking (renter)
+  { path: "/mi-coworking", component: MiCoworking() },
+  { path: "/mi-agenda", component: MiAgenda() },
 
   // Calendario
   { path: "/calendar", component: Calendar() },

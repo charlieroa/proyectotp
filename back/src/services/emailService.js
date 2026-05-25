@@ -325,6 +325,52 @@ async function sendRenterStatusEmail({ to, firstName, tenantName, monthlyCop, da
   });
 }
 
+/**
+ * Invitación de acceso para un estilista de Coworking.
+ * Reutiliza el flujo de reset-password (mismo /reset-password/:token) pero con
+ * copy de activación de cuenta.
+ */
+async function sendCoworkingInviteEmail({ email, token, firstName, tenantName }) {
+  const activateUrl = `${FRONTEND_URL}/reset-password/${token}`;
+
+  const html = `
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #ffffff;">
+      <div style="background: linear-gradient(135deg, #438eff 0%, #6c5ce7 100%); padding: 40px 30px; text-align: center; border-radius: 8px 8px 0 0;">
+        <h1 style="color: #ffffff; margin: 0; font-size: 28px;">Tupelukeria</h1>
+        <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0; font-size: 16px;">Tu espacio de Coworking</p>
+      </div>
+      <div style="padding: 30px;">
+        <div style="text-align: center; margin-bottom: 25px;">
+          <div style="width: 64px; height: 64px; background: #e8f0ff; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;">
+            <span style="font-size: 32px;">💈</span>
+          </div>
+        </div>
+        <h2 style="color: #333; text-align: center;">Activa tu cuenta</h2>
+        <p style="color: #666;">Hola${firstName ? ` <strong>${firstName}</strong>` : ''},</p>
+        <p style="color: #666;">${tenantName || 'Tu salón'} te dio acceso a tu espacio de <strong>Coworking</strong> en Tupelukeria. Allí podrás ver el estado de tu Coworking, tus pagos, tu agenda y actualizar tu método de pago.</p>
+        <p style="color: #666;">Crea tu contraseña para ingresar. Tu usuario es este mismo correo (<strong>${email}</strong>).</p>
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${activateUrl}"
+             style="background-color: #438eff; color: white; padding: 14px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
+            Crear mi contraseña
+          </a>
+        </div>
+        <p style="color: #888; font-size: 13px; text-align: center;">Este enlace expira en 72 horas. Si no esperabas este correo, puedes ignorarlo.</p>
+      </div>
+      <hr style="border: none; border-top: 1px solid #eee; margin: 0;" />
+      <p style="color: #999; font-size: 12px; text-align: center; padding: 20px;">
+        &copy; ${new Date().getFullYear()} Tupelukeria. Todos los derechos reservados.
+      </p>
+    </div>
+  `;
+
+  return sendEmail({
+    to: email,
+    subject: `Activa tu cuenta de Coworking en ${tenantName || 'Tupelukeria'}`,
+    html,
+  });
+}
+
 module.exports = {
   sendEmail,
   sendPasswordResetEmail,
@@ -333,4 +379,5 @@ module.exports = {
   sendStylistWelcomeEmail,
   sendCampaignEmail,
   sendRenterStatusEmail,
+  sendCoworkingInviteEmail,
 };

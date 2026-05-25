@@ -370,6 +370,24 @@ const ChairRentalTab: React.FC = () => {
     }
   };
 
+  const onInvite = async (r: Renter) => {
+    const conf = await Swal.fire({
+      icon: 'question',
+      title: `Enviar invitación de acceso a ${r.first_name}?`,
+      html: `Se enviará un correo a <strong>${r.email}</strong> para que cree su contraseña e ingrese a su espacio de Coworking en Tupelukeria.`,
+      showCancelButton: true,
+      confirmButtonText: 'Sí, enviar invitación',
+      confirmButtonColor: '#3577f1',
+    });
+    if (!conf.isConfirmed) return;
+    try {
+      const { data } = await api.post<{ message: string }>(`/chair-rentals/renters/${r.id}/invite`, {});
+      Swal.fire('Invitación enviada', data?.message || `Se envió la invitación a ${r.email}`, 'success');
+    } catch (e: any) {
+      Swal.fire('Error', e?.response?.data?.error || 'No se pudo enviar la invitación', 'error');
+    }
+  };
+
   const onRemove = async (r: Renter) => {
     const conf = await Swal.fire({
       icon: 'warning',
@@ -666,6 +684,9 @@ const ChairRentalTab: React.FC = () => {
                             </Button>
                             <Button size="sm" color="light" className="me-1" onClick={() => onResendLink(r)} title="Enlace de pago">
                               <i className="ri-link"></i>
+                            </Button>
+                            <Button size="sm" color="light" className="me-1" onClick={() => onInvite(r)} title="Enviar invitación de acceso (login)">
+                              <i className="ri-mail-send-line"></i>
                             </Button>
                             <Button size="sm" color="light" className="text-danger" onClick={() => onRemove(r)} title="Quitar">
                               <i className="ri-delete-bin-line"></i>
