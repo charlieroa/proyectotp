@@ -198,7 +198,7 @@ const ChairRentalTab: React.FC = () => {
   const [eligibleStaff, setEligibleStaff] = useState<EligibleStaff[]>([]);
   const [staffLoading, setStaffLoading] = useState(false);
   const [staffSearch, setStaffSearch] = useState('');
-  const [selectedStaffId, setSelectedStaffId] = useState<string>('');
+  const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
   const [addForm, setAddForm] = useState({ first_name: '', last_name: '', email: '', phone: '', monthly_rent_cop: '' });
   const [addBusy, setAddBusy] = useState(false);
 
@@ -211,6 +211,9 @@ const ChairRentalTab: React.FC = () => {
   const [chargeOpen, setChargeOpen] = useState(false);
   const [chargeForm, setChargeForm] = useState({ amount_cop: '', description: '' });
   const [chargeBusy, setChargeBusy] = useState(false);
+
+  // Vincular / agregar tarjeta desde el detalle
+  const [linkingCard, setLinkingCard] = useState(false);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -289,7 +292,7 @@ const ChairRentalTab: React.FC = () => {
   const openAddModal = async () => {
     setAddOpen(true);
     setAddMode('existing');
-    setSelectedStaffId('');
+    setSelectedStaffIds([]);
     setStaffSearch('');
     setAddForm({ first_name: '', last_name: '', email: '', phone: '', monthly_rent_cop: '' });
     setStaffLoading(true);
@@ -313,32 +316,40 @@ const ChairRentalTab: React.FC = () => {
     });
   }, [eligibleStaff, staffSearch]);
 
-  const onAddSubmit = async () => {
-    const monthly = Number(addForm.monthly_rent_cop);
-    if (!monthly) {
-      Swal.fire('Faltan datos', 'El precio mensual es obligatorio', 'warning');
+  const toggleStaff = (id: string) => {
+    setSelectedStaffIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  // "Seleccionar todos" opera sobre los visibles tras el filtro de búsqueda.
+  const allFilteredSelected =
+    filteredStaff.length > 0 && filteredStaff.every((s) => selectedStaffIds.includes(s.id));
+
+  const toggleSelectAll = () => {
+    setSelectedStaffIds((prev) => {
+      const visibleIds = filteredStaff.map((s) => s.id);
+      if (visibleIds.every((id) => prev.includes(id))) {
+        // todos los visibles ya estaban → des-seleccionarlos
+        return prev.filter((id) => !visibleIds.includes(id));
+      }
+      // agregar los visibles que falten, conservando los ya seleccionados (fuera del filtro)
+      return Array.from(new Set([...prev, ...visibleIds]));
+    });
+  };
+
+  // Modo "Crear nuevo": un solo estilista, muestra link de setup para copiar.
+  const submitNewRenter = async (monthly: number) => {
+    if (!addForm.first_name || !addForm.email) {
+      Swal.fire('Faltan datos', 'Nombre y email son obligatorios', 'warning');
       return;
     }
-
-    let payload: any = { monthly_rent_cop: monthly };
-
-    if (addMode === 'existing') {
-      if (!selectedStaffId) {
-        Swal.fire('Faltan datos', 'Selecciona un estilista de la lista', 'warning');
-        return;
-      }
-      payload.user_id = selectedStaffId;
-    } else {
-      if (!addForm.first_name || !addForm.email) {
-        Swal.fire('Faltan datos', 'Nombre y email son obligatorios', 'warning');
-        return;
-      }
-      payload = { ...payload, ...addForm, monthly_rent_cop: monthly };
-    }
-
     setAddBusy(true);
     try {
-      const { data } = await api.post<{ setup_url: string }>('/chair-rentals/renters', payload);
+      const { data } = await api.post<{ setup_url: string }>('/chair-rentals/renters', {
+        ...addForm,
+        monthly_rent_cop: monthly,
+      });
       setAddOpen(false);
       await loadAll();
       await Swal.fire({
@@ -353,6 +364,93 @@ const ChairRentalTab: React.FC = () => {
       Swal.fire('Error', e?.response?.data?.error || 'No se pudo agregar el estilista', 'error');
     } finally {
       setAddBusy(false);
+    }
+  };
+
+  // Modo "Desde mi personal": agrega en lote los seleccionados con el mismo
+  // precio y le envía a cada uno la invitación de acceso por email.
+  const submitBulkExisting = async (monthly: number) => {
+    const ids = [...selectedStaffIds];
+    if (ids.length === 0) {
+      Swal.fire('Faltan datos', 'Selecciona al menos un estilista de la lista', 'warning');
+      return;
+    }
+    const byId = new Map(eligibleStaff.map((s) => [s.id, s]));
+    const nameOf = (id: string) => {
+      const s = byId.get(id);
+      return s ? [s.first_name, s.last_name].filter(Boolean).join(' ') : id;
+    };
+
+    setAddBusy(true);
+    try {
+      // 1) Agregar cada estilista al coworking (crea customer + price diario).
+      const added = await Promise.all(
+        ids.map(async (id) => {
+          try {
+            await api.post('/chair-rentals/renters', { user_id: id, monthly_rent_cop: monthly });
+            return { id, ok: true as const, error: null as string | null };
+          } catch (e: any) {
+            return { id, ok: false as const, error: e?.response?.data?.error || 'No se pudo agregar' };
+          }
+        })
+      );
+
+      // 2) Para los agregados con éxito, enviar invitación de acceso por email.
+      const okIds = added.filter((a) => a.ok).map((a) => a.id);
+      const invited = await Promise.all(
+        okIds.map(async (id) => {
+          try {
+            await api.post(`/chair-rentals/renters/${id}/invite`, {});
+            return { id, emailed: true as const, error: null as string | null };
+          } catch (e: any) {
+            return { id, emailed: false as const, error: e?.response?.data?.error || 'No se pudo invitar' };
+          }
+        })
+      );
+      const invMap = new Map(invited.map((i) => [i.id, i]));
+
+      setAddOpen(false);
+      await loadAll();
+
+      const successRows = added
+        .filter((a) => a.ok)
+        .map((a) => {
+          const inv = invMap.get(a.id);
+          const mailIcon = inv?.emailed
+            ? '<i class="ri-mail-check-line text-success"></i> invitado'
+            : '<i class="ri-mail-close-line text-warning"></i> sin email';
+          return `<li><strong>${nameOf(a.id)}</strong> — ${mailIcon}</li>`;
+        });
+      const failRows = added
+        .filter((a) => !a.ok)
+        .map((a) => `<li><strong>${nameOf(a.id)}</strong> — <span class="text-danger">${a.error}</span></li>`);
+
+      await Swal.fire({
+        icon: failRows.length ? 'warning' : 'success',
+        title: `${successRows.length} estilista${successRows.length === 1 ? '' : 's'} agregado${successRows.length === 1 ? '' : 's'} al coworking`,
+        html: `
+          <div style="text-align:left">
+            ${successRows.length ? `<p class="mb-1">Se les envió la invitación de acceso por email para que ingresen y guarden su tarjeta:</p><ul style="padding-left:18px">${successRows.join('')}</ul>` : ''}
+            ${failRows.length ? `<p class="mb-1 mt-2 text-danger">No se pudieron agregar:</p><ul style="padding-left:18px">${failRows.join('')}</ul>` : ''}
+          </div>`,
+      });
+    } catch (e: any) {
+      Swal.fire('Error', e?.response?.data?.error || 'No se pudo agregar el lote', 'error');
+    } finally {
+      setAddBusy(false);
+    }
+  };
+
+  const onAddSubmit = async () => {
+    const monthly = Number(addForm.monthly_rent_cop);
+    if (!monthly) {
+      Swal.fire('Faltan datos', 'El precio mensual es obligatorio', 'warning');
+      return;
+    }
+    if (addMode === 'existing') {
+      await submitBulkExisting(monthly);
+    } else {
+      await submitNewRenter(monthly);
     }
   };
 
@@ -424,6 +522,35 @@ const ChairRentalTab: React.FC = () => {
     if (!detail) return;
     setChargeForm({ amount_cop: '', description: '' });
     setChargeOpen(true);
+  };
+
+  // Genera el enlace para que el estilista guarde/actualice su tarjeta.
+  // - Sin suscripción aún → setup-link (activa la suscripción diaria al guardar).
+  // - Con suscripción → payment-link (actualiza la tarjeta existente).
+  const onLinkCardFromDetail = async () => {
+    if (!detail) return;
+    const r = detail.renter;
+    const updating = !!detail.default_card; // ya tiene tarjeta → es actualización
+    const endpoint = r.has_subscription
+      ? `/chair-rentals/renters/${r.id}/payment-link`
+      : `/chair-rentals/renters/${r.id}/setup-link`;
+    setLinkingCard(true);
+    try {
+      const { data } = await api.post<{ setup_url?: string; url?: string }>(endpoint, {});
+      const url = data.setup_url || data.url || '';
+      setLinkingCard(false);
+      await Swal.fire({
+        icon: 'success',
+        title: updating ? 'Enlace para actualizar tarjeta' : 'Enlace para vincular tarjeta',
+        html: `Envíale este enlace a <strong>${[r.first_name, r.last_name].filter(Boolean).join(' ')}</strong> para que ${updating ? 'actualice' : 'guarde'} su tarjeta:<br/><br/>
+          <a href="${url}" target="_blank" rel="noopener">${url.slice(0, 60)}…</a>
+          <br/><br/>${r.has_subscription ? 'La tarjeta nueva se usará en el próximo cobro.' : 'Cuando complete el setup, la suscripción diaria se activa.'}`,
+        confirmButtonText: 'Copiar enlace',
+      }).then(() => navigator.clipboard?.writeText(url));
+    } catch (e: any) {
+      setLinkingCard(false);
+      Swal.fire('Error', e?.response?.data?.error || 'No se pudo generar el enlace de tarjeta', 'error');
+    }
   };
 
   const onChargeSubmit = async () => {
@@ -730,7 +857,7 @@ const ChairRentalTab: React.FC = () => {
 
           {addMode === 'existing' ? (
             <>
-              <FormGroup>
+              <FormGroup className="mb-2">
                 <InputGroup>
                   <InputGroupText className="bg-light"><i className="ri-search-line"></i></InputGroupText>
                   <Input
@@ -740,6 +867,26 @@ const ChairRentalTab: React.FC = () => {
                   />
                 </InputGroup>
               </FormGroup>
+              {filteredStaff.length > 0 && (
+                <div className="d-flex justify-content-between align-items-center mb-2 px-1">
+                  <FormGroup check className="mb-0">
+                    <Input
+                      type="checkbox"
+                      id="cr-select-all"
+                      checked={allFilteredSelected}
+                      onChange={toggleSelectAll}
+                    />
+                    <Label check for="cr-select-all" className="ms-1 fs-13 fw-medium" style={{ cursor: 'pointer' }}>
+                      Seleccionar todos {staffSearch ? '(filtrados)' : ''}
+                    </Label>
+                  </FormGroup>
+                  {selectedStaffIds.length > 0 && (
+                    <Badge color="primary" pill>
+                      {selectedStaffIds.length} seleccionado{selectedStaffIds.length === 1 ? '' : 's'}
+                    </Badge>
+                  )}
+                </div>
+              )}
               <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid #e9ebec', borderRadius: 8 }}>
                 {staffLoading ? (
                   <div className="text-center p-4"><Spinner size="sm" /></div>
@@ -754,11 +901,11 @@ const ChairRentalTab: React.FC = () => {
                   </div>
                 ) : (
                   filteredStaff.map((s, idx) => {
-                    const selected = selectedStaffId === s.id;
+                    const selected = selectedStaffIds.includes(s.id);
                     return (
                       <div
                         key={s.id}
-                        onClick={() => setSelectedStaffId(s.id)}
+                        onClick={() => toggleStaff(s.id)}
                         style={{
                           padding: '10px 14px',
                           cursor: 'pointer',
@@ -770,6 +917,14 @@ const ChairRentalTab: React.FC = () => {
                           transition: 'background 0.15s',
                         }}
                       >
+                        <Input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={() => toggleStaff(s.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="mt-0 flex-shrink-0"
+                          style={{ cursor: 'pointer' }}
+                        />
                         <Avatar first={s.first_name} last={s.last_name} id={s.id} size={40} />
                         <div className="flex-grow-1">
                           <div className="fw-medium">{[s.first_name, s.last_name].filter(Boolean).join(' ')}</div>
@@ -781,16 +936,13 @@ const ChairRentalTab: React.FC = () => {
                         {s.employment_type === 'renter' && (
                           <Badge color="warning" pill>renter previo</Badge>
                         )}
-                        <div style={{ width: 24 }}>
-                          {selected && <i className="ri-check-line text-success" style={{ fontSize: 20 }}></i>}
-                        </div>
                       </div>
                     );
                   })
                 )}
               </div>
               <FormGroup className="mt-3">
-                <Label className="mb-1 fw-medium">Precio mensual</Label>
+                <Label className="mb-1 fw-medium">Precio mensual (igual para todos los seleccionados)</Label>
                 <InputGroup>
                   <InputGroupText>$</InputGroupText>
                   <Input
@@ -803,7 +955,8 @@ const ChairRentalTab: React.FC = () => {
                   <InputGroupText>COP</InputGroupText>
                 </InputGroup>
                 <small className="text-muted">
-                  Stripe cobra el equivalente diario: <strong>{addForm.monthly_rent_cop ? fmtCop(Number(addForm.monthly_rent_cop) / 30) : '—'}/día</strong>.
+                  Stripe cobra a cada uno el equivalente diario: <strong>{addForm.monthly_rent_cop ? fmtCop(Number(addForm.monthly_rent_cop) / 30) : '—'}/día</strong>.
+                  {' '}Puedes ajustar el precio individual luego en cada detalle.
                 </small>
               </FormGroup>
             </>
@@ -860,7 +1013,13 @@ const ChairRentalTab: React.FC = () => {
         <ModalFooter>
           <Button color="light" onClick={() => setAddOpen(false)}>Cancelar</Button>
           <Button color="primary" onClick={onAddSubmit} disabled={addBusy}>
-            {addBusy ? <Spinner size="sm" /> : <><i className="ri-send-plane-line me-1"></i> Crear y enviar link</>}
+            {addBusy ? (
+              <Spinner size="sm" />
+            ) : addMode === 'existing' ? (
+              <><i className="ri-mail-send-line me-1"></i> Agregar{selectedStaffIds.length ? ` ${selectedStaffIds.length}` : ''} e invitar</>
+            ) : (
+              <><i className="ri-send-plane-line me-1"></i> Crear y enviar link</>
+            )}
           </Button>
         </ModalFooter>
       </Modal>
@@ -923,16 +1082,37 @@ const ChairRentalTab: React.FC = () => {
                         <strong>{fmtCop(detail.renter.monthly_rent_cop)}</strong>
                       </div>
                       {detail.default_card ? (
-                        <div className="d-flex align-items-center gap-2 mb-2">
+                        <div className="d-flex align-items-center flex-wrap gap-2 mb-2">
                           <i className={`${cardBrandIcon(detail.default_card.brand)} text-primary`} style={{ fontSize: 18 }}></i>
                           <span>{detail.default_card.brand?.toUpperCase()} •••• {detail.default_card.last4}</span>
                           <small className="text-muted">
                             exp {String(detail.default_card.exp_month).padStart(2, '0')}/{String(detail.default_card.exp_year).slice(-2)}
                           </small>
+                          <Button
+                            color="link"
+                            size="sm"
+                            className="p-0 ms-1"
+                            onClick={onLinkCardFromDetail}
+                            disabled={linkingCard}
+                            title="Generar enlace para actualizar la tarjeta"
+                          >
+                            {linkingCard ? <Spinner size="sm" /> : <><i className="ri-refresh-line me-1"></i>Cambiar</>}
+                          </Button>
                         </div>
                       ) : (
-                        <div className="text-warning mb-2">
-                          <i className="ri-error-warning-line me-1"></i> Sin tarjeta guardada
+                        <div className="mb-2">
+                          <div className="text-warning mb-2">
+                            <i className="ri-error-warning-line me-1"></i> Sin tarjeta guardada
+                          </div>
+                          <Button
+                            color="primary"
+                            size="sm"
+                            outline
+                            onClick={onLinkCardFromDetail}
+                            disabled={linkingCard}
+                          >
+                            {linkingCard ? <Spinner size="sm" /> : <><i className="ri-bank-card-line me-1"></i> Vincular tarjeta</>}
+                          </Button>
                         </div>
                       )}
                       {detail.subscription ? (
