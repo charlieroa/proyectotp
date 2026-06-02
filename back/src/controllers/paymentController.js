@@ -3,6 +3,7 @@
 // VERSIÓN FINAL CORREGIDA - Migrado a Prisma ORM
 // =============================================
 const prisma = require('../config/prisma');
+const { getOrCreateOpenSession } = require('../utils/cashSession');
 
 /**
  * Crea una factura, sus ítems (servicios y productos), actualiza el stock,
@@ -89,14 +90,8 @@ exports.createInvoiceAndPayments = async (req, res) => {
         }
       }
 
-      // 1) Validar sesion de caja del cajero actual
-      const openSession = await tx.cash_sessions.findFirst({
-        where: { tenant_id: effectiveTenantId, status: 'OPEN', opened_by_user_id: cashier_id },
-        select: { id: true }
-      });
-      if (!openSession) {
-        throw new Error("No tienes una sesion de caja abierta. Abre tu caja antes de procesar pagos.");
-      }
+      // 1) Sesion de caja del cajero (apertura automatica si no tiene una abierta)
+      const openSession = await getOrCreateOpenSession(tx, effectiveTenantId, cashier_id);
       const cash_session_id = openSession.id;
 
       if (products.length > 0) {
@@ -341,7 +336,8 @@ exports.sendElectronicInvoice = async (req, res) => {
         id: true,
         total_amount: true,
         tip_amount: true,
-        clients: { select: { first_name: true, last_name: true } },
+        client_name_adhoc: true,
+        users: { select: { first_name: true, last_name: true } },
         tenants: { select: { name: true } },
         invoice_items: {
           select: { description: true, quantity: true, unit_price: true, total_price: true, item_type: true }
@@ -357,7 +353,10 @@ exports.sendElectronicInvoice = async (req, res) => {
       return res.status(404).json({ error: 'Factura no encontrada.' });
     }
 
-    const clientName = `${invoice.clients?.first_name || ''} ${invoice.clients?.last_name || ''}`.trim();
+    const clientName =
+      `${invoice.users?.first_name || ''} ${invoice.users?.last_name || ''}`.trim() ||
+      invoice.client_name_adhoc ||
+      'Cliente';
     const paymentMethod = invoice.payments?.[0]?.payment_method || 'mixed';
 
     const { sendInvoiceEmail } = require('../services/emailService');

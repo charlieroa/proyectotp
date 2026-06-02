@@ -123,6 +123,9 @@ const itemLineName = (it: InvoiceItem): string => {
   return "Ítem";
 };
 
+const isValidEmail = (raw: string): boolean =>
+  /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(raw || "").trim());
+
 // Strip non-numeric chars and parse as integer (es-CO format-tolerant).
 const parseAmount = (raw: string): number => {
   const cleaned = String(raw || "").replace(/[^\d.,-]/g, "").replace(/,/g, ".");
@@ -173,9 +176,15 @@ const PayTicketDrawer: React.FC<PayTicketDrawerProps> = ({
 
   const [submitting, setSubmitting] = useState<boolean>(false);
 
+  // Factura por correo (el cliente la pide).
+  const [wantsInvoice, setWantsInvoice] = useState<boolean>(false);
+  const [invoiceEmail, setInvoiceEmail] = useState<string>("");
+
   // ---------- Reset on open / new ticket ----------
   useEffect(() => {
     if (!isOpen) return;
+    setWantsInvoice(false);
+    setInvoiceEmail("");
     setPaymentMethod("cash");
     setCashReceivedRaw("");
     setCardAmountRaw("");
@@ -304,6 +313,8 @@ const PayTicketDrawer: React.FC<PayTicketDrawerProps> = ({
     if (!ticket || loading || submitting) return false;
     if (ticket.invoice_items.length === 0) return false;
     if (grandTotal <= 0) return false;
+    // Si pidió factura, el correo debe ser válido antes de cobrar.
+    if (wantsInvoice && !isValidEmail(invoiceEmail)) return false;
     if (paymentMethod === "cash") {
       // Allow cash even if no "received" entered (assume exact change).
       if (cashReceivedRaw.trim() !== "" && cashReceived < grandTotal) return false;
@@ -320,6 +331,7 @@ const PayTicketDrawer: React.FC<PayTicketDrawerProps> = ({
   }, [
     ticket, loading, submitting, grandTotal, paymentMethod,
     cashReceivedRaw, cashReceived, mixedValid, mixedCash, mixedCard,
+    wantsInvoice, invoiceEmail,
   ]);
 
   // ---------- Side-effect helper ----------
@@ -415,20 +427,33 @@ const PayTicketDrawer: React.FC<PayTicketDrawerProps> = ({
       if ((paymentMethod === "card" || paymentMethod === "mixed") && voucher.trim()) {
         body.voucher = voucher.trim();
       }
+      const wantsInvoiceEmail = wantsInvoice && isValidEmail(invoiceEmail);
+      if (wantsInvoiceEmail) {
+        body.invoice_email = invoiceEmail.trim();
+      }
 
-      await api.post(`/tickets/${ticket.id}/close`, body);
+      const { data } = await api.post(`/tickets/${ticket.id}/close`, body);
 
       dispatchTicketEvent();
 
+      const emailed = wantsInvoiceEmail && (data as any)?.invoice_emailed;
       void Swal.fire({
         toast: true,
         position: "top-end",
         icon: "success",
-        title: "Pagado",
+        title: emailed ? "Pagado · factura enviada" : "Pagado",
         showConfirmButton: false,
         timer: 1800,
         timerProgressBar: true,
       });
+      if (wantsInvoiceEmail && !emailed) {
+        // El cobro quedó hecho pero el correo falló; lo avisamos sin bloquear.
+        void Swal.fire({
+          icon: "warning",
+          title: "Cobro exitoso, pero no se pudo enviar la factura",
+          text: `Revisa el correo "${invoiceEmail.trim()}" e inténtalo de nuevo desde el detalle de la venta.`,
+        });
+      }
 
       onPaid();
       onClose();
@@ -1297,6 +1322,47 @@ const PayTicketDrawer: React.FC<PayTicketDrawerProps> = ({
                 bottom: 0,
               }}
             >
+              {/* Factura por correo (el cliente la pide) */}
+              <div className="mb-2">
+                <div className="form-check form-switch">
+                  <Input
+                    type="switch"
+                    role="switch"
+                    id="pay-wants-invoice"
+                    checked={wantsInvoice}
+                    disabled={submitting}
+                    onChange={(e) => setWantsInvoice(e.target.checked)}
+                  />
+                  <Label
+                    for="pay-wants-invoice"
+                    className="form-check-label text-body"
+                    style={{ fontSize: 13, cursor: "pointer" }}
+                  >
+                    <i className="ri-mail-send-line me-1" />
+                    El cliente pide factura por correo
+                  </Label>
+                </div>
+                {wantsInvoice && (
+                  <div className="mt-2">
+                    <Input
+                      type="email"
+                      value={invoiceEmail}
+                      onChange={(e) => setInvoiceEmail(e.target.value)}
+                      placeholder="correo@cliente.com"
+                      disabled={submitting}
+                      bsSize="sm"
+                      className="bg-white"
+                      invalid={invoiceEmail.length > 0 && !isValidEmail(invoiceEmail)}
+                    />
+                    {invoiceEmail.length > 0 && !isValidEmail(invoiceEmail) && (
+                      <div className="text-danger" style={{ fontSize: 11, marginTop: 2 }}>
+                        Correo inválido.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div
                 className="bg-light-subtle p-2 mb-2"
                 style={{ borderRadius: 8 }}

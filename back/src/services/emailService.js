@@ -194,7 +194,7 @@ async function sendInvoiceEmail({ to, clientName, invoiceId, items, totalAmount,
   `;
 
   return sendEmail({
-    to: email,
+    to,
     subject: `Comprobante de compra #${shortId} - ${tenantName || 'Tu Peluquería'}`,
     html,
   });

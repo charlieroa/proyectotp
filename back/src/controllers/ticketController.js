@@ -5,6 +5,7 @@
 
 const prisma = require('../config/prisma');
 const { getIO } = require('../socket');
+const { getOrCreateOpenSession } = require('../utils/cashSession');
 
 const OPEN_STATUS = 'open';
 const PAID_STATUS = 'paid';
@@ -541,14 +542,13 @@ exports.closeTicket = async (req, res) => {
     // Caja: para método 'cash' es obligatorio que el cajero tenga sesión abierta.
     // Para tarjeta/transferencia se intenta vincular a la sesión abierta pero no es
     // bloqueante (el movimiento no entra a caja efectivo).
-    const openSession = await prisma.cash_sessions.findFirst({
+    let openSession = await prisma.cash_sessions.findFirst({
       where: { tenant_id, status: 'OPEN', opened_by_user_id: user_id },
       select: { id: true }
     });
+    // Apertura automática (protocolo) para cobros en efectivo sin caja abierta.
     if (method === 'cash' && !openSession) {
-      return res.status(400).json({
-        error: 'No tienes una sesión de caja abierta. Abre tu caja antes de cobrar en efectivo.'
-      });
+      openSession = await getOrCreateOpenSession(prisma, tenant_id, user_id);
     }
     const cash_session_id = openSession ? openSession.id : null;
 
@@ -641,7 +641,48 @@ exports.closeTicket = async (req, res) => {
 
     const full = await loadTicket(invoice.id, tenant_id);
     emit(tenant_id, 'ticket:closed', full);
-    return res.json({ ok: true, invoice: result, ticket: full });
+
+    // Factura por correo: si el cliente la pidió (se envió invoice_email),
+    // mandamos el comprobante por Resend. No es bloqueante: si falla el
+    // correo, el cobro ya quedó hecho.
+    let invoice_emailed = false;
+    const invoiceEmail = String(req.body?.invoice_email || '').trim();
+    if (invoiceEmail && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(invoiceEmail)) {
+      try {
+        const inv = await prisma.invoices.findFirst({
+          where: { id: invoice.id, tenant_id },
+          select: {
+            id: true,
+            total_amount: true,
+            client_name_adhoc: true,
+            users: { select: { first_name: true, last_name: true } },
+            tenants: { select: { name: true } },
+            invoice_items: {
+              select: { description: true, quantity: true, unit_price: true, total_price: true, item_type: true },
+            },
+          },
+        });
+        const clientName =
+          `${inv?.users?.first_name || ''} ${inv?.users?.last_name || ''}`.trim() ||
+          inv?.client_name_adhoc ||
+          'Cliente';
+        const { sendInvoiceEmail } = require('../services/emailService');
+        await sendInvoiceEmail({
+          to: invoiceEmail,
+          clientName,
+          invoiceId: inv.id,
+          items: inv.invoice_items,
+          totalAmount: Number(inv.total_amount),
+          tenantName: inv.tenants?.name,
+          paymentMethod: method,
+        });
+        invoice_emailed = true;
+      } catch (mailErr) {
+        console.error('closeTicket: no se pudo enviar la factura por correo:', mailErr?.message || mailErr);
+      }
+    }
+
+    return res.json({ ok: true, invoice: result, ticket: full, invoice_emailed });
   } catch (err) {
     console.error('closeTicket error:', err);
     return res.status(err.status || 500).json({ error: err.message || 'Error interno.' });

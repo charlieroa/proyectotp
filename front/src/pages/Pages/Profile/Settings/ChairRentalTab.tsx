@@ -79,6 +79,21 @@ const fmtCop = (v: any) => {
   return n.toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 });
 };
 
+// Versión compacta para que montos grandes no se salgan del contenedor en
+// pantallas pequeñas (13"). 15.750.000 → "$15,75 M", 750.000 → "$750 k".
+const fmtCopCompact = (v: any) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '—';
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) {
+    return `$${(n / 1_000_000).toLocaleString('es-CO', { maximumFractionDigits: 2 })} M`;
+  }
+  if (abs >= 1_000) {
+    return `$${Math.round(n / 1_000).toLocaleString('es-CO')} k`;
+  }
+  return `$${n.toLocaleString('es-CO')}`;
+};
+
 const fmtStripeAmount = (cents: number, currency: string) => {
   const v = (cents || 0) / 100;
   return v.toLocaleString('es-CO', { style: 'currency', currency: (currency || 'cop').toUpperCase(), maximumFractionDigits: 0 });
@@ -163,7 +178,7 @@ const cardBrandIcon = (brand?: string) => {
   return 'ri-bank-card-line';
 };
 
-const KpiCard: React.FC<{ icon: string; label: string; value: React.ReactNode; color: string; subtitle?: string }> = ({ icon, label, value, color, subtitle }) => (
+const KpiCard: React.FC<{ icon: string; label: string; value: React.ReactNode; color: string; subtitle?: string; valueTitle?: string }> = ({ icon, label, value, color, subtitle, valueTitle }) => (
   <Card className="card-animate h-100 mb-0">
     <CardBody>
       <div className="d-flex align-items-center">
@@ -175,7 +190,7 @@ const KpiCard: React.FC<{ icon: string; label: string; value: React.ReactNode; c
         </div>
         <div className="flex-grow-1 overflow-hidden">
           <p className="text-uppercase text-muted fs-12 mb-1 fw-medium">{label}</p>
-          <h4 className="mb-0 fw-semibold">{value}</h4>
+          <h4 className="mb-0 fw-semibold text-truncate" style={{ fontSize: '1.05rem' }} title={valueTitle}>{value}</h4>
           {subtitle && <small className="text-muted">{subtitle}</small>}
         </div>
       </div>
@@ -676,7 +691,8 @@ const ChairRentalTab: React.FC = () => {
               <KpiCard
                 icon="ri-money-dollar-circle-fill"
                 label="Ingreso mensual"
-                value={fmtCop(kpis.ingresoMensual)}
+                value={fmtCopCompact(kpis.ingresoMensual)}
+                valueTitle={fmtCop(kpis.ingresoMensual)}
                 color="#0ab39c"
                 subtitle={kpis.activos === 1 ? '1 activo' : `${kpis.activos} activos`}
               />
