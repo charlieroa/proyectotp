@@ -8,7 +8,7 @@ import Flatpickr from "react-flatpickr";
 import Select from 'react-select';
 import { useNavigate } from "react-router-dom";
 import TarjetaCita from './TarjetaCita';
-import AgendaRapida from './AgendaRapida';
+import NuevaAtencionModal from './NuevaAtencionModal';
 import api from '../../services/api';
 import Swal from 'sweetalert2';
 import { useTranslation } from 'react-i18next';
@@ -198,7 +198,7 @@ const CentroDeCitasDiarias = ({ events, onNewAppointmentClick, targetTenantId }:
     const [canGiveLoans, setCanGiveLoans] = useState(true);
     const [prestamo, setPrestamo] = useState({ stylist_id: '', amountDigits: '', weeks: '4', interest_percent: '5' });
     const [savingPrestamo, setSavingPrestamo] = useState(false);
-    const [agendaRapidaOpen, setAgendaRapidaOpen] = useState(false);
+    const [nuevaAtencionOpen, setNuevaAtencionOpen] = useState(false);
 
     // --- Estado para modal de movimientos de caja ---
     const [movimientosModalOpen, setMovimientosModalOpen] = useState(false);
@@ -387,7 +387,7 @@ const CentroDeCitasDiarias = ({ events, onNewAppointmentClick, targetTenantId }:
                                 {cashSession && <DropdownItem onClick={() => { setMovimientosModalOpen(true); fetchMovements(); }}><i className="ri-file-list-3-line me-2 text-info"></i> {t("cash_movements")}</DropdownItem>}
                                 <DropdownItem onClick={onNewAppointmentClick}><i className="mdi mdi-plus me-2"></i> {t("create_new_appointment")}</DropdownItem>
                                 <DropdownItem divider />
-                                <DropdownItem onClick={() => setAgendaRapidaOpen(true)}><i className="ri-flashlight-line me-2 text-success"></i> {t("quick_schedule")}</DropdownItem>
+                                <DropdownItem onClick={() => setNuevaAtencionOpen(true)}><i className="ri-flashlight-line me-2 text-primary"></i> {t("new_attention")}</DropdownItem>
                             </DropdownMenu>
                         </Dropdown>
                     )}
@@ -752,7 +752,7 @@ const CentroDeCitasDiarias = ({ events, onNewAppointmentClick, targetTenantId }:
                 </ModalFooter>
             </Modal>
 
-            <AgendaRapida isOpen={agendaRapidaOpen} onClose={() => setAgendaRapidaOpen(false)} targetTenantId={targetTenantId} />
+            <NuevaAtencionModal isOpen={nuevaAtencionOpen} onClose={() => setNuevaAtencionOpen(false)} targetTenantId={targetTenantId} />
         </Card>
     );
 };

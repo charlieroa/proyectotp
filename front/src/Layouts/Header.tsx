@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Dropdown, DropdownMenu, DropdownToggle, Form, Offcanvas, OffcanvasBody, OffcanvasHeader } from 'reactstrap';
-import AgendaRapida from '../Components/Calendar/AgendaRapida';
-import TicketsModal from '../Components/Tickets/TicketsModal';
+import NuevaAtencionModal from '../Components/Calendar/NuevaAtencionModal';
 import AIAssistant from '../pages/AIAssistant';
 import { api } from '../services/api';
 import { useTranslation } from 'react-i18next';
@@ -71,8 +70,7 @@ const Header = ({ onChangeLayoutMode, layoutModeType, headerClass, startTour }: 
     const sidebarVisibilitytype = useSelector(selectDashboardData);
 
     const [search, setSearch] = useState<boolean>(false);
-    const [agendaRapidaOpen, setAgendaRapidaOpen] = useState<boolean>(false);
-    const [ticketsModalOpen, setTicketsModalOpen] = useState<boolean>(false);
+    const [nuevaAtencionOpen, setNuevaAtencionOpen] = useState<boolean>(false);
     const [aiOpen, setAiOpen] = useState<boolean>(false);
     // Roles that can use quick agenda: Admin(1), Owner(2 - cashier), Receptionist(6)
     const canUseAgendaRapida = userRole && [1, 2, 3, 6].includes(userRole);
@@ -176,64 +174,29 @@ const Header = ({ onChangeLayoutMode, layoutModeType, headerClass, startTour }: 
                             </Dropdown>
 
                             {/*
-                                Acción primaria del topbar:
-                                - Si el flag ticket_virtual está ON → botón azul "Ticket" (walk-ins)
-                                - Si está OFF → botón verde "Agenda Rápida" (crear cita)
-                                Solo visible para roles 1 (admin), 2 (owner/cajera), 3 (estilista), 6 (recep).
+                                Acción primaria del topbar: un solo botón "Nueva atención" que
+                                abre el selector (Ticket vs Reserva, o Reserva vs Agenda Rápida
+                                si el salón no tiene ticket virtual). Roles 1/2/3/6.
                             */}
-                            {canUseAgendaRapida && ticketVirtualEnabled && [1, 2, 6].includes(userRole as number) ? (
-                                <>
-                                    <style>{`
-                                        @keyframes ticketPulseBorder {
-                                            0%   { box-shadow: 0 0 0 0 rgba(64,129,255,0.55), 0 2px 6px rgba(64,129,255,0.35); }
-                                            70%  { box-shadow: 0 0 0 6px rgba(64,129,255,0),   0 2px 6px rgba(64,129,255,0.35); }
-                                            100% { box-shadow: 0 0 0 0 rgba(64,129,255,0),     0 2px 6px rgba(64,129,255,0.35); }
-                                        }
-                                        .ticket-topbar-btn {
-                                            background: linear-gradient(135deg, #4081ff 0%, #2d5fd1 100%);
-                                            color: #fff;
-                                            border: 1.5px solid rgba(255,255,255,0.35);
-                                            border-radius: 20px;
-                                            font-size: 13px;
-                                            font-weight: 600;
-                                            padding: 5px 14px;
-                                            animation: ticketPulseBorder 2.2s ease-out infinite;
-                                            transition: transform 0.15s ease;
-                                        }
-                                        .ticket-topbar-btn:hover {
-                                            transform: translateY(-1px);
-                                            color: #fff;
-                                        }
-                                    `}</style>
-                                    <button
-                                        type="button"
-                                        className="btn btn-sm d-flex align-items-center gap-1 me-1 ticket-topbar-btn"
-                                        onClick={() => setTicketsModalOpen(true)}
-                                        title="Ticket Virtual (walk-in)"
-                                    >
-                                        <i className="ri-bill-line"></i>
-                                        <span className="d-none d-sm-inline">Ticket Virtual</span>
-                                    </button>
-                                </>
-                            ) : canUseAgendaRapida && (
+                            {canUseAgendaRapida && (
                                 <button
                                     type="button"
                                     className="btn btn-sm d-flex align-items-center gap-1 me-1"
-                                    onClick={() => setAgendaRapidaOpen(true)}
-                                    title="Agenda Rápida"
+                                    onClick={() => setNuevaAtencionOpen(true)}
+                                    title={t("new_attention")}
                                     style={{
-                                        background: 'linear-gradient(135deg, #0ab39c 0%, #099885 100%)',
+                                        background: 'linear-gradient(135deg, #4081ff 0%, #2d5fd1 100%)',
                                         color: '#fff',
                                         borderRadius: 20,
                                         fontSize: 13,
                                         fontWeight: 600,
                                         padding: '5px 14px',
-                                        border: 'none',
-                                        boxShadow: '0 2px 4px rgba(10,179,156,0.3)',
+                                        border: '1.5px solid rgba(255,255,255,0.35)',
+                                        boxShadow: '0 2px 4px rgba(64,129,255,0.3)',
                                     }}
                                 >
                                     <i className="ri-flashlight-line"></i>
-                                    <span className="d-none d-sm-inline">Agenda Rápida</span>
+                                    <span className="d-none d-sm-inline">{t("new_attention")}</span>
                                 </button>
                             )}
 
@@ -279,15 +242,10 @@ const Header = ({ onChangeLayoutMode, layoutModeType, headerClass, startTour }: 
                 </div>
             </header>
             {canUseAgendaRapida && (
-                <AgendaRapida
-                    isOpen={agendaRapidaOpen}
-                    onClose={() => setAgendaRapidaOpen(false)}
-                />
-            )}
-            {ticketVirtualEnabled && userRole && [1, 2, 6].includes(userRole) && (
-                <TicketsModal
-                    isOpen={ticketsModalOpen}
-                    onClose={() => setTicketsModalOpen(false)}
+                <NuevaAtencionModal
+                    isOpen={nuevaAtencionOpen}
+                    onClose={() => setNuevaAtencionOpen(false)}
+                    ticketEnabled={ticketVirtualEnabled}
                 />
             )}
             {[1].includes(userRole as number) && (
