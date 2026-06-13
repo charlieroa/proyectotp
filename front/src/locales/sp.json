@@ -332,6 +332,7 @@
     "quick_schedule": "Agenda Rápida",
     "cash_closed": "La caja está cerrada",
     "must_open_cash": "Debes abrir la caja para ver la agenda y registrar operaciones en efectivo.",
+    "cash_open_optional_hint": "La caja se abre sola al primer cobro. Puedes abrirla con base inicial si lo prefieres.",
     "expenses_staff_operations": "Egresos y Operaciones de Personal",
     "advance": "Anticipo",
     "invoice": "Factura",

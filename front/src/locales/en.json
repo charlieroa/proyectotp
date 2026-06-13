@@ -332,6 +332,7 @@
     "quick_schedule": "Quick Schedule",
     "cash_closed": "Cash drawer is closed",
     "must_open_cash": "You must open the cash drawer to view the schedule and record cash operations.",
+    "cash_open_optional_hint": "The drawer opens automatically on the first charge. You can open it with a starting balance if you prefer.",
     "expenses_staff_operations": "Expenses and Staff Operations",
     "advance": "Advance",
     "invoice": "Invoice",

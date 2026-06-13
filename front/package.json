@@ -18,6 +18,8 @@
     "@react-google-maps/api": "^2.20.3",
     "@reduxjs/toolkit": "^2.2.8",
     "@south-paw/react-vector-maps": "^3.2.0",
+    "@stripe/react-stripe-js": "^2.9.0",
+    "@stripe/stripe-js": "^4.10.0",
     "@tanstack/match-sorter-utils": "^8.19.4",
     "@tanstack/react-table": "^8.20.5",
     "@testing-library/jest-dom": "^6.5.0",

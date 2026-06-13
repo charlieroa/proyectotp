@@ -1,5 +1,6 @@
 // Ticket Virtual — crear ticket (desde topbar).
-// UX simple: busca cliente existente o cae en walk-in con el texto tipeado.
+// UX simple: busca cliente existente; si el nombre no existe, crea el cliente
+// en la BD (rol 4) y abre el ticket con él. Walk-in queda como opción secundaria.
 // Al crearse, emite window event 'ticketCreated' para que el calendario lo recargue.
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -20,10 +21,8 @@ import Swal from "sweetalert2";
 import { api } from "../../services/api";
 import { getTenantIdFromToken } from "../../services/auth";
 
-type ClientOpt = { id: string; first_name: string; last_name?: string; phone?: string };
-
-const fullName = (u?: { first_name?: string; last_name?: string } | null) =>
-  u ? `${u.first_name || ""} ${u.last_name || ""}`.trim() : "";
+// El endpoint /users/tenant/:id/clients devuelve { id, name, phone, ... } (name ya combinado).
+type ClientOpt = { id: string; name: string; phone?: string };
 
 interface TicketsModalProps {
   isOpen: boolean;
@@ -35,11 +34,13 @@ const TicketsModal: React.FC<TicketsModalProps> = ({ isOpen, onClose }) => {
   const tenantId = getTenantIdFromToken();
   const [clients, setClients] = useState<ClientOpt[]>([]);
   const [query, setQuery] = useState("");
+  const [newPhone, setNewPhone] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!isOpen || !tenantId) return;
     setQuery("");
+    setNewPhone("");
     api.get(`/users/tenant/${tenantId}/clients`)
       .then(({ data }) => setClients(Array.isArray(data) ? data : []))
       .catch(() => setClients([]));
@@ -50,11 +51,35 @@ const TicketsModal: React.FC<TicketsModalProps> = ({ isOpen, onClose }) => {
     const q = query.toLowerCase();
     return clients
       .filter((c) => {
-        const full = `${c.first_name || ""} ${c.last_name || ""}`.toLowerCase();
+        const full = (c.name || "").toLowerCase();
         return full.includes(q) || (c.phone || "").includes(q);
       })
       .slice(0, 6);
   }, [query, clients]);
+
+  // Crea el cliente en la BD (rol 4) con el nombre tipeado y abre el ticket con él.
+  const createClientAndOpen = async () => {
+    const raw = query.trim();
+    if (!raw || !tenantId) return;
+    const parts = raw.split(/\s+/);
+    const first_name = parts.shift() || raw;
+    const last_name = parts.join(" ") || null;
+    setSubmitting(true);
+    try {
+      const { data: client } = await api.post("/users", {
+        tenant_id: tenantId,
+        role_id: 4,
+        first_name,
+        last_name,
+        phone: newPhone.trim() || null,
+      });
+      // submit() maneja su propio setSubmitting; lo dejamos encadenar.
+      await submit({ client_id: client.id });
+    } catch (err: any) {
+      Swal.fire("Error", err?.response?.data?.error || "No se pudo crear el cliente.", "error");
+      setSubmitting(false);
+    }
+  };
 
   const submit = async (payload: { client_id?: string; client_name_adhoc?: string }) => {
     setSubmitting(true);
@@ -91,7 +116,7 @@ const TicketsModal: React.FC<TicketsModalProps> = ({ isOpen, onClose }) => {
             autoFocus
           />
           <small className="text-muted">
-            Si no está en la BD, lo abres como walk-in con el nombre tipeado.
+            Si el nombre no existe, lo creas como cliente nuevo (o lo abres como walk-in).
           </small>
         </FormGroup>
 
@@ -108,7 +133,7 @@ const TicketsModal: React.FC<TicketsModalProps> = ({ isOpen, onClose }) => {
                     disabled={submitting}
                   >
                     <div className="d-flex justify-content-between">
-                      <span>{fullName(c)}</span>
+                      <span>{c.name || "Cliente"}</span>
                       <small className="text-muted">{c.phone || ""}</small>
                     </div>
                   </ListGroupItem>
@@ -117,16 +142,36 @@ const TicketsModal: React.FC<TicketsModalProps> = ({ isOpen, onClose }) => {
             ) : (
               <div className="p-3 bg-light rounded">
                 <small className="text-muted d-block mb-2">
-                  No hay cliente con ese nombre. Abrir como <strong>walk-in</strong>:
+                  No hay ningún cliente con ese nombre. Créalo como cliente nuevo:
                 </small>
+                <Input
+                  type="tel"
+                  bsSize="sm"
+                  className="mb-2"
+                  placeholder="Teléfono (opcional)"
+                  value={newPhone}
+                  onChange={(e) => setNewPhone(e.target.value)}
+                />
                 <Button
                   color="primary"
                   size="sm"
+                  className="w-100 mb-2"
                   disabled={submitting}
-                  onClick={() => submit({ client_name_adhoc: query.trim() })}
+                  onClick={createClientAndOpen}
                 >
-                  {submitting ? <Spinner size="sm" /> : `Abrir como "${query.trim()}"`}
+                  {submitting ? <Spinner size="sm" /> : `Crear cliente "${query.trim()}" y abrir ticket`}
                 </Button>
+                <div className="text-center">
+                  <Button
+                    color="link"
+                    size="sm"
+                    className="text-muted p-0"
+                    disabled={submitting}
+                    onClick={() => submit({ client_name_adhoc: query.trim() })}
+                  >
+                    o abrir como walk-in (sin guardar)
+                  </Button>
+                </div>
               </div>
             )}
           </>

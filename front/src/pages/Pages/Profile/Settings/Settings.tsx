@@ -822,6 +822,17 @@ const Settings: React.FC = () => {
   const currentPlan = tenant?.plan || "free";
   const allowedTabs = PLAN_TABS[currentPlan] || PLAN_TABS.free;
 
+  // Coworking: el backend decide quién gestiona (rol 5 siempre; encargado
+  // designado del tenant si existe; si no, roles 1/2). Misma regla que el guard.
+  const [canManageCoworking, setCanManageCoworking] = useState(false);
+  useEffect(() => {
+    const roleId = decodeRoleId();
+    if (roleId === null || ![1, 2, 5].includes(roleId)) return;
+    api.get('/chair-rentals/access')
+      .then(({ data }) => setCanManageCoworking(!!data?.can_manage))
+      .catch(() => setCanManageCoworking(false));
+  }, []);
+
   const progress = useMemo(() => {
     const datosOk = !!(name.trim() && address.trim() && phone.trim());
     const hasActive = DAYS.some(({ key }) => perDay[key].active);
@@ -1120,16 +1131,18 @@ const Settings: React.FC = () => {
                         {tr('tab_plans')}
                       </NavLink>
                     </NavItem>
-                    <NavItem>
-                      <NavLink
-                        className={classnames({ active: activeTab === "7" })}
-                        onClick={() => tabChange("7")}
-                        style={{ cursor: 'pointer' }}
-                      >
-                        <i className="ri-armchair-line me-1"></i>
-                        Coworking
-                      </NavLink>
-                    </NavItem>
+                    {canManageCoworking && (
+                      <NavItem>
+                        <NavLink
+                          className={classnames({ active: activeTab === "7" })}
+                          onClick={() => tabChange("7")}
+                          style={{ cursor: 'pointer' }}
+                        >
+                          <i className="ri-armchair-line me-1"></i>
+                          Coworking
+                        </NavLink>
+                      </NavItem>
+                    )}
                   </Nav>
                 </CardHeader>
 
@@ -1653,7 +1666,7 @@ const Settings: React.FC = () => {
                     </>
                   )}
 
-                  {activeTab === "7" && <ChairRentalTab />}
+                  {activeTab === "7" && canManageCoworking && <ChairRentalTab />}
                 </CardBody>
               </Card>
             </Col>

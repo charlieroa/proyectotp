@@ -336,7 +336,7 @@ const CentroDeCitasDiarias = ({ events, onNewAppointmentClick, targetTenantId }:
 
     useEffect(() => { if (paymentsModalOpen) fetchPrerequisites(); }, [paymentsModalOpen]);
 
-    const gruposPorCliente = useMemo<GrupoCliente[]>(() => { if (!cashSession && !isRecepcionista) return []; const startOfDay = new Date(selectedDate); startOfDay.setHours(0, 0, 0, 0); const endOfDay = new Date(selectedDate); endOfDay.setHours(23, 59, 59, 999); const filtradas: CitaEvento[] = events.filter((event) => { if (event.extendedProps?._isTicket) return false; const fechaCita = new Date(event.start); const enFecha = fechaCita >= startOfDay && fechaCita <= endOfDay; const esOperativa = event.extendedProps.status !== 'cancelled' && event.extendedProps.status !== 'completed'; if (!enFecha || !esOperativa) return false; if (searchTerm) { const q = searchTerm.toLowerCase(); return (event.extendedProps.client_first_name?.toLowerCase().includes(q) || event.extendedProps.client_last_name?.toLowerCase().includes(q) || event.extendedProps.stylist_first_name?.toLowerCase().includes(q)); } return true; }); const map = new Map<string | number, GrupoCliente>(); for (const ev of filtradas) { const ep = ev.extendedProps || {}; const clientId = ep.client_id ?? ep.clientId; if (clientId == null) continue; const item = { id: ev.id, service_name: ep.service_name, stylist_first_name: ep.stylist_first_name, start_time: ep.start_time ?? ev.start, }; if (!map.has(clientId)) { map.set(clientId, { clientId, client_first_name: ep.client_first_name, client_last_name: ep.client_last_name, earliestStartISO: item.start_time, count: 1, appointments: [item], }); } else { const g = map.get(clientId)!; g.appointments.push(item); g.count += 1; if (new Date(item.start_time).getTime() < new Date(g.earliestStartISO).getTime()) { g.earliestStartISO = item.start_time; } } } return Array.from(map.values()).sort((a, b) => new Date(a.earliestStartISO).getTime() - new Date(b.earliestStartISO).getTime()); }, [events, selectedDate, searchTerm, cashSession]);
+    const gruposPorCliente = useMemo<GrupoCliente[]>(() => { const startOfDay = new Date(selectedDate); startOfDay.setHours(0, 0, 0, 0); const endOfDay = new Date(selectedDate); endOfDay.setHours(23, 59, 59, 999); const filtradas: CitaEvento[] = events.filter((event) => { if (event.extendedProps?._isTicket) return false; const fechaCita = new Date(event.start); const enFecha = fechaCita >= startOfDay && fechaCita <= endOfDay; const esOperativa = event.extendedProps.status !== 'cancelled' && event.extendedProps.status !== 'completed'; if (!enFecha || !esOperativa) return false; if (searchTerm) { const q = searchTerm.toLowerCase(); return (event.extendedProps.client_first_name?.toLowerCase().includes(q) || event.extendedProps.client_last_name?.toLowerCase().includes(q) || event.extendedProps.stylist_first_name?.toLowerCase().includes(q)); } return true; }); const map = new Map<string | number, GrupoCliente>(); for (const ev of filtradas) { const ep = ev.extendedProps || {}; const clientId = ep.client_id ?? ep.clientId; if (clientId == null) continue; const item = { id: ev.id, service_name: ep.service_name, stylist_first_name: ep.stylist_first_name, start_time: ep.start_time ?? ev.start, }; if (!map.has(clientId)) { map.set(clientId, { clientId, client_first_name: ep.client_first_name, client_last_name: ep.client_last_name, earliestStartISO: item.start_time, count: 1, appointments: [item], }); } else { const g = map.get(clientId)!; g.appointments.push(item); g.count += 1; if (new Date(item.start_time).getTime() < new Date(g.earliestStartISO).getTime()) { g.earliestStartISO = item.start_time; } } } return Array.from(map.values()).sort((a, b) => new Date(a.earliestStartISO).getTime() - new Date(b.earliestStartISO).getTime()); }, [events, selectedDate, searchTerm, cashSession]);
 
     // Tickets virtuales del día seleccionado — separados porque no son citas.
     const ticketsDelDia = useMemo(() => {
@@ -353,7 +353,7 @@ const CentroDeCitasDiarias = ({ events, onNewAppointmentClick, targetTenantId }:
                 return (ev.extendedProps?.client_name || '').toLowerCase().includes(q);
             });
     }, [events, selectedDate, searchTerm]);
-    const handleOpenPayments = () => { if (cashSession) { setActiveTab('anticipo'); } else if(canSellToStaff) { setActiveTab('venta_personal'); } setPaymentsModalOpen(true); };
+    const handleOpenPayments = () => { setActiveTab('anticipo'); setPaymentsModalOpen(true); };
     const handleNewSale = () => { navigate('/checkout'); };
     const handleSaveAnticipo = async () => { const amount = parseInt(anticipo.amountDigits || '0', 10) || 0; if (!anticipo.stylist_id || amount <= 0) { Swal.fire('Datos incompletos', 'Selecciona un estilista y un monto valido.', 'warning'); return; } try { const payload: any = { type: 'payroll_advance', category: 'stylist_advance', description: anticipo.description || 'Anticipo', amount, payment_method: 'cash', related_entity_type: 'stylist', related_entity_id: anticipo.stylist_id }; if (targetTenantId) payload.target_tenant_id = targetTenantId; await api.post('/cash/movements', payload); Swal.fire('¡Éxito!', 'Anticipo registrado correctamente.', 'success'); setPaymentsModalOpen(false); setAnticipo({ stylist_id: '', amountDigits: '', description: '' }); fetchCurrentSession(); } catch (e: any) { console.error(e); Swal.fire('Error', e?.response?.data?.error || 'No se pudo registrar el anticipo.', 'error'); } };
     const handleSaveFactura = async () => { const amount = parseInt(factura.amountDigits || '0', 10) || 0; if (!factura.reference || amount <= 0) { Swal.fire('Datos incompletos', 'Ingresa una referencia y un monto valido.', 'warning'); return; } try { const payload: any = { type: 'expense', category: 'vendor_invoice', invoice_ref: factura.reference, description: factura.description || 'Factura de proveedor', amount, payment_method: 'cash' }; if (targetTenantId) payload.target_tenant_id = targetTenantId; await api.post('/cash/movements', payload); Swal.fire('¡Éxito!', 'Factura registrada correctamente.', 'success'); setPaymentsModalOpen(false); setFactura({ reference: '', amountDigits: '', description: '' }); fetchCurrentSession(); } catch (e: any) { console.error(e); Swal.fire('Error', e?.response?.data?.error || 'No se pudo registrar la factura.', 'error'); } };
@@ -380,9 +380,10 @@ const CentroDeCitasDiarias = ({ events, onNewAppointmentClick, targetTenantId }:
                         <Dropdown isOpen={dropdownOpen} toggle={toggleDropdown}>
                             <DropdownToggle color="light" caret>{t("options")}</DropdownToggle>
                             <DropdownMenu end>
+                                {!cashSession && <DropdownItem onClick={() => setOpenModalOpen(true)} disabled={loadingSession}><i className="ri-door-open-line me-2"></i> {t("open_cash")}</DropdownItem>}
                                 {cashSession && <DropdownItem onClick={() => setCloseModalOpen(true)} disabled={loadingSession}><i className="mdi mdi-door-closed me-2"></i> {t("close_cash")}</DropdownItem>}
                                 <DropdownItem onClick={handleNewSale} disabled={loadingSession}><i className="mdi mdi-cart-plus me-2"></i> {t("quick_sale")}</DropdownItem>
-                                <DropdownItem onClick={handleOpenPayments} disabled={!cashSession && !canSellToStaff && !canGiveLoans} title={!cashSession && !canSellToStaff && !canGiveLoans ? "Abre la caja o activa los módulos de personal" : ""}><i className="mdi mdi-cash me-2"></i> {t("expenses_staff")}</DropdownItem>
+                                <DropdownItem onClick={handleOpenPayments} disabled={loadingSession}><i className="mdi mdi-cash me-2"></i> {t("expenses_staff")}</DropdownItem>
                                 {cashSession && <DropdownItem onClick={() => { setMovimientosModalOpen(true); fetchMovements(); }}><i className="ri-file-list-3-line me-2 text-info"></i> {t("cash_movements")}</DropdownItem>}
                                 <DropdownItem onClick={onNewAppointmentClick}><i className="mdi mdi-plus me-2"></i> {t("create_new_appointment")}</DropdownItem>
                                 <DropdownItem divider />
@@ -391,16 +392,22 @@ const CentroDeCitasDiarias = ({ events, onNewAppointmentClick, targetTenantId }:
                         </Dropdown>
                     )}
                 </div>
-                {loadingSession ? ( <div className='text-center p-5'><Spinner /></div> ) : (cashSession || isRecepcionista) ? (
+                {loadingSession ? ( <div className='text-center p-5'><Spinner /></div> ) : (
                     <>
                         <div className="mb-3"><Flatpickr className="form-control" value={selectedDate} onChange={([date]) => setSelectedDate(date as Date)} options={{ dateFormat: "Y-m-d", altInput: true, altFormat: "F j, Y" }} /></div>
                         <Input type="text" className="form-control" placeholder="Buscar por cliente o estilista..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
                     </>
-                ) : null}
+                )}
             </CardBody>
             <CardBody className="pt-0">
-                {loadingSession ? null : (cashSession || isRecepcionista) ? (
+                {loadingSession ? null : (
                     <SimpleBar style={{ maxHeight: "calc(100vh - 450px)" }}>
+                        {!cashSession && !isRecepcionista && (
+                            <div className="alert alert-warning d-flex justify-content-between align-items-center flex-wrap gap-2 py-2 px-3 mb-3" role="alert">
+                                <span className="me-2"><i className="ri-information-line align-middle me-1"></i>{t("cash_open_optional_hint")}</span>
+                                <Button color="success" size="sm" onClick={() => setOpenModalOpen(true)}><i className="ri-door-open-line me-1"></i> {t("open_cash")}</Button>
+                            </div>
+                        )}
                         {ticketsDelDia.length > 0 && (
                             <div className="mb-3">
                                 <div className="d-flex align-items-center mb-2">
@@ -443,12 +450,6 @@ const CentroDeCitasDiarias = ({ events, onNewAppointmentClick, targetTenantId }:
                             : (ticketsDelDia.length === 0 && <p className="text-muted text-center mt-4">No hay citas pendientes para hoy.</p>)
                         }
                     </SimpleBar>
-                ) : (
-                    <div className="text-center p-5">
-                        <h4>{t("cash_closed")}</h4>
-                        <p className="text-muted">{t("must_open_cash")}</p>
-                        <Button color="success" size="lg" onClick={() => setOpenModalOpen(true)}><i className="ri-door-open-line me-1"></i> {t("open_cash")}</Button>
-                    </div>
                 )}
             </CardBody>
             
@@ -456,14 +457,10 @@ const CentroDeCitasDiarias = ({ events, onNewAppointmentClick, targetTenantId }:
                 <ModalHeader toggle={() => setPaymentsModalOpen(false)}>{t("expenses_staff_operations")}</ModalHeader>
                 <ModalBody>
                     <Nav tabs>
-                        {cashSession && (
-                            <>
-                                <NavItem><NavLink className={classnames({ active: activeTab === 'anticipo' })} onClick={() => setActiveTab('anticipo')} style={{ cursor: 'pointer' }}>{t("advance")}</NavLink></NavItem>
-                                <NavItem><NavLink className={classnames({ active: activeTab === 'factura' })} onClick={() => setActiveTab('factura')} style={{ cursor: 'pointer' }}>{t("invoice")}</NavLink></NavItem>
-                                <NavItem><NavLink className={classnames({ active: activeTab === 'servicios_publicos' })} onClick={() => setActiveTab('servicios_publicos')} style={{ cursor: 'pointer' }}>{t("utility_bill")}</NavLink></NavItem>
-                            </>
-                        )}
-                        {canGiveLoans && cashSession && ( <NavItem><NavLink className={classnames({ active: activeTab === 'prestamo' })} onClick={() => setActiveTab('prestamo')} style={{ cursor: 'pointer' }}>{t("loan")}</NavLink></NavItem> )}
+                        <NavItem><NavLink className={classnames({ active: activeTab === 'anticipo' })} onClick={() => setActiveTab('anticipo')} style={{ cursor: 'pointer' }}>{t("advance")}</NavLink></NavItem>
+                        <NavItem><NavLink className={classnames({ active: activeTab === 'factura' })} onClick={() => setActiveTab('factura')} style={{ cursor: 'pointer' }}>{t("invoice")}</NavLink></NavItem>
+                        <NavItem><NavLink className={classnames({ active: activeTab === 'servicios_publicos' })} onClick={() => setActiveTab('servicios_publicos')} style={{ cursor: 'pointer' }}>{t("utility_bill")}</NavLink></NavItem>
+                        {canGiveLoans && ( <NavItem><NavLink className={classnames({ active: activeTab === 'prestamo' })} onClick={() => setActiveTab('prestamo')} style={{ cursor: 'pointer' }}>{t("loan")}</NavLink></NavItem> )}
                         {canSellToStaff && ( <NavItem><NavLink className={classnames({ active: activeTab === 'venta_personal' })} onClick={() => setActiveTab('venta_personal')} style={{ cursor: 'pointer' }}>{t("staff_sale")}</NavLink></NavItem> )}
                     </Nav>
                     <TabContent activeTab={activeTab} className="pt-3">

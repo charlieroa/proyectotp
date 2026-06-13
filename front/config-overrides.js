@@ -35,5 +35,19 @@ module.exports = function override(config, env) {
   // Ignorar warnings de sourcemaps
   config.ignoreWarnings = [/Failed to parse source map/];
 
+  // Build bajo en memoria (LOW_MEM_BUILD=true): quita el type-checker que corre
+  // en proceso aparte (validar antes con `npx tsc --noEmit`) y minifica sin
+  // workers paralelos. Para máquinas con poca RAM libre donde el build muere
+  // con OOM/segfault sin mensaje.
+  if (process.env.LOW_MEM_BUILD === 'true') {
+    config.plugins = config.plugins.filter(
+      (p) => p.constructor.name !== 'ForkTsCheckerWebpackPlugin'
+    );
+    for (const m of (config.optimization && config.optimization.minimizer) || []) {
+      if (m && m.options) m.options.parallel = false;
+    }
+    config.parallelism = 4;
+  }
+
   return config;
 };
