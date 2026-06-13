@@ -66,17 +66,33 @@ exports.login = async (req, res) => {
   email = String(email).trim().toLowerCase();
 
   try {
-    const user = await prisma.users.findFirst({
-      where: { email },
-      orderBy: { role_id: 'asc' },
+    // Un mismo email puede estar en varias cuentas (mismo dueño con admin+estilista,
+    // o incluso personas distintas que compartieron correo por error). Por eso NO
+    // basta con findFirst + comparar contra una sola fila: hay que recorrer TODAS las
+    // cuentas activas del correo y quedarnos con aquella cuya contraseña coincide.
+    // El orderBy fija un desempate estable (admin antes que estilista, luego la más
+    // antigua) para que, si varias comparten contraseña, el resultado sea determinista
+    // y no "salte" de tenant entre logins.
+    // Excluir desactivadas (status='inactive'); el OR con null cubre filas viejas
+    // sin status, que en Postgres no pasarían un simple `not`.
+    const candidates = await prisma.users.findMany({
+      where: {
+        email,
+        OR: [{ status: null }, { status: { not: 'inactive' } }],
+      },
+      orderBy: [{ role_id: 'asc' }, { created_at: 'asc' }],
     });
 
-    if (!user) {
-      return res.status(401).json({ error: 'Credenciales inválidas.' });
+    let user = null;
+    for (const candidate of candidates) {
+      if (!candidate.password_hash) continue;
+      if (await bcrypt.compare(password, candidate.password_hash)) {
+        user = candidate;
+        break;
+      }
     }
 
-    const isMatch = await bcrypt.compare(password, user.password_hash);
-    if (!isMatch) {
+    if (!user) {
       return res.status(401).json({ error: 'Credenciales inválidas.' });
     }
 
@@ -295,6 +311,19 @@ exports.registerTenantAndAdmin = async (req, res) => {
   const tenantNameNorm = normalizeName(tenantName);
 
   try {
+    // El email debe ser único en toda la plataforma: si se permite repetir,
+    // el login (findFirst por email) se vuelve ambiguo y alguien puede
+    // registrar un tenant con el correo de otra persona.
+    const existingUser = await prisma.users.findFirst({
+      where: { email: adminEmailNorm },
+      select: { id: true },
+    });
+    if (existingUser) {
+      return res.status(409).json({
+        error: 'Ya existe una cuenta con ese email. Inicia sesión o usa otro correo.',
+      });
+    }
+
     // Verificar si ya existe un tenant con nombre similar
     const existingTenants = await prisma.tenants.findMany({
       select: { id: true, name: true },
