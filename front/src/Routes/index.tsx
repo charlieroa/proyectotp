@@ -30,12 +30,14 @@ const Index = () => {
                 </Route>
 
                 <Route>
-                    {authProtectedRoutes.map((route, idx) => (
+                    {authProtectedRoutes.map((route: any, idx: any) => (
                         <Route
                             path={route.path}
                             element={
                                 <AuthProtected>
-                                    <VerticalLayout>{route.component}</VerticalLayout>
+                                    {route.fullScreen
+                                        ? route.component
+                                        : <VerticalLayout>{route.component}</VerticalLayout>}
                                 </AuthProtected>}
                             key={idx}
                             // exact={true}

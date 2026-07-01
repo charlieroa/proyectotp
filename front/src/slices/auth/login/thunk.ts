@@ -96,7 +96,7 @@ export const loginUser =
         } else if (setup_complete === false) {
           navigate("/assistant"); // Si la configuración no está completa, va al Asistente
         } else {
-          navigate("/dashboard-v2"); // Si está completa, va al Dashboard
+          navigate("/v2"); // Admin/Owner: rediseño "Luxe claro" (app.tupelukeria.com)
         }
       }
 

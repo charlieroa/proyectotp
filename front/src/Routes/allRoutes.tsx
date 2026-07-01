@@ -22,6 +22,7 @@ const Loadable = (Component: React.LazyExoticComponent<any>) => (props?: any) =>
 // Dashboard
 const DashboardPrincipal = Loadable(React.lazy(() => import("../pages/DashboardPrincipal")));
 const DashboardV2 = Loadable(React.lazy(() => import("../pages/DashboardV2")));
+const V2 = Loadable(React.lazy(() => import("../pages/V2")));
 
 // Calendario
 const Calendar = Loadable(React.lazy(() => import("../pages/Calendar")));
@@ -86,6 +87,9 @@ const authProtectedRoutes = [
   { path: "/dashboard", component: DashboardPrincipal() },
   // Dashboard v2 — hub multi-sucursal: agenda, tickets, caja, POS embebido y fichero (datos reales)
   { path: "/dashboard-v2", component: DashboardV2() },
+  // v2 — rediseño "Luxe claro" completo (Operación, Clientes, Inventario, Nómina, Config)
+  // fullScreen: trae su propio shell (sidebar+header), se renderiza SIN el VerticalLayout viejo
+  { path: "/v2", component: V2(), fullScreen: true },
 
   // Super Admin
   { path: "/super-admin", component: SuperAdminDashboard() },
