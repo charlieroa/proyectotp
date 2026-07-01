@@ -2,7 +2,6 @@
 // Cableada a datos reales (/dashboard-v2/*, /cash/*) y reutiliza los componentes ya
 // probados: AppointmentDetailDrawer, PointOfSale embebido y los modales de caja.
 import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { Offcanvas, OffcanvasBody, OffcanvasHeader } from "reactstrap";
 import { api } from "../../../services/api";
 import { ScreenProps } from "../types";
 import { T, FONT, fmtCOP, fmtCOPShort, colorFor, initials } from "../theme";
@@ -10,7 +9,7 @@ import { Kpi, KpiGrid, Panel, Mono, Empty, Loading } from "../components/ui";
 import { useBranchesDay } from "../data/useV2Data";
 import AppointmentDetailDrawer, { ApptDetail } from "../../../Components/Calendar/AppointmentDetailDrawer";
 import NewAppointmentModal from "../components/NewAppointmentModal";
-import PointOfSale from "../../PointOfSale";
+import TicketView, { Phase } from "./TicketView";
 import { ModalAbrirCaja, ModalResumenCierre } from "../../../Components/Calendar/CentroDeCitasDiarias";
 
 type Tab = "agenda" | "tickets" | "caja";
@@ -47,7 +46,11 @@ const Operacion: React.FC<ScreenProps> = ({ date, newApptSignal }) => {
   // drawers / modales
   const [appt, setAppt] = useState<ApptDetail | null>(null);
   const [pos, setPos] = useState<{ ticketId: string; targetTenantId: string } | null>(null);
+  const [posPhase, setPosPhase] = useState<Phase>("ticket");
   const [newAppt, setNewAppt] = useState(false);
+
+  // al abrir un ticket, la vista arranca siempre en el constructor
+  useEffect(() => { if (pos) setPosPhase("ticket"); }, [pos?.ticketId]);
 
   // el shell dispara "Nueva atención" incrementando newApptSignal → abre el modal de cita
   useEffect(() => { if (newApptSignal) setNewAppt(true); }, [newApptSignal]);
@@ -102,8 +105,11 @@ const Operacion: React.FC<ScreenProps> = ({ date, newApptSignal }) => {
   const kCobrado = active.revenue_today || 0;
   const kTickets = active.open_tickets?.count ?? 0;
 
-  // etapa actual del flujo según la pestaña (Cita → Ticket → Caja → Nómina)
-  const stage = tab === "agenda" ? 1 : tab === "tickets" ? 2 : 3;
+  // etapa actual del flujo (Cita → Ticket → Caja → Nómina). Si hay un ticket
+  // abierto inline, la etapa la manda su fase (constructor=Ticket, cobro=Caja).
+  const stage = pos
+    ? (posPhase === "ticket" ? 2 : posPhase === "cobro" ? 3 : 4)
+    : (tab === "agenda" ? 1 : tab === "tickets" ? 2 : 3);
   const steps = [
     { t: "Cita", s: "entra a la agenda" },
     { t: "Ticket", s: "se atiende y suma" },
@@ -158,6 +164,18 @@ const Operacion: React.FC<ScreenProps> = ({ date, newApptSignal }) => {
         })}
       </div>
 
+      {/* Ticket inline: ocupa el área principal, oculta lista/tabs mientras está abierto */}
+      {pos && activeId ? (
+        <TicketView
+          key={pos.ticketId}
+          ticketId={pos.ticketId}
+          targetTenantId={pos.targetTenantId}
+          date={date}
+          onExit={() => { setPos(null); refreshAll(); }}
+          onPhase={setPosPhase}
+        />
+      ) : (
+      <>
       {/* tabs */}
       <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 16, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 13, padding: 6, width: "fit-content" }}>
         <TabBtn active={tab === "agenda"} onClick={() => setTab("agenda")} label="Agenda" count={kCitas} />
@@ -266,6 +284,8 @@ const Operacion: React.FC<ScreenProps> = ({ date, newApptSignal }) => {
           </Panel>
         </div>
       )}
+      </>
+      )}
 
       {/* Drawers reales reutilizados */}
       <AppointmentDetailDrawer
@@ -288,15 +308,6 @@ const Operacion: React.FC<ScreenProps> = ({ date, newApptSignal }) => {
         defaultDate={new Date(`${date}T00:00:00`)}
         targetTenantId={activeId || undefined}
       />
-
-      <Offcanvas isOpen={!!pos} toggle={() => setPos(null)} direction="end" style={{ width: "min(1100px, 100vw)" }}>
-        <OffcanvasHeader toggle={() => setPos(null)} className="border-bottom"><span style={{ fontWeight: 600 }}>Cobrar ticket</span></OffcanvasHeader>
-        <OffcanvasBody className="p-0" style={{ overflowY: "auto" }}>
-          {pos && (
-            <PointOfSale embedded={{ ticketId: pos.ticketId, targetTenantId: pos.targetTenantId, onClose: () => { setPos(null); refreshAll(); } }} />
-          )}
-        </OffcanvasBody>
-      </Offcanvas>
     </div>
   );
 };
