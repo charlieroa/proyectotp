@@ -46,6 +46,7 @@ const V2: React.FC = () => {
   const [showAI, setShowAI] = useState(false);
   const [dark, setDark] = useState<boolean>(() => localStorage.getItem("v2-theme") === "dark");
   const [newApptSignal, setNewApptSignal] = useState(0);
+  const [userOpen, setUserOpen] = useState(false);
   const tenant = useTenant();
   const user = useCurrentUser();
 
@@ -169,14 +170,32 @@ const V2: React.FC = () => {
 
           <div style={{ width: 1, height: 26, background: T.border }} />
 
-          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-            <div style={{ width: 34, height: 34, borderRadius: 10, background: colorFor(user.name), color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13 }}>
-              {user.initials}
-            </div>
-            <div style={{ lineHeight: 1.25 }}>
-              <div style={{ fontWeight: 700, fontSize: 12.5 }}>{user.name}</div>
-              <div style={{ fontSize: 11, color: T.dim }}>{user.roleLabel}</div>
-            </div>
+          <div style={{ position: "relative" }}>
+            <button onClick={() => setUserOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 9, background: "transparent", border: 0, cursor: "pointer", fontFamily: FONT, padding: 0 }}>
+              <div style={{ width: 34, height: 34, borderRadius: 10, background: colorFor(user.name), color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13 }}>
+                {user.initials}
+              </div>
+              <div style={{ lineHeight: 1.25, textAlign: "left" }}>
+                <div style={{ fontWeight: 700, fontSize: 12.5, color: T.text }}>{user.name}</div>
+                <div style={{ fontSize: 11, color: T.dim }}>{user.roleLabel}</div>
+              </div>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.dim} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+            </button>
+            {userOpen && (
+              <>
+                <div onClick={() => setUserOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+                <div style={{ position: "absolute", top: 46, right: 0, width: 210, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 14, boxShadow: "0 18px 44px rgba(0,0,0,.18)", padding: 8, zIndex: 50 }}>
+                  <button onClick={() => { setUserOpen(false); setSection("config"); }} style={v2MenuItem}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M12 3v2M12 19v2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M3 12h2M19 12h2M5.6 18.4 7 17M17 7l1.4-1.4" /></svg>
+                    Configuración
+                  </button>
+                  <button onClick={() => { window.location.href = "/logout"; }} style={{ ...v2MenuItem, color: T.red }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></svg>
+                    Cerrar sesión
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </header>
 
@@ -186,6 +205,12 @@ const V2: React.FC = () => {
       <AIDrawer open={showAI} onClose={() => setShowAI(false)} userName={user.name} />
     </div>
   );
+};
+
+const v2MenuItem: React.CSSProperties = {
+  width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", borderRadius: 9,
+  background: "transparent", border: 0, cursor: "pointer", fontFamily: FONT, fontWeight: 600, fontSize: 13,
+  color: T.text, textAlign: "left",
 };
 
 // ── Switch de suite: Tupelukeria ↔ Bolti (mismo login) ────────

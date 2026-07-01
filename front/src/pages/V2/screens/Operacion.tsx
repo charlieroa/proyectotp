@@ -9,7 +9,7 @@ import { T, FONT, fmtCOP, fmtCOPShort, colorFor, initials } from "../theme";
 import { Kpi, KpiGrid, Panel, Mono, Empty, Loading } from "../components/ui";
 import { useBranchesDay } from "../data/useV2Data";
 import AppointmentDetailDrawer, { ApptDetail } from "../../../Components/Calendar/AppointmentDetailDrawer";
-import AppointmentModal from "../../../Components/Calendar/AppointmentModal";
+import NewAppointmentModal from "../components/NewAppointmentModal";
 import PointOfSale from "../../PointOfSale";
 import { ModalAbrirCaja, ModalResumenCierre } from "../../../Components/Calendar/CentroDeCitasDiarias";
 
@@ -281,11 +281,10 @@ const Operacion: React.FC<ScreenProps> = ({ date, newApptSignal }) => {
       <ModalAbrirCaja isOpen={cashOpen} onClose={() => setCashOpen(false)} onSessionOpened={fetchCash} targetTenantId={activeId || undefined} />
       <ModalResumenCierre isOpen={cashClose} onClose={() => setCashClose(false)} onSessionClosed={fetchCash} sessionData={cash} targetTenantId={activeId || undefined} />
 
-      {/* Modal de agendamiento (crea cita nueva) — reutiliza el modal real del calendario */}
-      <AppointmentModal
+      {/* Modal de agendamiento (crea cita nueva) — diseño v2, cableado a los thunks reales */}
+      <NewAppointmentModal
         isOpen={newAppt}
         onClose={() => { setNewAppt(false); refreshAll(); }}
-        selectedEvent={null}
         defaultDate={new Date(`${date}T00:00:00`)}
         targetTenantId={activeId || undefined}
       />
