@@ -47,6 +47,7 @@ type Tenant = {
   logo_url?: string | null;
   products_for_staff_enabled?: boolean;
   admin_fee_enabled?: boolean;
+  admin_fee_on_service?: boolean;
   loans_to_staff_enabled?: boolean;
   allow_past_appointments?: boolean;
   price_override_enabled?: boolean;
@@ -410,6 +411,7 @@ const Settings: React.FC = () => {
   const [perDay, setPerDay] = useState<WorkingHoursPerDay>(defaultWeek());
   const [productsForStaff, setProductsForStaff] = useState<boolean>(true);
   const [adminFeeEnabled, setAdminFeeEnabled] = useState<boolean>(false);
+  const [adminFeeOnService, setAdminFeeOnService] = useState<boolean>(false);
   const [loansToStaff, setLoansToStaff] = useState<boolean>(false);
   const [allowPastAppointments, setAllowPastAppointments] = useState<boolean>(false);
   const [sharedStylistsEnabled, setSharedStylistsEnabled] = useState<boolean>(false);
@@ -472,6 +474,7 @@ const Settings: React.FC = () => {
     setPerDay(normalizeWorkingHoursFromAPI(tenantData.working_hours));
     setProductsForStaff(tenantData.products_for_staff_enabled ?? true);
     setAdminFeeEnabled(tenantData.admin_fee_enabled ?? false);
+    setAdminFeeOnService(tenantData.admin_fee_on_service ?? false);
     setLoansToStaff(tenantData.loans_to_staff_enabled ?? false);
     setAllowPastAppointments(tenantData.allow_past_appointments ?? false);
     setSharedStylistsEnabled(tenantData.shared_stylists_enabled ?? false);
@@ -613,6 +616,7 @@ const Settings: React.FC = () => {
         working_hours: buildWorkingHoursPayload(perDay),
         iva_rate: ensureNumber(ivaRate),
         admin_fee_percent: adminFeeEnabled ? ensureNumber(adminFee) : null,
+        admin_fee_on_service: adminFeeEnabled ? adminFeeOnService : false,
         logo_url: logoUrlForPayload,
         products_for_staff_enabled: productsForStaff,
         admin_fee_enabled: adminFeeEnabled,
@@ -929,8 +933,8 @@ const Settings: React.FC = () => {
           </div>
 
           <Row className="g-4">
-            {/* Sidebar */}
-            <Col xl={3}>
+            {/* Sidebar (solo en pantallas grandes) */}
+            <Col xl={2} className="d-none d-xl-block">
               <div className="vstack gap-3">
                 {/* Logo card */}
                 <Card className="overflow-hidden position-relative" style={{ zIndex: 1 }}>
@@ -1051,7 +1055,50 @@ const Settings: React.FC = () => {
             </Col>
 
             {/* Main content */}
-            <Col xl={9}>
+            <Col xl={10}>
+              {/* Cabecera compacta logo + plan (solo pantallas pequeñas) */}
+              <Card className="d-xl-none mb-3">
+                <CardBody className="py-3">
+                  <div className="d-flex align-items-center gap-3">
+                    <div
+                      className={`position-relative flex-shrink-0${isPrimaryBranch ? ' cursor-pointer' : ''}`}
+                      onClick={isPrimaryBranch ? openLogoPicker : undefined}
+                      title={isPrimaryBranch ? tr('sidebar_change_logo') : tr('sidebar_logo_primary_only')}
+                    >
+                      <img src={logoUrl || avatar1} className="rounded-circle border border-2 border-white shadow object-fit-cover" style={{ width: '56px', height: '56px' }} alt="logo" />
+                      {isPrimaryBranch && (
+                        <span className="position-absolute bottom-0 end-0 d-flex align-items-center justify-content-center rounded-circle bg-primary text-white border border-2 border-white" style={{ width: '20px', height: '20px' }}>
+                          <i className="ri-image-edit-line" style={{ fontSize: '10px' }}></i>
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex-grow-1" style={{ minWidth: 0 }}>
+                      <h5 className="fs-15 fw-semibold mb-1 text-truncate">{name || tr('sidebar_my_salon')}</h5>
+                      {(() => {
+                        const planKey = tenant?.plan || "free";
+                        const planInfo = PLAN_CONFIG[planKey] || PLAN_CONFIG.free;
+                        const badgeColor = planBadgeColorMap[planKey] || "secondary";
+                        return (
+                          <span className={`badge bg-${badgeColor}-subtle text-${badgeColor} rounded-pill`}>
+                            {tr("my_plan")}: {planKey === "free" ? tr("free") : planInfo.label}
+                          </span>
+                        );
+                      })()}
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      color={(tenant?.plan || "free") === "enterprise" ? "soft-success" : "soft-primary"}
+                      className="flex-shrink-0 d-inline-flex align-items-center gap-1"
+                      onClick={() => tabChange("6")}
+                    >
+                      <i className={(tenant?.plan || "free") === "enterprise" ? "ri-check-double-line" : "ri-vip-crown-line"}></i>
+                      {(tenant?.plan || "free") === "enterprise" ? tr('sidebar_full_plan') : tr('sidebar_upgrade_plan')}
+                    </Button>
+                  </div>
+                </CardBody>
+              </Card>
+
               <Card>
                 {/* Title + Tabs header */}
                 <CardHeader className="p-0 border-0">
@@ -1061,7 +1108,7 @@ const Settings: React.FC = () => {
                       {tr('settings_configuration')}
                     </h4>
                   </div>
-                  <Nav tabs className="nav-tabs-custom px-4 mb-0">
+                  <Nav tabs className="nav-tabs-custom px-4 mb-0 flex-nowrap" style={{ overflowX: 'auto', overflowY: 'hidden', whiteSpace: 'nowrap' }}>
                     <NavItem>
                       <NavLink
                         className={classnames({ active: activeTab === "1" })}
@@ -1161,6 +1208,7 @@ const Settings: React.FC = () => {
                       setName={setName} setPhone={setPhone} setAddress={setAddress} setCity={setCity} setEmail={setEmail} setWebsite={setWebsite} setIvaRate={setIvaRate} setAdminFee={setAdminFee}
                       productsForStaff={productsForStaff} setProductsForStaff={setProductsForStaff}
                       adminFeeEnabled={adminFeeEnabled} setAdminFeeEnabled={setAdminFeeEnabled}
+                      adminFeeOnService={adminFeeOnService} setAdminFeeOnService={setAdminFeeOnService}
                       loansToStaff={loansToStaff} setLoansToStaff={setLoansToStaff}
                       allowPastAppointments={allowPastAppointments} setAllowPastAppointments={setAllowPastAppointments}
                       sharedStylistsEnabled={sharedStylistsEnabled} setSharedStylistsEnabled={setSharedStylistsEnabled}
@@ -1187,6 +1235,7 @@ const Settings: React.FC = () => {
                       setName={() => { }} setPhone={() => { }} setAddress={() => { }} setCity={() => { }} setEmail={() => { }} setWebsite={() => { }} setIvaRate={() => { }} setAdminFee={() => { }}
                       productsForStaff={productsForStaff} setProductsForStaff={setProductsForStaff}
                       adminFeeEnabled={adminFeeEnabled} setAdminFeeEnabled={setAdminFeeEnabled}
+                      adminFeeOnService={adminFeeOnService} setAdminFeeOnService={setAdminFeeOnService}
                       loansToStaff={loansToStaff} setLoansToStaff={setLoansToStaff}
                       allowPastAppointments={allowPastAppointments} setAllowPastAppointments={setAllowPastAppointments}
                       sharedStylistsEnabled={sharedStylistsEnabled} setSharedStylistsEnabled={setSharedStylistsEnabled}

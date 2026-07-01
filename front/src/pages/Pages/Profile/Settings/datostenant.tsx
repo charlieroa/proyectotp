@@ -45,6 +45,7 @@ export type DatosTenantProps = {
 
   productsForStaff: boolean; setProductsForStaff: (v: boolean) => void;
   adminFeeEnabled: boolean; setAdminFeeEnabled: (v: boolean) => void;
+  adminFeeOnService: boolean; setAdminFeeOnService: (v: boolean) => void;
   loansToStaff: boolean; setLoansToStaff: (v: boolean) => void;
   allowPastAppointments: boolean; setAllowPastAppointments: (v: boolean) => void;
 
@@ -150,6 +151,7 @@ const DatosTenant: React.FC<DatosTenantProps> = ({
   setName, setPhone, setAddress, setCity, setEmail, setWebsite, setIvaRate, setAdminFee,
   productsForStaff, setProductsForStaff,
   adminFeeEnabled, setAdminFeeEnabled,
+  adminFeeOnService, setAdminFeeOnService,
   loansToStaff, setLoansToStaff,
   allowPastAppointments, setAllowPastAppointments,
   sharedStylistsEnabled, setSharedStylistsEnabled,
@@ -265,10 +267,29 @@ const DatosTenant: React.FC<DatosTenantProps> = ({
             checked={adminFeeEnabled} onChange={setAdminFeeEnabled} switchId="admin-fee-switch"
             locked={!allowed("admin_fee")} requiredPlan={minPlan("admin_fee")}
             extraContent={
-              <div className="input-group" style={{ maxWidth: "200px" }}>
-                <Input id="tenant-admin-fee" type="number" min={0} max={100} step="0.01" value={adminFee} onChange={handleInputChange(setAdminFee)} placeholder="10" />
-                <span className="input-group-text">%</span>
-              </div>
+              <>
+                <div className="input-group" style={{ maxWidth: "200px" }}>
+                  <Input id="tenant-admin-fee" type="number" min={0} max={100} step="0.01" value={adminFee} onChange={handleInputChange(setAdminFee)} placeholder="10" />
+                  <span className="input-group-text">%</span>
+                </div>
+                <div className="form-check form-switch mt-3">
+                  <Input
+                    type="switch"
+                    className="form-check-input"
+                    id="admin-fee-on-service-switch"
+                    checked={adminFeeOnService}
+                    onChange={() => setAdminFeeOnService(!adminFeeOnService)}
+                  />
+                  <label className="form-check-label fw-medium" htmlFor="admin-fee-on-service-switch">
+                    {t("settings_admin_fee_on_service")}
+                  </label>
+                  <div className="text-muted small mt-1">
+                    {adminFeeOnService
+                      ? t("settings_admin_fee_on_service_on")
+                      : t("settings_admin_fee_on_service_off")}
+                  </div>
+                </div>
+              </>
             }
           />
         </Col>

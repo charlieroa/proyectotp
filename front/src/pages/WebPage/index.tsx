@@ -20,6 +20,10 @@ const WebPage = () => {
   const [polling, setPolling] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Mantenimiento: el generador (Plury) está fuera de servicio mientras se migra
+  // a generación directa. Mostramos aviso al entrar y bloqueamos la generación.
+  const MAINTENANCE = true;
+  const [showMaintenance, setShowMaintenance] = useState(true);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollErrorCount = useRef(0);
 
@@ -280,6 +284,23 @@ const WebPage = () => {
       <Container fluid>
         <BreadCrumb title="Pagina Web" pageTitle="Mi Negocio" />
 
+        {/* Aviso de mantenimiento al entrar */}
+        <Modal isOpen={MAINTENANCE && showMaintenance} toggle={() => setShowMaintenance(false)} centered>
+          <ModalHeader toggle={() => setShowMaintenance(false)}>
+            <i className="ri-tools-line me-2 text-warning"></i>Modulo en actualizacion
+          </ModalHeader>
+          <ModalBody>
+            <p className="mb-2">Estamos actualizando este modulo de creacion de paginas web. 🚧</p>
+            <p className="text-muted mb-0">
+              Por ahora la generacion de nuevas paginas esta temporalmente deshabilitada.
+              Las paginas ya publicadas siguen funcionando con normalidad. Vuelve pronto.
+            </p>
+          </ModalBody>
+          <ModalFooter>
+            <Button color="primary" onClick={() => setShowMaintenance(false)}>Entendido</Button>
+          </ModalFooter>
+        </Modal>
+
         <Row>
           <Col lg={8}>
             {loading ? (
@@ -390,6 +411,12 @@ const WebPage = () => {
                     </div>
                   ) : (
                     <>
+                      {MAINTENANCE && (
+                        <Alert color="warning" className="mb-3 d-flex align-items-center gap-2">
+                          <i className="ri-tools-line fs-18"></i>
+                          <span><strong>Estamos actualizando este modulo.</strong> La creacion de paginas esta temporalmente deshabilitada. Vuelve pronto.</span>
+                        </Alert>
+                      )}
                       <p className="text-muted mb-3">
                         Describe como quieres tu pagina web. Nuestra IA creara una landing page profesional
                         con toda la informacion de tu negocio.
@@ -404,7 +431,10 @@ const WebPage = () => {
                           rows={4}
                           value={prompt}
                           onChange={(e) => setPrompt(e.target.value)}
-                          placeholder="Ej: Quiero una pagina moderna con colores oscuros, que muestre nuestros servicios de peluqueria, galeria de fotos, horarios y un boton para agendar cita por WhatsApp."
+                          disabled={MAINTENANCE}
+                          placeholder={MAINTENANCE
+                            ? "Estamos actualizando este modulo. La creacion de paginas estara disponible pronto."
+                            : "Ej: Quiero una pagina moderna con colores oscuros, que muestre nuestros servicios de peluqueria, galeria de fotos, horarios y un boton para agendar cita por WhatsApp."}
                         />
                         <small className="text-muted mt-1 d-block">
                           La informacion de tu negocio (nombre, direccion, telefono) se incluye automaticamente.
@@ -414,7 +444,7 @@ const WebPage = () => {
                       <Button
                         color="primary"
                         onClick={handleOpenSlugModal}
-                        disabled={!prompt.trim() || prompt.trim().length < 3}
+                        disabled={MAINTENANCE || !prompt.trim() || prompt.trim().length < 3}
                         className="d-flex align-items-center gap-2"
                       >
                         <i className="ri-magic-line"></i>

@@ -17,6 +17,7 @@ interface TenantSettings {
   working_hours?: Record<string, string | null>;
   products_for_staff_enabled?: boolean;
   admin_fee_enabled?: boolean;
+  admin_fee_on_service?: boolean;
   loans_to_staff_enabled?: boolean;
   allow_past_appointments?: boolean;
   shared_stylists_enabled?: boolean;

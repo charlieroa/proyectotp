@@ -38,6 +38,7 @@ const dbToApiTenant = (row) => ({
   // Modulos
   products_for_staff_enabled: row.products_for_staff_enabled,
   admin_fee_enabled: row.admin_fee_enabled,
+  admin_fee_on_service: !!row.admin_fee_on_service,
   loans_to_staff_enabled: row.loans_to_staff_enabled,
   // Flag para permitir citas en pasado
   allow_past_appointments: !!row.allow_past_appointments,
@@ -80,6 +81,7 @@ exports.createTenant = async (req, res) => {
       iva_rate, admin_fee_percent,
       products_for_staff_enabled = true,
       admin_fee_enabled = false,
+      admin_fee_on_service = false,
       loans_to_staff_enabled = false,
       allow_past_appointments = false,
     } = req.body;
@@ -103,6 +105,7 @@ exports.createTenant = async (req, res) => {
         admin_fee_rate: pctToFrac(admin_fee_percent),
         products_for_staff_enabled: !!products_for_staff_enabled,
         admin_fee_enabled: !!admin_fee_enabled,
+        admin_fee_on_service: !!admin_fee_on_service,
         loans_to_staff_enabled: !!loans_to_staff_enabled,
         allow_past_appointments: !!allow_past_appointments,
       },
@@ -197,6 +200,8 @@ exports.updateTenant = async (req, res) => {
       data.products_for_staff_enabled = !!body.products_for_staff_enabled;
     if (body.admin_fee_enabled !== undefined)
       data.admin_fee_enabled = !!body.admin_fee_enabled;
+    if (body.admin_fee_on_service !== undefined)
+      data.admin_fee_on_service = !!body.admin_fee_on_service;
     if (body.loans_to_staff_enabled !== undefined)
       data.loans_to_staff_enabled = !!body.loans_to_staff_enabled;
 

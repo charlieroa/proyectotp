@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { Dropdown, DropdownMenu, DropdownToggle, Form, Offcanvas, OffcanvasBody, OffcanvasHeader } from 'reactstrap';
+import { Dropdown, DropdownMenu, DropdownToggle, Form, Offcanvas, OffcanvasBody, OffcanvasHeader, Modal, ModalHeader, ModalBody } from 'reactstrap';
 import NuevaAtencionModal from '../Components/Calendar/NuevaAtencionModal';
 import AIAssistant from '../pages/AIAssistant';
 import { api } from '../services/api';
@@ -32,12 +32,13 @@ const Header = ({ onChangeLayoutMode, layoutModeType, headerClass, startTour }: 
     const userRole = getRoleFromToken();
 
     // Subscription status badge
-    const [subStatus, setSubStatus] = useState<{ plan: string; status: string; period_end: string | null } | null>(null);
+    const [subStatus, setSubStatus] = useState<{ plan: string; status: string; period_end: string | null; paused: boolean } | null>(null);
+    const [pausedModalOpen, setPausedModalOpen] = useState<boolean>(false);
     useEffect(() => {
         if (userRole && [1, 2].includes(userRole)) {
             api.get('/stripe/subscription-status').then(({ data }) => {
-                if (data.plan && data.plan !== 'free') setSubStatus({ plan: data.plan, status: data.subscription_status, period_end: data.current_period_end });
-                else if (data.plan === 'free') setSubStatus({ plan: 'free', status: 'none', period_end: null });
+                if (data.plan && data.plan !== 'free') setSubStatus({ plan: data.plan, status: data.subscription_status, period_end: data.current_period_end, paused: !!data.paused });
+                else if (data.plan === 'free') setSubStatus({ plan: 'free', status: 'none', period_end: null, paused: false });
             }).catch(() => {});
         }
     }, [userRole]);
@@ -222,6 +223,30 @@ const Header = ({ onChangeLayoutMode, layoutModeType, headerClass, startTour }: 
                                 </button>
                             )}
 
+                            {/* Badge "Pago pausado" — solo cuando la suscripción tiene
+                                pause_collection activo en Stripe. Al hacer clic abre un
+                                modal explicativo. */}
+                            {subStatus?.paused && (
+                                <button
+                                    type="button"
+                                    className="btn btn-sm d-flex align-items-center gap-1 me-1"
+                                    onClick={() => setPausedModalOpen(true)}
+                                    title={t("payment_paused")}
+                                    style={{
+                                        background: '#fff4e5',
+                                        color: '#b54708',
+                                        borderRadius: 20,
+                                        fontSize: 12,
+                                        fontWeight: 600,
+                                        padding: '4px 12px',
+                                        border: '1.5px solid #f5c592',
+                                    }}
+                                >
+                                    <i className="ri-pause-circle-line"></i>
+                                    <span className="d-none d-sm-inline">{t("payment_paused")}</span>
+                                </button>
+                            )}
+
                             {/* FullScreenDropdown */}
                             <FullScreenDropdown />
 
@@ -248,6 +273,17 @@ const Header = ({ onChangeLayoutMode, layoutModeType, headerClass, startTour }: 
                     ticketEnabled={ticketVirtualEnabled}
                 />
             )}
+            <Modal isOpen={pausedModalOpen} toggle={() => setPausedModalOpen(false)} centered>
+                <ModalHeader toggle={() => setPausedModalOpen(false)}>
+                    <i className="ri-pause-circle-line me-2" style={{ color: '#b54708' }} />
+                    {t("payment_paused")}
+                </ModalHeader>
+                <ModalBody>
+                    <p className="mb-2">{t("payment_paused_desc")}</p>
+                    <p className="mb-0 text-muted" style={{ fontSize: 13 }}>{t("payment_paused_help")}</p>
+                </ModalBody>
+            </Modal>
+
             {[1].includes(userRole as number) && (
                 <Offcanvas
                     isOpen={aiOpen}
