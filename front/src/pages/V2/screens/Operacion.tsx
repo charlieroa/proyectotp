@@ -15,13 +15,13 @@ import { ModalAbrirCaja, ModalResumenCierre } from "../../../Components/Calendar
 type Tab = "agenda" | "tickets" | "caja";
 
 const STATUS: Record<string, { label: string; color: string; bg: string }> = {
-  scheduled: { label: "Agendada", color: "#5a5f67", bg: "#f0f0ec" },
-  rescheduled: { label: "Reagendada", color: "#5a5f67", bg: "#f0f0ec" },
+  scheduled: { label: "Agendada", color: T.muted, bg: T.surface3 },
+  rescheduled: { label: "Reagendada", color: T.muted, bg: T.surface3 },
   pending_approval: { label: "Por aprobar", color: T.purple, bg: T.purpleBg2 },
   checked_in: { label: "En curso", color: T.purple2, bg: T.purpleBg },
   checked_out: { label: "Por cobrar", color: T.amber, bg: T.amberBg },
   completed: { label: "Cobrada", color: T.green, bg: T.greenBg },
-  cancelled: { label: "Cancelada", color: T.dim, bg: "#f0f0ec" },
+  cancelled: { label: "Cancelada", color: T.dim, bg: T.surface3 },
 };
 
 const fmtTime = (iso: string): string => {
@@ -121,23 +121,23 @@ const Operacion: React.FC<ScreenProps> = ({ date }) => {
       </div>
 
       {/* stepper */}
-      <div style={{ background: "#fff", border: `1px solid ${T.border}`, borderRadius: 16, padding: "13px 15px", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: "13px 15px", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
         {steps.map((s, i) => (
           <React.Fragment key={s.n}>
             <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "4px 8px" }}>
-              <div style={{ width: 24, height: 24, borderRadius: 8, background: T.ink, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12, flex: "none" }}>{s.n}</div>
+              <div style={{ width: 24, height: 24, borderRadius: 8, background: T.ink, color: T.onInk, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12, flex: "none" }}>{s.n}</div>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 13 }}>{s.t}</div>
                 <div style={{ fontSize: 11, color: T.dim }}>{s.s}</div>
               </div>
             </div>
-            {i < steps.length - 1 && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#cdcdc7" strokeWidth="2" strokeLinecap="round" style={{ flex: "none" }}><path d="m9 6 6 6-6 6" /></svg>}
+            {i < steps.length - 1 && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.faint} strokeWidth="2" strokeLinecap="round" style={{ flex: "none" }}><path d="m9 6 6 6-6 6" /></svg>}
           </React.Fragment>
         ))}
       </div>
 
       {/* tabs */}
-      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 16, background: "#fff", border: `1px solid ${T.border}`, borderRadius: 13, padding: 6, width: "fit-content" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 16, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 13, padding: 6, width: "fit-content" }}>
         <TabBtn active={tab === "agenda"} onClick={() => setTab("agenda")} label="Agenda" count={kCitas} />
         <TabBtn active={tab === "tickets"} onClick={() => setTab("tickets")} label="Tickets abiertos" count={tickets?.summary?.open_count ?? kTickets} />
         <TabBtn active={tab === "caja"} onClick={() => setTab("caja")} label="Caja" />
@@ -206,8 +206,8 @@ const Operacion: React.FC<ScreenProps> = ({ date }) => {
       {/* CAJA */}
       {tab === "caja" && (
         <div>
-          <div style={{ background: "#fff", border: `1px solid ${T.border}`, borderRadius: 16, padding: "16px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 14 }}>
-            <span style={{ width: 10, height: 10, borderRadius: "50%", background: cash ? T.green : T.dim, boxShadow: cash ? `0 0 0 4px ${T.green}22` : "none" }} />
+          <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: "16px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 14 }}>
+            <span style={{ width: 10, height: 10, borderRadius: "50%", background: cash ? T.green : T.dim, boxShadow: cash ? "0 0 0 4px rgba(20,160,90,.22)" : "none" }} />
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 800, fontSize: 15 }}>{cash ? "Caja abierta" : "Caja cerrada"}</div>
               <div style={{ fontSize: 12.5, color: T.muted }}>
@@ -273,13 +273,13 @@ const Operacion: React.FC<ScreenProps> = ({ date }) => {
 
 // ── sub-componentes ──────────────────────────────────────────
 const TabBtn: React.FC<{ active: boolean; onClick: () => void; label: string; count?: number }> = ({ active, onClick, label, count }) => (
-  <button onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 7, background: active ? T.ink : "transparent", color: active ? "#fff" : T.muted, border: 0, borderRadius: 9, padding: "9px 14px", fontWeight: 700, fontSize: 13, fontFamily: FONT, cursor: "pointer" }}>
+  <button onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 7, background: active ? T.ink : "transparent", color: active ? T.onInk : T.muted, border: 0, borderRadius: 9, padding: "9px 14px", fontWeight: 700, fontSize: 13, fontFamily: FONT, cursor: "pointer" }}>
     {label}{count !== undefined && <span style={{ opacity: 0.6 }}>{count}</span>}
   </button>
 );
 
 const TicketRow: React.FC<{ t: any; onOpen: () => void; tone: "open" | "paid" }> = ({ t, onOpen, tone }) => (
-  <div onClick={onOpen} style={{ background: "#fff", border: `1px solid ${T.border}`, borderRadius: 16, padding: "18px 20px", marginBottom: 13, display: "flex", alignItems: "center", gap: 16, cursor: "pointer", opacity: tone === "paid" ? 0.75 : 1 }}>
+  <div onClick={onOpen} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: "18px 20px", marginBottom: 13, display: "flex", alignItems: "center", gap: 16, cursor: "pointer", opacity: tone === "paid" ? 0.75 : 1 }}>
     <div style={{ width: 42, height: 42, borderRadius: 12, background: colorFor(t.client_name || t.id), color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 14 }}>{initials(t.client_name || "?")}</div>
     <div style={{ flex: 1 }}>
       <div style={{ fontWeight: 700, fontSize: 15 }}>{t.client_name || "Cliente"}</div>
@@ -293,8 +293,8 @@ const TicketRow: React.FC<{ t: any; onOpen: () => void; tone: "open" | "paid" }>
   </div>
 );
 
-const selStyle: React.CSSProperties = { background: "#fff", border: `1px solid ${T.border}`, borderRadius: 12, padding: "9px 12px", fontWeight: 700, fontSize: 13.5, fontFamily: FONT, cursor: "pointer" };
-const btnDark: React.CSSProperties = { background: T.ink, color: "#fff", border: 0, borderRadius: 10, padding: "10px 16px", fontWeight: 700, fontSize: 13, fontFamily: FONT, cursor: "pointer" };
-const btnRed: React.CSSProperties = { background: "#fff", border: `1px solid ${T.border}`, borderRadius: 11, padding: "11px 16px", fontWeight: 700, fontSize: 13, fontFamily: FONT, cursor: "pointer", color: T.red };
+const selStyle: React.CSSProperties = { background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: "9px 12px", fontWeight: 700, fontSize: 13.5, fontFamily: FONT, cursor: "pointer" };
+const btnDark: React.CSSProperties = { background: T.ink, color: T.onInk, border: 0, borderRadius: 10, padding: "10px 16px", fontWeight: 700, fontSize: 13, fontFamily: FONT, cursor: "pointer" };
+const btnRed: React.CSSProperties = { background: T.surface, border: `1px solid ${T.border}`, borderRadius: 11, padding: "11px 16px", fontWeight: 700, fontSize: 13, fontFamily: FONT, cursor: "pointer", color: T.red };
 
 export default Operacion;

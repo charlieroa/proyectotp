@@ -169,7 +169,7 @@ const Nomina: React.FC<ScreenProps> = ({ tenantId, date }) => {
           ))}
         </div>
         <div style={{ flex: 1 }} />
-        <button onClick={() => setReloadKey((n) => n + 1)} style={{ background: T.ink, color: "#fff", border: 0, borderRadius: 11, padding: "11px 18px", fontWeight: 700, fontSize: 13, fontFamily: FONT, cursor: "pointer", display: "flex", alignItems: "center", gap: 7 }}>
+        <button onClick={() => setReloadKey((n) => n + 1)} style={{ background: T.ink, color: T.onInk, border: 0, borderRadius: 11, padding: "11px 18px", fontWeight: 700, fontSize: 13, fontFamily: FONT, cursor: "pointer", display: "flex", alignItems: "center", gap: 7 }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v4h4" /></svg>
           Calcular
         </button>
@@ -257,7 +257,7 @@ const Nomina: React.FC<ScreenProps> = ({ tenantId, date }) => {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
               <Mono style={{ fontWeight: 800, fontSize: 24, color: T.green }}>{fmtCOP(tot.pagar)}</Mono>
-              <button onClick={generar} style={{ background: T.ink, color: "#fff", border: 0, borderRadius: 12, padding: "14px 22px", fontWeight: 700, fontSize: 14, fontFamily: FONT, cursor: "pointer" }}>Generar y guardar nómina</button>
+              <button onClick={generar} style={{ background: T.ink, color: T.onInk, border: 0, borderRadius: 12, padding: "14px 22px", fontWeight: 700, fontSize: 14, fontFamily: FONT, cursor: "pointer" }}>Generar y guardar nómina</button>
             </div>
           </div>
         </>
@@ -285,7 +285,7 @@ const DateField: React.FC<{ label: string; value: string; onChange: (v: string) 
 
 const chipStyle = (active: boolean): React.CSSProperties => ({
   background: active ? T.ink : T.surface,
-  color: active ? "#fff" : T.muted,
+  color: active ? T.onInk : T.muted,
   border: `1px solid ${active ? T.ink : T.border}`,
   borderRadius: 9,
   padding: "9px 13px",

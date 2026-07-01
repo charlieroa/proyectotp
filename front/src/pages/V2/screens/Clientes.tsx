@@ -129,7 +129,7 @@ const Clientes: React.FC<ScreenProps> = ({ tenantId }) => {
           onClick={() => console.log("Agregar cliente")}
           style={{
             background: T.ink,
-            color: "#fff",
+            color: T.onInk,
             border: 0,
             borderRadius: 12,
             padding: "12px 18px",

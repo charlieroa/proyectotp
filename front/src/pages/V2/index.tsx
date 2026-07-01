@@ -1,10 +1,11 @@
 // /v2 — Rediseño "Luxe claro" de Tupelukeria. Shell: sidebar + header + drawer IA.
 // Cada sección es una pantalla propia bajo screens/, cableada a datos reales.
-import React, { useState, useMemo } from "react";
-import { T, FONT, MONO, colorFor } from "./theme";
+import React, { useState, useMemo, useEffect } from "react";
+import { T, FONT, MONO, colorFor, V2_THEME_CSS } from "./theme";
 import { SectionKey } from "./types";
 import { useTenant, useCurrentUser, todayISO } from "./data/useV2Data";
 import AIDrawer from "./components/AIDrawer";
+import SedeSwitcher from "./components/SedeSwitcher";
 import Operacion from "./screens/Operacion";
 import Clientes from "./screens/Clientes";
 import Inventario from "./screens/Inventario";
@@ -43,10 +44,16 @@ const V2: React.FC = () => {
   const [section, setSection] = useState<SectionKey>("op");
   const [date, setDate] = useState<string>(todayISO());
   const [showAI, setShowAI] = useState(false);
+  const [dark, setDark] = useState<boolean>(() => localStorage.getItem("v2-theme") === "dark");
   const tenant = useTenant();
   const user = useCurrentUser();
 
   document.title = "Tupelukeria · v2";
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-v2-theme", dark ? "dark" : "light");
+    localStorage.setItem("v2-theme", dark ? "dark" : "light");
+  }, [dark]);
 
   const goTo = (s: SectionKey) => setSection(s);
   const screenProps = { tenantId: tenant.id, tenantName: tenant.name, date, onOpenAI: () => setShowAI(true), goTo };
@@ -68,20 +75,21 @@ const V2: React.FC = () => {
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: T.bg, color: T.text, fontFamily: FONT, WebkitFontSmoothing: "antialiased" }}>
+      <style>{V2_THEME_CSS}</style>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap');
         .v2-mono{font-family:${MONO};font-feature-settings:'tnum'}
-        .v2-nav:hover{background:#f4f4f1}
+        .v2-nav:hover{background:var(--v2-surface3)}
         .v2-root ::-webkit-scrollbar{width:9px;height:9px}
         .v2-root ::-webkit-scrollbar-thumb{background:rgba(0,0,0,.13);border-radius:8px}
       `}</style>
 
       {/* Sidebar */}
-      <aside style={{ width: 236, flex: "none", background: "#fff", borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh" }}>
+      <aside style={{ width: 236, flex: "none", background: T.surface, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh" }}>
         <div style={{ padding: "22px 20px 14px", display: "flex", alignItems: "center", gap: 9 }}>
           <BrandMark />
           <div style={{ fontWeight: 800, fontSize: 15.5, letterSpacing: "-.4px" }}>
-            tupelukeria<span style={{ color: "#9a9aa2", fontWeight: 600 }}>.com</span>
+            tupelukeria<span style={{ color: T.dim, fontWeight: 600 }}>.com</span>
           </div>
         </div>
 
@@ -105,8 +113,8 @@ const V2: React.FC = () => {
                     style={{
                       display: "flex", alignItems: "center", gap: 9, padding: "10px 10px", borderRadius: 10,
                       cursor: "pointer", textDecoration: "none",
-                      color: active ? T.text : "#5a5f67",
-                      background: active ? "#f0efeb" : "transparent",
+                      color: active ? T.text : T.muted,
+                      background: active ? T.surface3 : "transparent",
                       fontWeight: active ? 700 : 600, fontSize: 13.5,
                     }}
                   >
@@ -120,23 +128,15 @@ const V2: React.FC = () => {
         </nav>
 
         <div style={{ padding: 12, margin: "0 12px 14px", borderTop: `1px solid ${T.border2}`, paddingTop: 14 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "7px 8px", border: `1px solid ${T.border}`, borderRadius: 12 }}>
-            <div style={{ width: 30, height: 30, borderRadius: 8, background: T.ink, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 12 }}>
-              {(tenant.name || "S").slice(0, 1).toUpperCase()}
-            </div>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontWeight: 700, fontSize: 12.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tenant.name || "Mi salón"}</div>
-              <div style={{ fontSize: 10.5, color: T.dim }}>{tenant.city || "—"}</div>
-            </div>
-          </div>
+          <SedeSwitcher name={tenant.name} city={tenant.city} />
         </div>
       </aside>
 
       {/* Main column */}
       <div className="v2-root" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-        <header style={{ height: 62, flex: "none", background: "rgba(244,244,241,.85)", backdropFilter: "blur(10px)", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 14, padding: "0 26px", position: "sticky", top: 0, zIndex: 30 }}>
+        <header style={{ height: 62, flex: "none", background: T.bg, backdropFilter: "blur(10px)", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 14, padding: "0 26px", position: "sticky", top: 0, zIndex: 30 }}>
           {/* Date nav */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", border: `1px solid ${T.border}`, borderRadius: 12, padding: "7px 8px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: "7px 8px" }}>
             <button onClick={() => setDate(shiftDate(date, -1))} style={{ border: 0, background: "transparent", cursor: "pointer", display: "flex", color: T.muted }}>
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="m15 6-6 6 6 6" /></svg>
             </button>
@@ -147,7 +147,7 @@ const V2: React.FC = () => {
           </div>
           <button onClick={() => setDate(todayISO())} style={{ border: 0, background: "transparent", color: T.muted, fontWeight: 600, fontSize: 13, cursor: "pointer", fontFamily: FONT }}>Hoy</button>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 9, background: "#fff", border: `1px solid ${T.border}`, borderRadius: 11, padding: "9px 13px", width: 240, color: T.dim, fontSize: 13.5 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 11, padding: "9px 13px", width: 240, color: T.dim, fontSize: 13.5 }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.2-3.2" /></svg>
             <span>Buscar cliente, ticket o estilista…</span>
           </div>
@@ -157,6 +157,12 @@ const V2: React.FC = () => {
           <button onClick={() => setShowAI(true)} style={{ display: "flex", alignItems: "center", gap: 7, background: T.ink, color: "#fff", border: 0, borderRadius: 11, padding: "10px 15px", fontWeight: 700, fontSize: 13, fontFamily: FONT, cursor: "pointer" }}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c4b5ff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.8 4.7L18.5 9l-4.7 1.8L12 15l-1.8-4.2L5.5 9l4.7-1.3z" /></svg>
             Hablar con IA
+          </button>
+
+          <button onClick={() => setDark((d) => !d)} title={dark ? "Modo claro" : "Modo oscuro"} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, background: T.surface, color: T.muted, border: `1px solid ${T.border}`, borderRadius: 11, cursor: "pointer", flex: "none" }}>
+            {dark
+              ? <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4.3" /><path d="M12 2v2.2M12 19.8V22M4.2 12H2M22 12h-2.2M5.1 5.1l1.6 1.6M17.3 17.3l1.6 1.6M18.9 5.1l-1.6 1.6M6.7 17.3l-1.6 1.6" /></svg>
+              : <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" /></svg>}
           </button>
 
           <div style={{ width: 1, height: 26, background: T.border }} />

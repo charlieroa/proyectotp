@@ -1,4 +1,4 @@
-// src/pages/Authentication/Login.tsx
+// src/pages/Authentication/Login.tsx — rediseño "Luxe claro" (coherente con /v2 y la landing).
 import React, { useEffect, useState } from 'react';
 import { Spinner } from 'reactstrap';
 
@@ -10,11 +10,18 @@ import * as Yup from "yup";
 import { useFormik } from "formik";
 
 import { loginUser, socialLogin, resetLoginFlag } from "../../slices/thunks";
-import logoLight from "../../assets/images/logo-light.png";
 import { createSelector } from 'reselect';
 
 import Swal from 'sweetalert2';
 import { useTranslation } from 'react-i18next';
+
+import { T, FONT, V2_THEME_CSS } from "../V2/theme";
+
+const BrandMark: React.FC<{ size?: number }> = ({ size = 34 }) => (
+  <div style={{ width: size, height: size, borderRadius: size * 0.3, background: T.ink, display: "flex", alignItems: "center", justifyContent: "center", flex: "none" }}>
+    <svg width={size * 0.56} height={size * 0.56} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2 4.5 13.5H11l-1 8.5 8.5-12H12z" /></svg>
+  </div>
+);
 
 const Login = (props: any) => {
   const { t } = useTranslation();
@@ -36,7 +43,12 @@ const Login = (props: any) => {
   const [userLogin, setUserLogin] = useState<any>({});
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [loader, setLoader] = useState<boolean>(false);
-  const [logoHover, setLogoHover] = useState<boolean>(false);
+  const [dark, setDark] = useState<boolean>(() => localStorage.getItem("v2-theme") === "dark");
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-v2-theme", dark ? "dark" : "light");
+    localStorage.setItem("v2-theme", dark ? "dark" : "light");
+  }, [dark]);
 
   useEffect(() => {
     if (user) {
@@ -70,6 +82,7 @@ const Login = (props: any) => {
     },
   });
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const signIn = (type: any) => {
     dispatch(socialLogin(type, props.router.navigate));
   };
@@ -82,9 +95,9 @@ const Login = (props: any) => {
         title: t("invalid_credentials"),
         text: messageRaw?.trim() || t("check_credentials"),
         confirmButtonText: t("got_it"),
-        confirmButtonColor: "#7c3aed",
-        background: "#0f172a",
-        color: "#e2e8f0",
+        confirmButtonColor: "#15171c",
+        background: dark ? "#171a1f" : "#ffffff",
+        color: dark ? "#f2f3f1" : "#15171c",
       }).finally(() => {
         setLoader(false);
         dispatch(resetLoginFlag());
@@ -94,178 +107,81 @@ const Login = (props: any) => {
 
   document.title = `${t("sign_in")} | Tupelukeria`;
 
-  const inputStyle = (touched: boolean, hasError: boolean) => ({
+  const inputStyle = (touched: boolean, hasError: boolean): React.CSSProperties => ({
     width: '100%',
-    padding: '14px 16px',
-    background: 'rgba(2, 6, 23, 0.8)',
-    border: touched && hasError
-      ? '1px solid #ef4444'
-      : '1px solid rgba(100, 116, 139, 0.3)',
-    borderRadius: '12px',
-    color: '#e2e8f0',
-    fontSize: '14px',
+    padding: '13px 15px',
+    background: T.surface2,
+    border: touched && hasError ? `1px solid ${T.red}` : `1px solid ${T.border}`,
+    borderRadius: 12,
+    color: T.text,
+    fontSize: 14,
+    fontFamily: FONT,
     outline: 'none',
-    transition: 'border-color 0.2s',
-    boxSizing: 'border-box' as const,
+    transition: 'border-color .15s',
+    boxSizing: 'border-box',
   });
 
   return (
-    <div style={{
+    <div className="lx-login" style={{
       minHeight: '100vh',
-      background: '#000000',
+      background: T.bg,
+      color: T.text,
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       position: 'relative',
       overflow: 'hidden',
-      fontFamily: '"Inter", sans-serif',
+      fontFamily: FONT,
+      WebkitFontSmoothing: 'antialiased',
     }}>
-      {/* Grid pattern background */}
-      <div style={{
-        position: 'fixed',
-        inset: 0,
-        backgroundSize: '40px 40px',
-        backgroundImage: 'linear-gradient(to right, rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.05) 1px, transparent 1px)',
-        maskImage: 'linear-gradient(to bottom, transparent, black, transparent)',
-        WebkitMaskImage: 'linear-gradient(to bottom, transparent 10%, black 50%, transparent 90%)',
-        pointerEvents: 'none',
-        zIndex: 0,
-      }} />
+      <style>{V2_THEME_CSS}</style>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap');
+        .lx-login ::placeholder{color:var(--v2-faint)}
+        .lx-login input:-webkit-autofill{-webkit-text-fill-color:var(--v2-text);transition:background-color 5000s}
+      `}</style>
 
-      {/* Animated blobs */}
-      <div style={{
-        position: 'absolute',
-        top: '20%',
-        left: '30%',
-        width: '400px',
-        height: '400px',
-        background: 'rgba(124, 58, 237, 0.25)',
-        borderRadius: '50%',
-        filter: 'blur(120px)',
-        animation: 'blob 10s infinite',
-        zIndex: 0,
-      }} />
-      <div style={{
-        position: 'absolute',
-        bottom: '20%',
-        right: '20%',
-        width: '350px',
-        height: '350px',
-        background: 'rgba(34, 211, 238, 0.15)',
-        borderRadius: '50%',
-        filter: 'blur(100px)',
-        animation: 'blob 10s infinite reverse',
-        zIndex: 0,
-      }} />
+      {/* glow verde superior (igual que la landing) */}
+      <div style={{ position: 'absolute', top: -40, left: '50%', transform: 'translateX(-50%)', width: 760, height: 380, background: 'radial-gradient(closest-side,rgba(20,160,90,.13),transparent)', pointerEvents: 'none', zIndex: 0 }} />
 
-      <div style={{
-        position: 'relative',
-        zIndex: 10,
-        width: '100%',
-        maxWidth: '440px',
-        padding: '0 20px',
-      }}>
-        {/* Logo centrado */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '28px' }}>
-          <Link to="/" style={{ display: 'inline-block' }}>
-            <img
-              src={logoLight}
-              alt="Tupelukeria"
-              onMouseEnter={() => setLogoHover(true)}
-              onMouseLeave={() => setLogoHover(false)}
-              style={{
-                height: '70px',
-                display: 'block',
-                transition: 'filter 250ms ease',
-                filter: logoHover
-                  ? 'drop-shadow(0 0 15px rgba(34, 211, 238, 0.5))'
-                  : 'drop-shadow(0 0 10px rgba(139, 92, 246, 0.4))',
-              }}
-            />
+      {/* toggle claro/oscuro */}
+      <button onClick={() => setDark((d) => !d)} title={dark ? "Modo claro" : "Modo oscuro"} style={{ position: 'absolute', top: 20, right: 22, zIndex: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 40, height: 40, background: T.surface, color: T.muted, border: `1px solid ${T.border}`, borderRadius: 12, cursor: 'pointer' }}>
+        {dark
+          ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4.3" /><path d="M12 2v2.2M12 19.8V22M4.2 12H2M22 12h-2.2M5.1 5.1l1.6 1.6M17.3 17.3l1.6 1.6M18.9 5.1l-1.6 1.6M6.7 17.3l-1.6 1.6" /></svg>
+          : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" /></svg>}
+      </button>
+
+      <div style={{ position: 'relative', zIndex: 10, width: '100%', maxWidth: 430, padding: '0 20px' }}>
+        {/* Marca */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 24 }}>
+          <Link to="/" style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+            <BrandMark />
+            <span style={{ fontWeight: 800, fontSize: 20, letterSpacing: '-.5px', color: T.text }}>
+              tupelukeria<span style={{ color: T.dim, fontWeight: 600 }}>.com</span>
+            </span>
           </Link>
-          <p style={{
-            marginTop: '10px',
-            fontSize: '13px',
-            color: '#94a3b8',
-            fontWeight: 400,
-          }}>
-            {t("ai_tagline")}
-          </p>
+          <p style={{ marginTop: 12, fontSize: 13.5, color: T.muted, fontWeight: 500 }}>{t("ai_tagline")}</p>
         </div>
 
-        {/* Tabs Login / Registro */}
-        <div style={{
-          display: 'flex',
-          background: 'rgba(15, 23, 42, 0.6)',
-          backdropFilter: 'blur(8px)',
-          borderRadius: '16px',
-          padding: '4px',
-          marginBottom: '20px',
-          border: '1px solid rgba(100, 116, 139, 0.2)',
-        }}>
-          <div style={{
-            flex: 1,
-            textAlign: 'center',
-            padding: '12px 0',
-            borderRadius: '12px',
-            background: 'linear-gradient(135deg, #7c3aed, #8b5cf6)',
-            color: '#ffffff',
-            fontWeight: 700,
-            fontSize: '14px',
-            cursor: 'default',
-            boxShadow: '0 2px 10px rgba(139, 92, 246, 0.3)',
-          }}>
+        {/* Tabs */}
+        <div style={{ display: 'flex', gap: 4, background: T.surface, borderRadius: 14, padding: 4, marginBottom: 18, border: `1px solid ${T.border}` }}>
+          <div style={{ flex: 1, textAlign: 'center', padding: '11px 0', borderRadius: 10, background: T.ink, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'default' }}>
             {t("sign_in")}
           </div>
           <div
             onClick={() => navigate('/register-tenant')}
-            style={{
-              flex: 1,
-              textAlign: 'center',
-              padding: '12px 0',
-              borderRadius: '12px',
-              background: 'transparent',
-              color: '#64748b',
-              fontWeight: 600,
-              fontSize: '14px',
-              cursor: 'pointer',
-              transition: 'color 0.2s',
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = '#a78bfa')}
-            onMouseLeave={(e) => (e.currentTarget.style.color = '#64748b')}
+            style={{ flex: 1, textAlign: 'center', padding: '11px 0', borderRadius: 10, background: 'transparent', color: T.muted, fontWeight: 600, fontSize: 14, cursor: 'pointer' }}
           >
             {t("create_account")}
           </div>
         </div>
 
         {/* Card */}
-        <div style={{
-          background: 'linear-gradient(145deg, rgba(30, 41, 59, 0.5), rgba(15, 23, 42, 0.3))',
-          backdropFilter: 'blur(16px)',
-          WebkitBackdropFilter: 'blur(16px)',
-          border: '1px solid rgba(139, 92, 246, 0.2)',
-          borderRadius: '24px',
-          padding: '32px',
-          boxShadow: '0 4px 40px rgba(0, 0, 0, 0.5)',
-        }}>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              validation.handleSubmit();
-              return false;
-            }}
-          >
+        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 24, padding: 30, boxShadow: '0 20px 50px rgba(0,0,0,.07)' }}>
+          <form onSubmit={(e) => { e.preventDefault(); validation.handleSubmit(); return false; }}>
             {/* Email */}
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{
-                display: 'block',
-                fontSize: '13px',
-                fontWeight: 500,
-                color: '#94a3b8',
-                marginBottom: '8px',
-              }}>
-                {t("email")}
-              </label>
+            <div style={{ marginBottom: 18 }}>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: T.muted, marginBottom: 7 }}>{t("email")}</label>
               <input
                 name="email"
                 type="email"
@@ -274,41 +190,19 @@ const Login = (props: any) => {
                 onBlur={validation.handleBlur}
                 value={validation.values.email || ""}
                 style={inputStyle(validation.touched.email, !!validation.errors.email)}
-                onFocus={(e) => {
-                  if (!(validation.touched.email && validation.errors.email)) {
-                    e.target.style.borderColor = 'rgba(139, 92, 246, 0.5)';
-                  }
-                }}
-                onBlurCapture={(e) => {
-                  if (!(validation.touched.email && validation.errors.email)) {
-                    e.target.style.borderColor = 'rgba(100, 116, 139, 0.3)';
-                  }
-                }}
+                onFocus={(e) => { if (!(validation.touched.email && validation.errors.email)) e.target.style.borderColor = T.green; }}
+                onBlurCapture={(e) => { if (!(validation.touched.email && validation.errors.email)) e.target.style.borderColor = T.border; }}
               />
               {validation.touched.email && validation.errors.email && (
-                <p style={{ color: '#ef4444', fontSize: '12px', marginTop: '6px' }}>
-                  {validation.errors.email}
-                </p>
+                <p style={{ color: T.red, fontSize: 12, marginTop: 6 }}>{validation.errors.email}</p>
               )}
             </div>
 
             {/* Password */}
-            <div style={{ marginBottom: '20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                <label style={{
-                  fontSize: '13px',
-                  fontWeight: 500,
-                  color: '#94a3b8',
-                }}>
-                  {t("password")}
-                </label>
-                <Link to="/forgot-password" style={{
-                  fontSize: '12px',
-                  color: '#8b5cf6',
-                  textDecoration: 'none',
-                }}>
-                  {t("forgot_password")}
-                </Link>
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 7 }}>
+                <label style={{ fontSize: 13, fontWeight: 600, color: T.muted }}>{t("password")}</label>
+                <Link to="/forgot-password" style={{ fontSize: 12, color: T.green, textDecoration: 'none', fontWeight: 600 }}>{t("forgot_password")}</Link>
               </div>
               <div style={{ position: 'relative' }}>
                 <input
@@ -318,89 +212,40 @@ const Login = (props: any) => {
                   onChange={validation.handleChange}
                   onBlur={validation.handleBlur}
                   value={validation.values.password || ""}
-                  style={{
-                    ...inputStyle(validation.touched.password, !!validation.errors.password),
-                    paddingRight: '48px',
-                  }}
-                  onFocus={(e) => {
-                    if (!(validation.touched.password && validation.errors.password)) {
-                      e.target.style.borderColor = 'rgba(139, 92, 246, 0.5)';
-                    }
-                  }}
-                  onBlurCapture={(e) => {
-                    if (!(validation.touched.password && validation.errors.password)) {
-                      e.target.style.borderColor = 'rgba(100, 116, 139, 0.3)';
-                    }
-                  }}
+                  style={{ ...inputStyle(validation.touched.password, !!validation.errors.password), paddingRight: 46 }}
+                  onFocus={(e) => { if (!(validation.touched.password && validation.errors.password)) e.target.style.borderColor = T.green; }}
+                  onBlurCapture={(e) => { if (!(validation.touched.password && validation.errors.password)) e.target.style.borderColor = T.border; }}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  style={{
-                    position: 'absolute',
-                    right: '14px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    background: 'none',
-                    border: 'none',
-                    color: '#64748b',
-                    cursor: 'pointer',
-                    fontSize: '16px',
-                    padding: '4px',
-                  }}
+                  style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: T.dim, cursor: 'pointer', padding: 4, display: 'flex' }}
                 >
-                  {showPassword ? '\u{1F648}' : '\u{1F441}\u{FE0F}'}
+                  {showPassword
+                    ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.4 5.2A9.4 9.4 0 0 1 12 5c5 0 9 4.5 9 7 0 1-.7 2.3-1.9 3.5M6.1 6.6C4 7.9 3 9.9 3 12c0 0 4 7 9 7 1 0 2-.2 2.9-.5" /></svg>
+                    : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></svg>}
                 </button>
               </div>
               {validation.touched.password && validation.errors.password && (
-                <p style={{ color: '#ef4444', fontSize: '12px', marginTop: '6px' }}>
-                  {validation.errors.password}
-                </p>
+                <p style={{ color: T.red, fontSize: 12, marginTop: 6 }}>{validation.errors.password}</p>
               )}
             </div>
 
             {/* Remember me */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '28px' }}>
-              <input
-                type="checkbox"
-                id="remember-check"
-                style={{
-                  width: '16px',
-                  height: '16px',
-                  accentColor: '#8b5cf6',
-                  cursor: 'pointer',
-                }}
-              />
-              <label htmlFor="remember-check" style={{
-                fontSize: '13px',
-                color: '#94a3b8',
-                cursor: 'pointer',
-              }}>
-                {t("remember_me")}
-              </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 24 }}>
+              <input type="checkbox" id="remember-check" style={{ width: 16, height: 16, accentColor: T.green, cursor: 'pointer' }} />
+              <label htmlFor="remember-check" style={{ fontSize: 13, color: T.muted, cursor: 'pointer' }}>{t("remember_me")}</label>
             </div>
 
-            {/* Submit Button */}
+            {/* Submit */}
             <button
               type="submit"
               disabled={loader}
               style={{
-                width: '100%',
-                padding: '16px',
-                background: 'linear-gradient(135deg, #7c3aed, #8b5cf6, #6d28d9)',
-                border: 'none',
-                borderRadius: '14px',
-                color: '#ffffff',
-                fontSize: '16px',
-                fontWeight: 700,
-                cursor: loader ? 'not-allowed' : 'pointer',
-                opacity: loader ? 0.7 : 1,
-                transition: 'all 0.3s',
-                boxShadow: '0 0 20px rgba(139, 92, 246, 0.4)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
+                width: '100%', padding: 15, background: T.ink, border: 'none', borderRadius: 14,
+                color: '#fff', fontSize: 15.5, fontWeight: 700, fontFamily: FONT,
+                cursor: loader ? 'not-allowed' : 'pointer', opacity: loader ? 0.75 : 1,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
               }}
             >
               {loader && <Spinner size="sm" />}
@@ -410,24 +255,10 @@ const Login = (props: any) => {
         </div>
 
         {/* Footer */}
-        <div style={{ textAlign: 'center', marginTop: '40px' }}>
-          <p style={{ fontSize: '11px', color: '#334155', fontFamily: 'monospace' }}>
-            &copy; 2026 TUPELUKERIA SYSTEMS
-          </p>
+        <div style={{ textAlign: 'center', marginTop: 30 }}>
+          <p className="v2-mono" style={{ fontSize: 11, color: T.faint, fontFamily: "'JetBrains Mono',monospace" }}>&copy; 2026 · TUPELUKERIA</p>
         </div>
       </div>
-
-      <style>{`
-        @keyframes blob {
-          0% { transform: translate(0px, 0px) scale(1); }
-          33% { transform: translate(30px, -50px) scale(1.1); }
-          66% { transform: translate(-20px, 20px) scale(0.9); }
-          100% { transform: translate(0px, 0px) scale(1); }
-        }
-        ::placeholder {
-          color: #475569 !important;
-        }
-      `}</style>
     </div>
   );
 };

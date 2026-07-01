@@ -40,7 +40,7 @@ export const Kpi: React.FC<{
         fontSize: 21,
         fontWeight: 800,
         marginTop: 6,
-        color: valueColor || (dark ? "#fff" : T.text),
+        color: valueColor || (dark ? T.onInk : T.text),
       }}
     >
       {value}

@@ -249,7 +249,7 @@ const btnGhost: React.CSSProperties = {
 
 const btnDark: React.CSSProperties = {
   background: T.ink,
-  color: "#fff",
+  color: T.onInk,
   border: 0,
   borderRadius: R.md,
   padding: "9px 14px",

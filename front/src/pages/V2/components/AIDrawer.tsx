@@ -49,7 +49,7 @@ const AIDrawer: React.FC<{ open: boolean; onClose: () => void; userName: string 
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ width: 430, maxWidth: "92vw", height: "100vh", background: "#fff", display: "flex", flexDirection: "column", boxShadow: "-12px 0 40px rgba(0,0,0,.12)" }}
+        style={{ width: 430, maxWidth: "92vw", height: "100vh", background: T.surface, display: "flex", flexDirection: "column", boxShadow: "-12px 0 40px rgba(0,0,0,.12)" }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "18px 20px", borderBottom: `1px solid ${T.border2}` }}>
           <div style={{ width: 34, height: 34, borderRadius: 10, background: "linear-gradient(135deg,#6d5ce7,#a78bfa)", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -59,7 +59,7 @@ const AIDrawer: React.FC<{ open: boolean; onClose: () => void; userName: string 
             <div style={{ fontWeight: 800, fontSize: 15 }}>Asistente Tupelukeria</div>
             <div style={{ fontSize: 11.5, color: T.green, fontWeight: 600 }}>● Agéntico · puede hacer acciones por ti</div>
           </div>
-          <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: 9, border: `1px solid ${T.border}`, background: "#fff", cursor: "pointer", fontSize: 16, color: T.muted }}>✕</button>
+          <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: 9, border: `1px solid ${T.border}`, background: T.surface, cursor: "pointer", fontSize: 16, color: T.muted }}>✕</button>
         </div>
 
         <div ref={scrollRef} style={{ flex: 1, overflow: "auto", padding: 20 }}>
@@ -84,8 +84,8 @@ const AIDrawer: React.FC<{ open: boolean; onClose: () => void; userName: string 
                   fontSize: 13.5,
                   lineHeight: 1.5,
                   whiteSpace: "pre-wrap",
-                  background: m.role === "user" ? T.ink : "#f4f4f1",
-                  color: m.role === "user" ? "#fff" : T.text,
+                  background: m.role === "user" ? T.ink : T.bg,
+                  color: m.role === "user" ? T.onInk : T.text,
                 }}
               >
                 {m.text}
@@ -98,7 +98,7 @@ const AIDrawer: React.FC<{ open: boolean; onClose: () => void; userName: string 
         <div style={{ padding: "14px 18px 18px", borderTop: `1px solid ${T.border2}` }}>
           <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 11 }}>
             {CHIPS.map((c) => (
-              <button key={c} onClick={() => send(c)} style={{ background: "#f4f4f1", border: `1px solid ${T.border}`, borderRadius: 9, padding: "7px 12px", fontWeight: 600, fontSize: 12, fontFamily: FONT, cursor: "pointer", color: T.text }}>
+              <button key={c} onClick={() => send(c)} style={{ background: T.bg, border: `1px solid ${T.border}`, borderRadius: 9, padding: "7px 12px", fontWeight: 600, fontSize: 12, fontFamily: FONT, cursor: "pointer", color: T.text }}>
                 {c}
               </button>
             ))}
@@ -111,7 +111,7 @@ const AIDrawer: React.FC<{ open: boolean; onClose: () => void; userName: string 
               placeholder="Escribe lo que necesitas…"
               style={{ flex: 1, border: 0, outline: "none", fontSize: 13.5, fontFamily: FONT, background: "transparent", color: T.text }}
             />
-            <button onClick={() => send(input)} disabled={busy} style={{ width: 36, height: 36, borderRadius: 10, border: 0, background: T.ink, color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <button onClick={() => send(input)} disabled={busy} style={{ width: 36, height: 36, borderRadius: 10, border: 0, background: T.ink, color: T.onInk, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
             </button>
           </div>

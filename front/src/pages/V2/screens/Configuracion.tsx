@@ -9,7 +9,7 @@ import { ScreenProps } from "../types";
 import { T, R, FONT, fmtCOP, colorFor, initials } from "../theme";
 import { Toggle, Mono, Loading, Empty, Avatar } from "../components/ui";
 
-type TabKey = "datos" | "personal" | "servicios" | "comisiones" | "horarios" | "bot" | "planes";
+type TabKey = "datos" | "personal" | "servicios" | "comisiones" | "horarios" | "bot" | "coworking" | "planes";
 
 type Tenant = {
   id: string;
@@ -80,14 +80,21 @@ const ROLE: Record<number, { label: string; color: string; bg: string }> = {
   3: { label: "Estilista", color: T.green, bg: T.greenBg },
   6: { label: "Recepción", color: T.amber, bg: T.amberBg },
 };
-const roleOf = (id: number) => ROLE[id] || { label: "Equipo", color: T.muted, bg: "#f0f0ec" };
+const roleOf = (id: number) => ROLE[id] || { label: "Equipo", color: T.muted, bg: T.surface3 };
 
-// ── planes (fiel al mockup, resalta el plan real del tenant) ──
+// ── planes (mismos que la landing tupelukeria.com) ──
 const PLANS = [
-  { key: "free", name: "Free", price: "$0", desc: "Para empezar a ordenar la agenda.", feats: ["Agenda y citas", "1 sede", "Hasta 3 estilistas", "Soporte por correo"] },
-  { key: "pro", name: "Pro", price: "$29.900", desc: "El salón que ya factura en serio.", feats: ["Todo lo de Free", "Punto de venta y caja", "Comisiones y nómina", "Estilistas ilimitados"] },
-  { key: "enterprise", name: "Enterprise", price: "$129.900", desc: "Varias sedes, bot y automatización.", feats: ["Todo lo de Pro", "Bot de WhatsApp", "Multi-sede y coworking", "Reportes avanzados"] },
+  { key: "inicia", name: "Inicia", monthly: "$ 19.900", annual: "$ 16.700", billMonthly: "facturado mensual", billAnnual: "facturado anual · $200.000/año", desc: "Para tu salón, lo esencial", feats: ["Hasta 5 estilistas", "Agenda, tickets y caja", "Nómina y comisiones", "Soporte en español"] },
+  { key: "crece", name: "Crece", monthly: "$ 69.900", annual: "$ 59.400", billMonthly: "facturado mensual", billAnnual: "facturado anual · ahorras 15%", desc: "Tu salón con IA", popular: true, feats: ["15 estilistas + 2 recepción", "WhatsApp agéntico", "Inventario + CRM", "Nómina y comisiones"] },
+  { key: "imperio", name: "Imperio", monthly: "$ 139.900", annual: "$ 118.900", billMonthly: "facturado mensual", billAnnual: "facturado anual · ahorras 15%", desc: "Varias sedes", feats: ["Estilistas ilimitados", "Multi-sede ilimitado", "Arriendo de cupos", "Página web incluida"] },
 ];
+// mapea el plan interno del tenant (free/pro/business/enterprise) al plan comercial
+const PLAN_MAP: Record<string, string> = {
+  free: "inicia", basic: "inicia", inicia: "inicia", pro: "inicia",
+  business: "crece", crece: "crece", pro_plus: "crece",
+  enterprise: "imperio", imperio: "imperio",
+  plus: "plus",
+};
 
 const Configuracion: React.FC<ScreenProps> = ({ tenantId, tenantName }) => {
   const [tab, setTab] = useState<TabKey>("datos");
@@ -96,6 +103,7 @@ const Configuracion: React.FC<ScreenProps> = ({ tenantId, tenantName }) => {
   const [staff, setStaff] = useState<Staff[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [canCowork, setCanCowork] = useState(false);
 
   // horarios por estilista (lazy)
   const [selStylist, setSelStylist] = useState<string | null>(null);
@@ -118,6 +126,15 @@ const Configuracion: React.FC<ScreenProps> = ({ tenantId, tenantName }) => {
       if (sRes.status === "fulfilled") setServices(Array.isArray(sRes.value.data) ? sRes.value.data : []);
       if (cRes.status === "fulfilled") setCategories(Array.isArray(cRes.value.data) ? cRes.value.data : []);
     }).finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [tenantId]);
+
+  // ¿este usuario puede gestionar coworking? (muestra la pestaña Coworking)
+  useEffect(() => {
+    let alive = true;
+    api.get("/chair-rentals/access")
+      .then(({ data }) => { if (alive) setCanCowork(!!data?.can_manage); })
+      .catch(() => { if (alive) setCanCowork(false); });
     return () => { alive = false; };
   }, [tenantId]);
 
@@ -154,6 +171,7 @@ const Configuracion: React.FC<ScreenProps> = ({ tenantId, tenantName }) => {
     { key: "comisiones", label: "Comisiones" },
     { key: "horarios", label: "Horarios" },
     { key: "bot", label: "Bot" },
+    ...(canCowork ? [{ key: "coworking" as TabKey, label: "Coworking" }] : []),
     { key: "planes", label: "Planes" },
   ];
 
@@ -180,7 +198,7 @@ const Configuracion: React.FC<ScreenProps> = ({ tenantId, tenantName }) => {
             >
               {tb.label}
               {tb.count !== undefined && (
-                <span style={{ background: on ? T.ink : T.surface3, color: on ? "#fff" : T.dim, fontSize: 10.5, fontWeight: 700, padding: "1px 7px", borderRadius: 999 }}>{tb.count}</span>
+                <span style={{ background: on ? T.ink : T.surface3, color: on ? T.onInk : T.dim, fontSize: 10.5, fontWeight: 700, padding: "1px 7px", borderRadius: 999 }}>{tb.count}</span>
               )}
             </button>
           );
@@ -202,6 +220,7 @@ const Configuracion: React.FC<ScreenProps> = ({ tenantId, tenantName }) => {
         />
       )}
       {tab === "bot" && <BotTab salon={tenantName} />}
+      {tab === "coworking" && <CoworkingTab />}
       {tab === "planes" && <PlanesTab plan={plan} />}
     </div>
   );
@@ -431,7 +450,7 @@ const HorariosTab: React.FC<{
                     onClick={() => setSelStylist(s.id)}
                     style={{
                       display: "flex", alignItems: "center", gap: 7, cursor: "pointer", fontFamily: FONT,
-                      background: on ? T.ink : T.surface, color: on ? "#fff" : T.text,
+                      background: on ? T.ink : T.surface, color: on ? T.onInk : T.text,
                       border: `1px solid ${on ? T.ink : T.border}`, borderRadius: R.md, padding: "7px 11px", fontWeight: 700, fontSize: 12.5,
                     }}
                   >
@@ -454,7 +473,7 @@ const HorariosTab: React.FC<{
 
 // ── BOT (vista fiel al mockup, semi-estática) ─────────────────
 const chipTone = (on: boolean) => ({
-  background: on ? T.ink : T.surface2, color: on ? "#fff" : T.muted,
+  background: on ? T.ink : T.surface2, color: on ? T.onInk : T.muted,
   border: on ? "0" : `1px solid ${T.border}`, fontWeight: 700, fontSize: 12.5, padding: "8px 16px", borderRadius: 9,
 });
 const BotTab: React.FC<{ salon: string }> = ({ salon }) => (
@@ -469,7 +488,7 @@ const BotTab: React.FC<{ salon: string }> = ({ salon }) => (
     </div>
     <div style={{ marginBottom: 16 }}>
       <label style={{ fontSize: 12, fontWeight: 600, color: T.muted }}>Mensaje de bienvenida</label>
-      <div style={{ marginTop: 6, border: `1px solid ${T.border}`, borderRadius: R.md, padding: "12px 14px", fontSize: 13.5, lineHeight: 1.5, background: T.surface2, color: "#3a3f47" }}>
+      <div style={{ marginTop: 6, border: `1px solid ${T.border}`, borderRadius: R.md, padding: "12px 14px", fontSize: 13.5, lineHeight: 1.5, background: T.surface2, color: T.text }}>
         ¡Hola! 👋 Soy el asistente de {salon || "tu peluquería"}. ¿Quieres agendar una cita? Dime el día y la hora que prefieres.
       </div>
     </div>
@@ -500,45 +519,231 @@ const BotTab: React.FC<{ salon: string }> = ({ salon }) => (
   </div>
 );
 
-// ── PLANES ────────────────────────────────────────────────────
-const PlanesTab: React.FC<{ plan: string }> = ({ plan }) => (
-  <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16 }}>
-    {PLANS.map((pl) => {
-      const current = pl.key === plan;
-      return (
-        <div key={pl.key} style={{ position: "relative", background: current ? T.ink : T.surface, color: current ? "#fff" : T.text, border: current ? "0" : `1px solid ${T.border}`, borderRadius: R.xxl, padding: 22 }}>
-          {current && (
-            <span style={{ position: "absolute", top: 16, right: 16, background: T.green, color: "#fff", fontWeight: 700, fontSize: 10.5, padding: "4px 10px", borderRadius: 7 }}>TU PLAN</span>
-          )}
-          <div style={{ fontWeight: 800, fontSize: 16 }}>{pl.name}</div>
-          <div style={{ margin: "10px 0 4px" }}>
-            <Mono style={{ fontSize: 30, fontWeight: 800 }}>{pl.price}</Mono>
-            <span style={{ fontSize: 12.5, color: current ? "rgba(255,255,255,.6)" : T.muted }}>/mes</span>
-          </div>
-          <div style={{ fontSize: 12.5, color: current ? "rgba(255,255,255,.7)" : T.muted, marginBottom: 16 }}>{pl.desc}</div>
-          {pl.feats.map((f, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, padding: "6px 0", fontSize: 13, color: current ? "rgba(255,255,255,.9)" : T.text }}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={current ? "#fff" : T.green} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 5 5L20 7" /></svg>
-              {f}
-            </div>
-          ))}
-          <button
-            onClick={() => console.log("[v2] cambiar plan (no-op)", pl.key)}
-            style={{
-              width: "100%", marginTop: 16, borderRadius: R.md, padding: "11px 16px", fontWeight: 700, fontSize: 13, fontFamily: FONT, cursor: "pointer",
-              border: current ? "1px solid rgba(255,255,255,.3)" : `1px solid ${T.border}`,
-              background: current ? "transparent" : (pl.key === "enterprise" ? T.ink : T.surface),
-              color: current ? "#fff" : (pl.key === "enterprise" ? "#fff" : T.text),
-            }}
-          >
-            {current ? "Plan actual" : "Elegir plan"}
+// ── PLANES (mismos planes que la landing) ─────────────────────
+const PlanesTab: React.FC<{ plan: string }> = ({ plan }) => {
+  const [annual, setAnnual] = useState(false);
+  const currentKey = PLAN_MAP[(plan || "").toLowerCase()] || "";
+  const seg = (on: boolean): React.CSSProperties => ({
+    display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 9, border: 0,
+    fontFamily: FONT, fontWeight: 700, fontSize: 13, cursor: "pointer",
+    background: on ? T.ink : "transparent", color: on ? T.onInk : T.muted,
+  });
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "center", marginBottom: 22 }}>
+        <div style={{ display: "inline-flex", gap: 4, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: 4 }}>
+          <button onClick={() => setAnnual(false)} style={seg(!annual)}>Mensual</button>
+          <button onClick={() => setAnnual(true)} style={seg(annual)}>
+            Anual <span style={{ background: T.green, color: "#fff", fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 6 }}>−15%</span>
           </button>
         </div>
-      );
-    })}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16 }}>
+        {PLANS.map((pl) => {
+          const current = pl.key === currentKey;
+          const dark = current || !!pl.popular;
+          const price = annual ? pl.annual : pl.monthly;
+          const bill = annual ? pl.billAnnual : pl.billMonthly;
+          return (
+            <div key={pl.key} style={{ position: "relative", background: dark ? T.ink : T.surface, color: dark ? T.onInk : T.text, border: dark ? "0" : `1px solid ${T.border}`, borderRadius: R.xxl, padding: 22 }}>
+              {current
+                ? <span style={{ position: "absolute", top: 16, right: 16, background: T.green, color: "#fff", fontWeight: 700, fontSize: 10.5, padding: "4px 10px", borderRadius: 7 }}>TU PLAN</span>
+                : pl.popular && <span style={{ position: "absolute", top: 16, right: 16, background: "#5ee0a0", color: "#0f3d27", fontWeight: 700, fontSize: 10.5, padding: "4px 10px", borderRadius: 7 }}>POPULAR</span>}
+              <div style={{ fontWeight: 800, fontSize: 16 }}>{pl.name}</div>
+              <div style={{ margin: "10px 0 2px" }}>
+                <Mono style={{ fontSize: 30, fontWeight: 800 }}>{price}</Mono>
+                <span style={{ fontSize: 12.5, color: dark ? "rgba(255,255,255,.6)" : T.muted }}>/mes</span>
+              </div>
+              <div style={{ fontSize: 12, color: dark ? "rgba(255,255,255,.45)" : T.faint, marginBottom: 12 }}>{bill}</div>
+              <div style={{ fontSize: 12.5, color: dark ? "rgba(255,255,255,.7)" : T.muted, marginBottom: 16 }}>{pl.desc}</div>
+              {pl.feats.map((f, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, padding: "6px 0", fontSize: 13, color: dark ? "rgba(255,255,255,.9)" : T.text }}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={dark ? "#5ee0a0" : T.green} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 5 5L20 7" /></svg>
+                  {f}
+                </div>
+              ))}
+              <button
+                onClick={() => console.log("[v2] cambiar plan (no-op)", pl.key)}
+                style={{
+                  width: "100%", marginTop: 16, borderRadius: R.md, padding: "11px 16px", fontWeight: 700, fontSize: 13, fontFamily: FONT, cursor: "pointer",
+                  border: dark ? "1px solid rgba(255,255,255,.3)" : `1px solid ${T.border}`,
+                  background: dark ? (current ? "transparent" : "#fff") : T.surface,
+                  color: dark ? (current ? T.onInk : "#15171c") : T.text,
+                }}
+              >
+                {current ? "Plan actual" : (pl.popular ? "Empezar ahora" : "Elegir plan")}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Plan Plus — salón + contabilidad Bolti (igual que el index) */}
+      <div style={{ position: "relative", overflow: "hidden", background: "#101826", borderRadius: R.xxl, padding: "30px 32px", marginTop: 16, display: "flex", alignItems: "center", gap: 32, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 260 }}>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+            <span style={{ background: "rgba(255,255,255,.08)", border: "1px solid rgba(255,255,255,.14)", borderRadius: 999, padding: "5px 12px", fontWeight: 700, fontSize: 11.5, color: "#fff" }}>tupelukeria<span style={{ color: "#8a93a3" }}>.com</span></span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4d8df0" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 8l-4 4 4 4M17 8l4 4-4 4M13.5 4l-3 16" /></svg>
+            <span style={{ background: "rgba(77,141,240,.16)", border: "1px solid rgba(77,141,240,.3)", borderRadius: 999, padding: "5px 12px", fontWeight: 700, fontSize: 11.5, color: "#8fb8f7" }}>Bolti</span>
+          </div>
+          <div style={{ color: "#fff", fontSize: 22, fontWeight: 800, letterSpacing: "-.5px", lineHeight: 1.2 }}>Plan Plus: tu salón <span style={{ color: "#4d8df0" }}>+ tu contabilidad</span>, conectados.</div>
+          <div style={{ color: "rgba(255,255,255,.62)", fontSize: 14, lineHeight: 1.55, marginTop: 10, maxWidth: 520 }}>Suma <strong style={{ color: "#fff" }}>Bolti</strong> a tu operación y factura electrónicamente ante la DIAN sin salir del sistema. Cada venta del POS viaja sola a tu contabilidad.</div>
+        </div>
+        <div style={{ width: 280, flex: "none", background: "#fff", borderRadius: R.xxl, padding: 22, position: "relative" }}>
+          <span style={{ position: "absolute", top: -11, left: 22, background: "#4d8df0", color: "#fff", fontWeight: 700, fontSize: 10.5, padding: "4px 11px", borderRadius: 7, letterSpacing: ".4px" }}>SUITE COMPLETA</span>
+          <div style={{ fontWeight: 800, fontSize: 18, marginTop: 4, color: "#15171c" }}>Plus</div>
+          <div style={{ fontSize: 12.5, color: "#80858d", marginBottom: 12 }}>Los dos sistemas interconectados</div>
+          <div><Mono style={{ fontSize: 30, fontWeight: 800, color: "#15171c" }}>$ 169.900</Mono><span style={{ fontSize: 13, color: "#a3a3ac" }}>/mes</span></div>
+          <div style={{ fontSize: 12, color: "#b3b3ad", margin: "2px 0 14px" }}>IVA incluido · facturación mensual</div>
+          {["Todo el plan Imperio", "Facturación electrónica DIAN", "Módulo contable y comercial"].map((f, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, padding: "6px 0", fontSize: 12.5, color: "#3a3f47" }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={i === 0 ? "#14a05a" : "#4d8df0"} strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 5 5L20 7" /></svg>{f}
+            </div>
+          ))}
+          <button onClick={() => console.log("[v2] activar plan plus (no-op)")} style={{ width: "100%", marginTop: 16, borderRadius: R.md, padding: 13, fontWeight: 700, fontSize: 14, fontFamily: FONT, cursor: "pointer", background: "#4d8df0", color: "#fff", border: 0 }}>Activar Plan Plus</button>
+        </div>
+      </div>
+    </>
+  );
+};
+
+// ── COWORKING (arriendo de cupos) ─────────────────────────────
+type Renter = {
+  id: string; first_name: string; last_name?: string | null; email?: string | null; phone?: string | null;
+  monthly_rent_cop?: number | null; rental_status?: string | null; rental_past_due_since?: string | null;
+  rental_stripe_subscription_id?: string | null;
+};
+const cowTone = (s?: string | null) =>
+  s === "active" ? { l: "Al día", c: T.green, bg: T.greenBg }
+  : s === "past_due" ? { l: "En mora", c: T.amber, bg: T.amberBg }
+  : s === "blocked" ? { l: "Bloqueado", c: T.red, bg: T.redBg }
+  : { l: "Sin activar", c: T.dim, bg: T.surface3 };
+
+const CoworkingTab: React.FC = () => {
+  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<any>(null);
+  const [renters, setRenters] = useState<Renter[]>([]);
+  const [income, setIncome] = useState<any>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    const month = new Date().toISOString().slice(0, 7);
+    Promise.allSettled([
+      api.get("/chair-rentals/status"),
+      api.get("/chair-rentals/renters"),
+      api.get("/chair-rentals/income-summary", { params: { month } }),
+    ]).then(([st, rt, inc]) => {
+      if (st.status === "fulfilled") setStatus(st.value.data || null);
+      if (rt.status === "fulfilled") setRenters(rt.value.data?.renters || []);
+      if (inc.status === "fulfilled") setIncome(inc.value.data || null);
+    }).finally(() => setLoading(false));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const grace = status?.grace_days ?? 3;
+  const daysPastDue = (r: Renter) => {
+    if (!r.rental_past_due_since) return 0;
+    return Math.max(0, Math.floor((Date.now() - new Date(r.rental_past_due_since).getTime()) / 86400000));
+  };
+  const counts = useMemo(() => {
+    const c = { active: 0, past_due: 0, blocked: 0 };
+    renters.forEach((r) => { if (r.rental_status === "active") c.active++; else if (r.rental_status === "past_due") c.past_due++; else if (r.rental_status === "blocked") c.blocked++; });
+    return c;
+  }, [renters]);
+
+  const paymentLink = async (id: string) => {
+    setBusy(id);
+    try { const { data } = await api.post(`/chair-rentals/renters/${id}/payment-link`); if (data?.url) window.open(data.url, "_blank"); }
+    catch { /* noop */ } finally { setBusy(null); }
+  };
+  if (loading) return <Loading label="Cargando coworking…" />;
+
+  const connected = !!(status?.connected || status?.direct_mode);
+  const enabled = !!status?.chair_rental_enabled;
+
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14, marginBottom: 16 }}>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 16 }}>Coworking · arriendo de cupos</div>
+          <div style={{ fontSize: 12.5, color: T.muted }}>Estilistas independientes que arriendan una silla. Cobro diario automático.</div>
+        </div>
+        <a href="/settings?tab=7" style={{ ...btnDark, textDecoration: "none", display: "inline-block" }}>Gestión avanzada</a>
+      </div>
+
+      {/* estado de conexión Stripe */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, background: T.surface, border: `1px solid ${connected && enabled ? T.greenBorder : T.border}`, borderRadius: R.xl, padding: "14px 18px", marginBottom: 16 }}>
+        <span style={{ width: 10, height: 10, borderRadius: "50%", background: connected && enabled ? T.green : T.amber, flex: "none" }} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: 13.5 }}>
+            {connected && enabled ? "Coworking activo" : connected ? "Conectado — falta activar el cobro" : "Sin conectar a Stripe"}
+          </div>
+          <div style={{ fontSize: 12, color: T.muted }}>
+            {connected ? `Días de gracia antes de bloquear: ${grace}` : "Conecta una cuenta para cobrar el arriendo diario."}
+          </div>
+        </div>
+        {!connected && <a href="/settings?tab=7" style={{ ...btnDark, textDecoration: "none" }}>Conectar</a>}
+      </div>
+
+      {/* KPIs */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 16 }}>
+        <KpiBox label="Arrendatarios" value={String(renters.length)} />
+        <KpiBox label="Al día" value={String(counts.active)} color={T.green} />
+        <KpiBox label="En mora" value={String(counts.past_due)} color={T.amber} />
+        <KpiBox label="Ingreso del mes" value={fmtCOP(income?.net_cop ?? 0)} color={T.green} />
+      </div>
+
+      {/* lista de renters */}
+      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: R.xxl, overflow: "hidden" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1.4fr", padding: "11px 20px", fontSize: 11, fontWeight: 700, letterSpacing: ".5px", color: T.dim, background: T.surface2 }}>
+          <span>ARRENDATARIO</span><span style={{ textAlign: "right" }}>MENSUAL</span><span style={{ textAlign: "right" }}>DIARIO</span><span style={{ textAlign: "right" }}>ESTADO</span>
+        </div>
+        {renters.length === 0 ? (
+          <Empty icon="🪑" title="Sin arrendatarios" hint="Aún no hay estilistas en el coworking. Usa Gestión avanzada para agregar." />
+        ) : renters.map((r) => {
+          const name = `${r.first_name} ${r.last_name || ""}`.trim();
+          const tone = cowTone(r.rental_status);
+          const monthly = Number(r.monthly_rent_cop) || 0;
+          const dpd = daysPastDue(r);
+          return (
+            <div key={r.id} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1.4fr", alignItems: "center", padding: "12px 20px", borderTop: `1px solid ${T.border3}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                <Avatar ini={initials(name)} color={colorFor(name)} size={34} radius={10} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</div>
+                  <div style={{ fontSize: 11.5, color: T.dim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.phone || r.email || "—"}</div>
+                </div>
+              </div>
+              <Mono style={{ textAlign: "right", fontWeight: 700, fontSize: 13 }}>{fmtCOP(monthly)}</Mono>
+              <Mono style={{ textAlign: "right", fontSize: 12.5, color: T.muted }}>{fmtCOP(Math.round(monthly / 30))}</Mono>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
+                <span style={{ background: tone.bg, color: tone.c, fontWeight: 700, fontSize: 11, padding: "4px 10px", borderRadius: 7 }}>
+                  {tone.l}{r.rental_status === "past_due" && dpd > 0 ? ` · ${dpd}d` : ""}
+                </span>
+                <button onClick={() => paymentLink(r.id)} disabled={busy === r.id} title="Enlace para actualizar tarjeta / pagar" style={{ border: `1px solid ${T.border}`, background: T.surface, color: T.muted, borderRadius: 8, padding: "6px 8px", cursor: "pointer", display: "flex" }}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="2.5" /><path d="M2.5 9.5h19" /></svg>
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ fontSize: 11.5, color: T.dim, marginTop: 10 }}>
+        Los cobros, calendario diario, reembolsos y alta de arrendatarios (con tarjeta) se gestionan en <a href="/settings?tab=7" style={{ color: T.green, fontWeight: 600 }}>Gestión avanzada</a>.
+      </div>
+    </>
+  );
+};
+
+const KpiBox: React.FC<{ label: string; value: string; color?: string }> = ({ label, value, color }) => (
+  <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: R.xl, padding: "15px 17px" }}>
+    <div style={{ fontSize: 12, color: T.muted, fontWeight: 600 }}>{label}</div>
+    <Mono style={{ fontSize: 20, fontWeight: 800, marginTop: 5, display: "block", color: color || T.text }}>{value}</Mono>
   </div>
 );
 
-const btnDark: React.CSSProperties = { background: T.ink, color: "#fff", border: 0, borderRadius: R.md, padding: "11px 18px", fontWeight: 700, fontSize: 13, fontFamily: FONT, cursor: "pointer" };
+const btnDark: React.CSSProperties = { background: T.ink, color: T.onInk, border: 0, borderRadius: R.md, padding: "11px 18px", fontWeight: 700, fontSize: 13, fontFamily: FONT, cursor: "pointer" };
 
 export default Configuracion;
