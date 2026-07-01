@@ -159,9 +159,44 @@ type PendingRefundsResp = {
   total_cop: number;
 };
 
+type IncomeReportCharge = {
+  renter_id: string;
+  renter_name: string;
+  date: string; // YYYY-MM-DD (Bogotá)
+  ts: number;
+  amount_cop: number;
+  refunded_cop: number;
+  net_cop: number;
+  type: 'arriendo' | 'extra' | string;
+  status: 'paid' | 'refunded' | string;
+  id: string;
+  url: string | null;
+};
+
+type IncomeReportResp = {
+  from?: string; // YYYY-MM-DD
+  to?: string;   // YYYY-MM-DD
+  month: string; // YYYY-MM (inicio del rango; compat)
+  gross_cop: number;
+  refunded_cop: number;
+  net_cop: number;
+  count: number;
+  charges: IncomeReportCharge[];
+  by_person: Array<{
+    renter_id: string;
+    renter_name: string;
+    charges: number;
+    gross_cop: number;
+    refunded_cop: number;
+    net_cop: number;
+  }>;
+};
+
 type CalendarDay = {
-  status: 'paid' | 'open' | 'failed' | 'void' | 'blocked' | 'refunded' | string;
+  status: 'paid' | 'paid_manual' | 'open' | 'failed' | 'void' | 'blocked' | 'refunded' | string;
   refunded?: boolean;
+  manual?: boolean;
+  note?: string;
   amount_cop: number;
   currency: string;
   invoice_id: string;
@@ -283,6 +318,7 @@ const buildMonthGrid = (ym: string): (string | null)[] => {
 const dayPalette = (status?: string): { bg: string; color: string; border: string } => {
   switch (status) {
     case 'paid': return { bg: '#d1f7e8', color: '#0a7c5a', border: '#0ab39c' };
+    case 'paid_manual': return { bg: '#cfeede', color: '#0a7c5a', border: '#0ab39c' };
     case 'failed': return { bg: '#ffe3df', color: '#c0392b', border: '#f06548' };
     case 'open': return { bg: '#fff4d6', color: '#9a6b00', border: '#f7b84b' };
     case 'void': return { bg: '#f1f3f5', color: '#868e96', border: '#dee2e6' };
@@ -390,7 +426,7 @@ const ChairRentalTab: React.FC = () => {
   const [calBusy, setCalBusy] = useState(false);
   // Modo de interacción del calendario: por defecto BLOQUEAR (clic en un día lo
   // bloquea / desbloquea, sin cobrar). "Cobrar día" queda como modo secundario.
-  const [calMode, setCalMode] = useState<'charge' | 'block'>('block');
+  const [calMode, setCalMode] = useState<'charge' | 'block' | 'paid'>('block');
 
   // Vincular / agregar tarjeta desde el detalle
   const [linkingCard, setLinkingCard] = useState(false);
@@ -401,6 +437,26 @@ const ChairRentalTab: React.FC = () => {
 
   // Acumulado REAL del mes a la fecha (cobrado − reembolsos), viene de Stripe.
   const [income, setIncome] = useState<{ month: string; gross_cop: number; refunded_cop: number; net_cop: number } | null>(null);
+
+  // Modal "Reporte de pagos": detalle de cobros del mes (por persona / por fecha)
+  // que se abre al hacer clic en el KPI "Acumulado mes".
+  const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' }); // YYYY-MM-DD (Bogotá)
+  const currentMonth = todayStr.slice(0, 7);
+  // Suma/resta días sobre una fecha YYYY-MM-DD sin líos de zona horaria (anclada al mediodía).
+  const addDays = (key: string, n: number) => {
+    const d = new Date(`${key}T12:00:00`);
+    d.setDate(d.getDate() + n);
+    return d.toLocaleDateString('en-CA');
+  };
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportData, setReportData] = useState<IncomeReportResp | null>(null);
+  const [reportFrom, setReportFrom] = useState<string>(`${currentMonth}-01`); // YYYY-MM-DD
+  const [reportTo, setReportTo] = useState<string>(todayStr);                 // YYYY-MM-DD
+  const [reportRenter, setReportRenter] = useState<string>('');
+  const [reportView, setReportView] = useState<'fecha' | 'persona'>('fecha');
+  const [reportPage, setReportPage] = useState(1);
+  const REPORT_PAGE_SIZE = 15;
 
   // Modal "Devoluciones pendientes": personas con cobros que toca devolver
   // (dobles cobros / días bloqueados cobrados) para llamarlas y reembolsar.
@@ -748,6 +804,88 @@ const ChairRentalTab: React.FC = () => {
     loadPendingRefunds();
   };
 
+  // Carga el detalle de cobros del reporte para un rango [from, to] (YYYY-MM-DD).
+  const loadIncomeReport = useCallback(async (from: string, to: string) => {
+    setReportLoading(true);
+    try {
+      const { data } = await api.get<IncomeReportResp>('/chair-rentals/income-report', { params: { from, to } });
+      setReportData(data);
+    } catch (e: any) {
+      Swal.fire('Error', e?.response?.data?.error || 'No se pudo cargar el reporte de pagos', 'error');
+    } finally {
+      setReportLoading(false);
+    }
+  }, []);
+
+  // Aplica un rango (normaliza el orden) y recarga del backend.
+  const applyReportRange = (from: string, to: string) => {
+    if (!from || !to) return;
+    const [a, b] = from <= to ? [from, to] : [to, from];
+    setReportFrom(a);
+    setReportTo(b);
+    loadIncomeReport(a, b);
+  };
+
+  const openReportModal = () => {
+    const from = `${currentMonth}-01`;
+    setReportRenter('');
+    setReportView('fecha');
+    setReportFrom(from);
+    setReportTo(todayStr);
+    setReportOpen(true);
+    loadIncomeReport(from, todayStr);
+  };
+
+  // El rango se filtra en el backend; aquí solo el filtro de persona (cliente).
+  const reportCharges = useMemo(() => {
+    const all = reportData?.charges || [];
+    return reportRenter ? all.filter((c) => c.renter_id === reportRenter) : all;
+  }, [reportData, reportRenter]);
+
+  // Totales y resumen por persona recalculados sobre lo filtrado.
+  const reportTotals = useMemo(() => {
+    let gross = 0, refunded = 0, net = 0;
+    const persons = new Map<string, IncomeReportResp['by_person'][number]>();
+    for (const c of reportCharges) {
+      gross += c.amount_cop; refunded += c.refunded_cop; net += c.net_cop;
+      const p = persons.get(c.renter_id) || {
+        renter_id: c.renter_id, renter_name: c.renter_name,
+        charges: 0, gross_cop: 0, refunded_cop: 0, net_cop: 0,
+      };
+      p.charges += 1; p.gross_cop += c.amount_cop; p.refunded_cop += c.refunded_cop; p.net_cop += c.net_cop;
+      persons.set(c.renter_id, p);
+    }
+    return {
+      gross_cop: gross, refunded_cop: refunded, net_cop: net, count: reportCharges.length,
+      by_person: Array.from(persons.values()).sort((a, b) => b.net_cop - a.net_cop),
+    };
+  }, [reportCharges]);
+
+  // Paginación de la vista "Por fecha" (la lista de todos los días puede ser larga).
+  const reportTotalPages = Math.max(1, Math.ceil(reportCharges.length / REPORT_PAGE_SIZE));
+  const reportPageSafe = Math.min(reportPage, reportTotalPages);
+  const reportChargesPage = useMemo(
+    () => reportCharges.slice((reportPageSafe - 1) * REPORT_PAGE_SIZE, reportPageSafe * REPORT_PAGE_SIZE),
+    [reportCharges, reportPageSafe]
+  );
+  // Al cambiar filtros (mes / estilista / vista) volver a la página 1.
+  useEffect(() => { setReportPage(1); }, [reportRenter, reportView, reportData]);
+
+  // Exporta lo que se ve (cobros filtrados) a CSV para llevar a contabilidad.
+  const exportReportCsv = () => {
+    const rows = [['Fecha', 'Estilista', 'Tipo', 'Cobrado_COP', 'Reembolsado_COP', 'Neto_COP', 'Estado', 'ID']];
+    for (const c of reportCharges) {
+      rows.push([c.date, c.renter_name, c.type, String(c.amount_cop), String(c.refunded_cop), String(c.net_cop), c.status, c.id]);
+    }
+    const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `reporte-pagos-coworking-${reportFrom === reportTo ? reportFrom : `${reportFrom}_a_${reportTo}`}${reportRenter ? '-filtrado' : ''}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
   // Reembolsa un cobro puntual desde el modal de devoluciones y recarga la lista.
   const onRefundPendingItem = async (renterId: string, renterName: string, item: PendingRefundItem) => {
     const conf = await Swal.fire({
@@ -1043,6 +1181,83 @@ const ChairRentalTab: React.FC = () => {
     }
   };
 
+  // Marca / desmarca un día como pagado MANUALMENTE (sin cobrar la tarjeta). Para
+  // cuando el cobro diario falló por falta de fondos y se cobró por otro medio
+  // (efectivo o un cobro extra). Anula el intento fallido y deja al renter al día.
+  const onMarkDayPaid = async (dateKey: string) => {
+    if (!calRenter || !calData) return;
+    const existing = calData.days[dateKey];
+    if (existing?.status === 'paid') {
+      Swal.fire('Día ya cobrado', 'Ese día ya tiene un cobro real pagado.', 'info');
+      return;
+    }
+    if (existing?.status === 'blocked') {
+      Swal.fire('Día bloqueado', 'Ese día está bloqueado (no se cobra). Desbloquéalo primero si quieres marcarlo pagado.', 'info');
+      return;
+    }
+    // Si ya está marcado manual → desmarcar.
+    if (existing?.status === 'paid_manual') {
+      const conf = await Swal.fire({
+        icon: 'warning',
+        title: 'Quitar pago manual',
+        text: `¿Quitar la marca de pagado del ${dateKey}?`,
+        showCancelButton: true,
+        confirmButtonText: 'Sí, quitar',
+        confirmButtonColor: '#f06548',
+      });
+      if (!conf.isConfirmed) return;
+      setCalBusy(true);
+      try {
+        await api.post(`/chair-rentals/renters/${calRenter.id}/unmark-day-paid`, { date: dateKey });
+        await loadCalendar(calRenter.id, calMonth);
+        await loadAll();
+      } catch (e: any) {
+        Swal.fire('Error', e?.response?.data?.error || 'No se pudo quitar la marca', 'error');
+      } finally {
+        setCalBusy(false);
+      }
+      return;
+    }
+    // Marcar pagado: pedir monto (default tarifa diaria) y nota opcional.
+    const defAmount = calData.daily_cop || 0;
+    const { value: formVals } = await Swal.fire({
+      title: 'Marcar día como pagado',
+      html:
+        `<div class="text-start">` +
+        `<p class="mb-2" style="font-size:13px">Día <b>${dateKey}</b>. Esto <b>no cobra la tarjeta</b>: marca el día como pagado (cobrado en efectivo o por un cobro extra) y anula el intento fallido.</p>` +
+        `<label class="form-label mb-1" style="font-size:12px">Monto cobrado (COP)</label>` +
+        `<input id="swal-amount" type="number" class="form-control mb-2" value="${defAmount}" min="0" />` +
+        `<label class="form-label mb-1" style="font-size:12px">Nota (opcional)</label>` +
+        `<input id="swal-note" type="text" class="form-control" placeholder="efectivo, cobro extra, etc." maxlength="200" />` +
+        `</div>`,
+      showCancelButton: true,
+      confirmButtonText: 'Marcar pagado',
+      confirmButtonColor: '#0ab39c',
+      focusConfirm: false,
+      preConfirm: () => {
+        const amount = Number((document.getElementById('swal-amount') as HTMLInputElement)?.value);
+        const note = (document.getElementById('swal-note') as HTMLInputElement)?.value || '';
+        return { amount_cop: amount, note };
+      },
+    });
+    if (!formVals) return;
+    setCalBusy(true);
+    try {
+      await api.post(`/chair-rentals/renters/${calRenter.id}/mark-day-paid`, {
+        date: dateKey,
+        amount_cop: formVals.amount_cop,
+        note: formVals.note,
+      });
+      await loadCalendar(calRenter.id, calMonth);
+      await loadAll();
+      Swal.fire({ icon: 'success', text: 'Día marcado como pagado', timer: 1300, showConfirmButton: false });
+    } catch (e: any) {
+      Swal.fire('Error', e?.response?.data?.error || 'No se pudo marcar el día', 'error');
+    } finally {
+      setCalBusy(false);
+    }
+  };
+
   // Política de días bloqueados: false = "saltar" (se reembolsan, paga menos);
   // true = "reajustar" (no se reembolsan, paga el mes completo).
   const onToggleReadjust = async () => {
@@ -1065,7 +1280,7 @@ const ChairRentalTab: React.FC = () => {
     let paidDays = 0, paidTotal = 0, failedDays = 0;
     for (const k of Object.keys(calData.days)) {
       const d = calData.days[k];
-      if (d.status === 'paid') { paidDays++; paidTotal += d.amount_cop || 0; }
+      if (d.status === 'paid' || d.status === 'paid_manual') { paidDays++; paidTotal += d.amount_cop || 0; }
       else if (d.status === 'failed') failedDays++;
     }
     return { paidDays, paidTotal, failedDays };
@@ -1152,8 +1367,9 @@ const ChairRentalTab: React.FC = () => {
                 subtitle: income
                   ? income.refunded_cop > 0
                     ? `Neto a hoy · −${fmtCop(income.refunded_cop)} reembolsado`
-                    : 'Neto cobrado hasta hoy'
+                    : 'Toca para ver el reporte'
                   : 'Calculando…',
+                onClick: openReportModal,
               },
               {
                 icon: 'ri-money-dollar-circle-fill',
@@ -1194,11 +1410,20 @@ const ChairRentalTab: React.FC = () => {
                 color: '#3577f1',
                 subtitle: kpis.total === 1 ? '1 estilista' : `${kpis.total} estilistas`,
               },
-            ].map((k, i) => (
-              <div key={i} style={{ flex: '0 0 auto', width: 210, scrollSnapAlign: 'start' }}>
-                <KpiCard {...k} />
-              </div>
-            ))}
+            ].map((k, i) => {
+              const { onClick, ...card } = k as typeof k & { onClick?: () => void };
+              return (
+                <div
+                  key={i}
+                  onClick={onClick}
+                  role={onClick ? 'button' : undefined}
+                  title={onClick ? 'Ver reporte de pagos' : undefined}
+                  style={{ flex: '0 0 auto', width: 210, scrollSnapAlign: 'start', cursor: onClick ? 'pointer' : undefined }}
+                >
+                  <KpiCard {...card} />
+                </div>
+              );
+            })}
           </div>
 
           {/* Settings */}
@@ -2000,6 +2225,180 @@ const ChairRentalTab: React.FC = () => {
         </ModalFooter>
       </Modal>
 
+      {/* ========= Modal Reporte de pagos ========= */}
+      <Modal isOpen={reportOpen} toggle={() => setReportOpen(!reportOpen)} size="lg" centered scrollable>
+        <ModalHeader toggle={() => setReportOpen(false)}>
+          <i className="ri-file-chart-line me-2"></i> Reporte de pagos
+        </ModalHeader>
+        <ModalBody className="p-4">
+          {/* Filtros: rango de fechas (Desde/Hasta). Para un solo día, pon la misma fecha en ambos o usa "Hoy". */}
+          <Row className="g-2 mb-2 align-items-end">
+            <Col xs={6} md={3}>
+              <Label className="form-label fs-12 text-muted mb-1">Desde</Label>
+              <Input type="date" bsSize="sm" value={reportFrom} max={todayStr}
+                onChange={(e) => applyReportRange(e.target.value, reportTo)} />
+            </Col>
+            <Col xs={6} md={3}>
+              <Label className="form-label fs-12 text-muted mb-1">Hasta</Label>
+              <Input type="date" bsSize="sm" value={reportTo} max={todayStr}
+                onChange={(e) => applyReportRange(reportFrom, e.target.value)} />
+            </Col>
+            <Col xs={12} md={6}>
+              <Label className="form-label fs-12 text-muted mb-1">Estilista</Label>
+              <Input type="select" bsSize="sm" value={reportRenter} onChange={(e) => setReportRenter(e.target.value)}>
+                <option value="">Todos los estilistas</option>
+                {renters.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {[r.first_name, r.last_name].filter(Boolean).join(' ') || r.email}
+                  </option>
+                ))}
+              </Input>
+            </Col>
+          </Row>
+          <Row className="g-2 mb-3 align-items-end">
+            <Col xs={12} md={8}>
+              <Label className="form-label fs-12 text-muted mb-1">Atajos</Label>
+              <div className="d-flex flex-wrap gap-1">
+                <Button color="light" size="sm" onClick={() => applyReportRange(todayStr, todayStr)}>Hoy</Button>
+                <Button color="light" size="sm" onClick={() => { const y = addDays(todayStr, -1); applyReportRange(y, y); }}>Ayer</Button>
+                <Button color="light" size="sm" onClick={() => applyReportRange(addDays(todayStr, -6), todayStr)}>Últ. 7 días</Button>
+                <Button color="light" size="sm" onClick={() => applyReportRange(`${currentMonth}-01`, todayStr)}>Este mes</Button>
+                <Button color="light" size="sm" onClick={() => { const lastPrev = addDays(`${currentMonth}-01`, -1); applyReportRange(`${lastPrev.slice(0, 7)}-01`, lastPrev); }}>Mes pasado</Button>
+              </div>
+            </Col>
+            <Col xs={12} md={4}>
+              <Label className="form-label fs-12 text-muted mb-1">Ver</Label>
+              <div className="btn-group w-100" role="group">
+                <Button color="primary" size="sm" outline={reportView !== 'fecha'} onClick={() => setReportView('fecha')}>
+                  <i className="ri-calendar-line me-1"></i>Por fecha
+                </Button>
+                <Button color="primary" size="sm" outline={reportView !== 'persona'} onClick={() => setReportView('persona')}>
+                  <i className="ri-user-line me-1"></i>Por persona
+                </Button>
+              </div>
+            </Col>
+          </Row>
+
+          {/* Resumen */}
+          <div className="d-flex flex-wrap gap-3 mb-3 p-3 rounded" style={{ background: '#f6f8fa' }}>
+            <div>
+              <div className="fs-12 text-muted text-uppercase">Neto</div>
+              <div className="fw-semibold fs-18 text-success">{fmtCop(reportTotals.net_cop)}</div>
+            </div>
+            <div>
+              <div className="fs-12 text-muted text-uppercase">Cobrado</div>
+              <div className="fw-semibold fs-18">{fmtCop(reportTotals.gross_cop)}</div>
+            </div>
+            {reportTotals.refunded_cop > 0 && (
+              <div>
+                <div className="fs-12 text-muted text-uppercase">Reembolsado</div>
+                <div className="fw-semibold fs-18 text-info">−{fmtCop(reportTotals.refunded_cop)}</div>
+              </div>
+            )}
+            <div className="ms-auto text-end">
+              <div className="fs-12 text-muted text-uppercase"># Cobros</div>
+              <div className="fw-semibold fs-18">{reportTotals.count}</div>
+            </div>
+          </div>
+
+          {reportLoading ? (
+            <div className="text-center py-5"><Spinner /></div>
+          ) : reportCharges.length === 0 ? (
+            <div className="text-center py-5">
+              <i className="ri-inbox-line text-muted" style={{ fontSize: 48 }}></i>
+              <p className="text-muted mt-3 mb-0">Sin cobros en este periodo{reportRenter ? ' para este estilista' : ''}.</p>
+            </div>
+          ) : reportView === 'fecha' ? (
+            <>
+            <div className="table-responsive">
+              <table className="table table-sm align-middle mb-0">
+                <thead>
+                  <tr className="text-muted fs-12">
+                    <th>Fecha</th>
+                    <th>Estilista</th>
+                    <th>Tipo</th>
+                    <th className="text-end">Monto</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reportChargesPage.map((c) => (
+                    <tr key={c.id}>
+                      <td className="fs-13" style={{ width: 100 }}>{c.date}</td>
+                      <td className="fs-13">{c.renter_name}</td>
+                      <td>
+                        {c.type === 'extra'
+                          ? <Badge color="warning" pill>Extra</Badge>
+                          : <Badge color="light" className="text-muted" pill>Arriendo</Badge>}
+                        {c.status === 'refunded' && <Badge color="info" pill className="ms-1">Reembolsado</Badge>}
+                      </td>
+                      <td className="text-end fw-medium" style={{ width: 130 }}>
+                        {c.status === 'refunded'
+                          ? <><span className="text-decoration-line-through text-muted">{fmtCop(c.amount_cop)}</span> <span className="text-info">{fmtCop(c.net_cop)}</span></>
+                          : fmtCop(c.amount_cop)}
+                      </td>
+                      <td className="text-end" style={{ width: 40 }}>
+                        {c.url && (
+                          <a href={c.url} target="_blank" rel="noopener noreferrer" title="Ver en Stripe" className="text-muted">
+                            <i className="ri-external-link-line"></i>
+                          </a>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {reportTotalPages > 1 && (
+              <div className="d-flex align-items-center justify-content-between mt-3">
+                <small className="text-muted">
+                  {(reportPageSafe - 1) * REPORT_PAGE_SIZE + 1}–{Math.min(reportPageSafe * REPORT_PAGE_SIZE, reportCharges.length)} de {reportCharges.length}
+                </small>
+                <div className="d-flex align-items-center gap-2">
+                  <Button color="light" size="sm" disabled={reportPageSafe <= 1} onClick={() => setReportPage((p) => Math.max(1, p - 1))}>
+                    <i className="ri-arrow-left-s-line"></i>
+                  </Button>
+                  <small className="text-muted">Pág. {reportPageSafe} / {reportTotalPages}</small>
+                  <Button color="light" size="sm" disabled={reportPageSafe >= reportTotalPages} onClick={() => setReportPage((p) => Math.min(reportTotalPages, p + 1))}>
+                    <i className="ri-arrow-right-s-line"></i>
+                  </Button>
+                </div>
+              </div>
+            )}
+            </>
+          ) : (
+            <div className="table-responsive">
+              <table className="table table-sm align-middle mb-0">
+                <thead>
+                  <tr className="text-muted fs-12">
+                    <th>Estilista</th>
+                    <th className="text-center"># Cobros</th>
+                    <th className="text-end">Cobrado</th>
+                    <th className="text-end">Neto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reportTotals.by_person.map((p) => (
+                    <tr key={p.renter_id} style={{ cursor: 'pointer' }} onClick={() => { setReportRenter(p.renter_id); setReportView('fecha'); }} title="Ver detalle de esta persona">
+                      <td className="fs-13 fw-medium">{p.renter_name}</td>
+                      <td className="text-center fs-13">{p.charges}</td>
+                      <td className="text-end fs-13">{fmtCop(p.gross_cop)}</td>
+                      <td className="text-end fw-semibold text-success">{fmtCop(p.net_cop)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </ModalBody>
+        <ModalFooter>
+          <Button color="light" size="sm" onClick={exportReportCsv} disabled={reportCharges.length === 0}>
+            <i className="ri-download-2-line me-1"></i> CSV
+          </Button>
+          <Button color="light" onClick={() => setReportOpen(false)}>Cerrar</Button>
+        </ModalFooter>
+      </Modal>
+
       {/* ========= Modal Calendario ========= */}
       <Modal isOpen={calOpen} toggle={() => setCalOpen(!calOpen)} size="lg" centered>
         <ModalHeader toggle={() => setCalOpen(false)}>
@@ -2078,6 +2477,17 @@ const ChairRentalTab: React.FC = () => {
                 disabled={calBusy}
               >
                 <i className="ri-money-dollar-circle-line me-1"></i> Cobrar día
+              </Button>
+              <Button
+                color={calMode === 'paid' ? 'success' : 'light'}
+                size="sm"
+                className="rounded-pill px-3"
+                onClick={() => setCalMode('paid')}
+                disabled={calBusy}
+                style={calMode === 'paid' ? { background: '#0ab39c', borderColor: '#0ab39c' } : undefined}
+                title="Marcar un día como pagado sin cobrar la tarjeta (efectivo / cobro extra)"
+              >
+                <i className="ri-hand-coin-line me-1"></i> Marcar pagado
               </Button>
               <Button
                 color={calMode === 'block' ? 'primary' : 'light'}
@@ -2162,26 +2572,34 @@ const ChairRentalTab: React.FC = () => {
                   const isToday = cell === todayKey();
                   const isFuture = cell > todayKey();
                   const isPaid = info?.status === 'paid';
+                  const isManual = info?.status === 'paid_manual';
                   const isBlocked = info?.status === 'blocked';
+                  const paidMode = calMode === 'paid';
                   const blockMode = calMode === 'block';
-                  // En modo "cobrar": cualquier día no pagado y no bloqueado (con tarjeta).
-                  // En modo "bloquear": cualquier día no pagado (bloquear/desbloquear), sin
-                  // requerir tarjeta — el bloqueo solo evita el cobro.
-                  const clickable = blockMode
-                    ? (!isPaid && !calBusy)
-                    : (!isPaid && !isBlocked && !calBusy && !!calData?.has_customer);
+                  // Modo "cobrar": día no pagado/no manual/no bloqueado (con tarjeta).
+                  // Modo "bloquear": día no pagado ni manual (bloquear/desbloquear).
+                  // Modo "marcar pagado": día no pagado-real y no bloqueado; incluye los
+                  //   ya marcados manual (para desmarcar). No requiere tarjeta.
+                  const clickable = calBusy ? false
+                    : paidMode ? (!isPaid && !isBlocked)
+                    : blockMode ? (!isPaid && !isManual)
+                    : (!isPaid && !isManual && !isBlocked && !!calData?.has_customer);
                   return (
                     <div
                       key={cell}
-                      onClick={clickable ? () => (blockMode ? onToggleBlockDay(cell) : onChargeDay(cell)) : undefined}
+                      onClick={clickable ? () => (paidMode ? onMarkDayPaid(cell) : blockMode ? onToggleBlockDay(cell) : onChargeDay(cell)) : undefined}
                       title={
                         isBlocked
                           ? `${cell} · Bloqueado (no se cobra)${info?.refunded ? ' · cobro reembolsado a la tarjeta' : ''}${blockMode ? ' · toca para desbloquear' : ''}`
-                          : blockMode
-                            ? `${cell} · toca para bloquear (no se cobrará)`
-                            : info
-                              ? `${cell} · ${info.status === 'paid' ? 'Pagado' : info.status === 'refunded' ? 'Reembolsado' : info.status === 'failed' ? 'Falló' : info.status === 'void' ? 'Anulado' : 'Pendiente'} ${fmtCop(info.amount_cop)}`
-                              : `${cell} · cobrar este día${isFuture ? ' (futuro)' : ''}`
+                          : isManual
+                            ? `${cell} · Pagado manualmente ${fmtCop(info?.amount_cop || 0)}${info?.note ? ' · ' + info.note : ''}${paidMode ? ' · toca para quitar' : ''}`
+                            : paidMode
+                              ? `${cell} · toca para marcar pagado (sin cobrar la tarjeta)`
+                              : blockMode
+                                ? `${cell} · toca para bloquear (no se cobrará)`
+                                : info
+                                  ? `${cell} · ${info.status === 'paid' ? 'Pagado' : info.status === 'refunded' ? 'Reembolsado' : info.status === 'failed' ? 'Falló' : info.status === 'void' ? 'Anulado' : 'Pendiente'} ${fmtCop(info.amount_cop)}`
+                                  : `${cell} · cobrar este día${isFuture ? ' (futuro)' : ''}`
                       }
                       style={{
                         position: 'relative',
@@ -2205,6 +2623,7 @@ const ChairRentalTab: React.FC = () => {
                     >
                       <span style={{ fontWeight: 600, fontSize: 14, lineHeight: 1 }}>{day}</span>
                       {info?.status === 'paid' && <i className="ri-check-line" style={{ fontSize: 13 }}></i>}
+                      {info?.status === 'paid_manual' && <i className="ri-hand-coin-line" style={{ fontSize: 12 }}></i>}
                       {info?.status === 'refunded' && <i className="ri-arrow-go-back-line" style={{ fontSize: 12 }}></i>}
                       {info?.status === 'failed' && <i className="ri-close-line" style={{ fontSize: 13 }}></i>}
                       {info?.status === 'open' && <i className="ri-time-line" style={{ fontSize: 12 }}></i>}
@@ -2241,6 +2660,7 @@ const ChairRentalTab: React.FC = () => {
               <div className="d-flex flex-wrap gap-3 mt-3 justify-content-center">
                 {[
                   { c: dayPalette('paid'), t: 'Pagado' },
+                  { c: dayPalette('paid_manual'), t: 'Pagado manual' },
                   { c: dayPalette('failed'), t: 'Falló' },
                   { c: dayPalette('open'), t: 'Pendiente' },
                   { c: dayPalette('blocked'), t: 'Bloqueado' },
@@ -2259,7 +2679,9 @@ const ChairRentalTab: React.FC = () => {
                   ? calData?.readjust_blocked
                     ? 'Toca un día para bloquearlo. Con la política "reajustar" el día NO se reembolsa: el renter paga el mes completo.'
                     : 'Toca un día para bloquearlo: no se cobrará. Si la suscripción alcanza a cobrarlo, se reembolsa automáticamente.'
-                  : 'Toca un día sin cobro para cobrar la tarifa diaria manualmente.'}
+                  : calMode === 'paid'
+                    ? 'Toca un día (pendiente o fallido) para marcarlo como pagado SIN cobrar la tarjeta — para cuando cobraste en efectivo o con un cobro extra. Anula el intento fallido y deja al renter al día.'
+                    : 'Toca un día sin cobro para cobrar la tarifa diaria manualmente.'}
               </p>
             </>
           )}

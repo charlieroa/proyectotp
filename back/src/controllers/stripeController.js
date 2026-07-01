@@ -202,11 +202,23 @@ exports.getSubscriptionStatus = async (req, res) => {
     });
     if (!tenant) return res.status(404).json({ error: 'Tenant no encontrado.' });
 
+    // Estado de pausa: vive solo en Stripe (pause_collection). Lo consultamos en
+    // vivo para reflejarlo en la app (badge "Pago pausado"). No es bloqueante:
+    // si falla la consulta, asumimos no pausado.
+    let paused = false;
+    if (stripe && tenant.stripe_subscription_id) {
+      try {
+        const sub = await stripe.subscriptions.retrieve(tenant.stripe_subscription_id);
+        paused = !!sub.pause_collection;
+      } catch (_) { /* best-effort */ }
+    }
+
     return res.json({
       plan: tenant.plan,
       subscription_status: tenant.subscription_status,
       current_period_end: tenant.current_period_end,
       has_stripe_subscription: !!tenant.stripe_subscription_id,
+      paused,
     });
   } catch (error) {
     console.error('Error obteniendo estado suscripcion:', error);

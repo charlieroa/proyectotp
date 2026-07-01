@@ -3,7 +3,6 @@ generator client {
   output   = "../src/generated/prisma"
 }
 
-
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -108,29 +107,29 @@ model inventory_movements {
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model invoice_items {
-  id                   String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  invoice_id           String    @db.Uuid
-  item_type            String    @db.VarChar(20)
-  related_id           String?   @db.Uuid
-  description          String
-  quantity             Int
-  unit_price           Decimal   @db.Decimal(10, 2)
-  total_price          Decimal   @db.Decimal(10, 2)
-  seller_id            String?   @db.Uuid
-  commission_percent   Decimal?  @db.Decimal(5, 2)
-  commission_value     Decimal?  @db.Decimal(12, 2)
-  commission_source    String?   @db.VarChar(20)
-  commission_locked    Boolean   @default(false)
-  commission_frozen_at DateTime? @db.Timestamptz(6)
-  admin_fee_rate       Decimal?  @db.Decimal
-  admin_fee_value      Decimal?  @db.Decimal
-  tenant_id            String    @db.Uuid
-  original_unit_price    Decimal?  @db.Decimal(10, 2)
-  override_reason        String?   @db.VarChar(255)
-  overridden_by_user_id  String?   @db.Uuid
-  tenants              tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_invoice_items_tenant")
-  invoices             invoices  @relation(fields: [invoice_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  users                users?    @relation(fields: [seller_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  id                    String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  invoice_id            String    @db.Uuid
+  item_type             String    @db.VarChar(20)
+  related_id            String?   @db.Uuid
+  description           String
+  quantity              Int
+  unit_price            Decimal   @db.Decimal(10, 2)
+  total_price           Decimal   @db.Decimal(10, 2)
+  seller_id             String?   @db.Uuid
+  commission_percent    Decimal?  @db.Decimal(5, 2)
+  commission_value      Decimal?  @db.Decimal(12, 2)
+  commission_source     String?   @db.VarChar(20)
+  commission_locked     Boolean   @default(false)
+  commission_frozen_at  DateTime? @db.Timestamptz(6)
+  admin_fee_rate        Decimal?  @db.Decimal
+  admin_fee_value       Decimal?  @db.Decimal
+  tenant_id             String    @db.Uuid
+  original_unit_price   Decimal?  @db.Decimal(10, 2)
+  override_reason       String?   @db.VarChar(255)
+  overridden_by_user_id String?   @db.Uuid
+  tenants               tenants   @relation(fields: [tenant_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_invoice_items_tenant")
+  invoices              invoices  @relation(fields: [invoice_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                 users?    @relation(fields: [seller_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([seller_id], map: "idx_invoice_items_seller_id")
 }
@@ -293,17 +292,17 @@ model service_categories {
 }
 
 model stylist_queues {
-  id             String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenant_id      String             @db.Uuid
-  stylist_id     String             @db.Uuid
-  category_id    String             @db.Uuid
-  position       Int
-  is_active      Boolean            @default(true)
-  last_served_at DateTime?          @db.Timestamptz(6)
-  created_at     DateTime           @default(now()) @db.Timestamptz(6)
-  updated_at     DateTime           @default(now()) @db.Timestamptz(6)
-  tenants        tenants            @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  users          users              @relation(fields: [stylist_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id          String             @db.Uuid
+  stylist_id         String             @db.Uuid
+  category_id        String             @db.Uuid
+  position           Int
+  is_active          Boolean            @default(true)
+  last_served_at     DateTime?          @db.Timestamptz(6)
+  created_at         DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime           @default(now()) @db.Timestamptz(6)
+  tenants            tenants            @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users              users              @relation(fields: [stylist_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   service_categories service_categories @relation(fields: [category_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([tenant_id, stylist_id, category_id])
@@ -312,22 +311,22 @@ model stylist_queues {
 }
 
 model services {
-  id                 String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenant_id          String?             @db.Uuid
-  category_id        String?             @db.Uuid
-  name               String              @db.VarChar(255)
-  description        String?
-  price              Decimal             @db.Decimal(12, 2)
-  duration_minutes   Int                 @default(30)
-  created_at         DateTime?           @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime?           @default(now()) @db.Timestamptz(6)
-  is_active          Boolean?            @default(true)
-  commission_percent       Decimal?            @db.Decimal(5, 2)
-  max_concurrent_stylists  Int                 @default(1)
-  appointments             appointments[]
-  service_categories service_categories? @relation(fields: [category_id], references: [id], onUpdate: NoAction)
-  tenants            tenants?            @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  stylist_services   stylist_services[]
+  id                      String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenant_id               String?             @db.Uuid
+  category_id             String?             @db.Uuid
+  name                    String              @db.VarChar(255)
+  description             String?
+  price                   Decimal             @db.Decimal(12, 2)
+  duration_minutes        Int                 @default(30)
+  created_at              DateTime?           @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime?           @default(now()) @db.Timestamptz(6)
+  is_active               Boolean?            @default(true)
+  commission_percent      Decimal?            @db.Decimal(5, 2)
+  max_concurrent_stylists Int                 @default(1)
+  appointments            appointments[]
+  service_categories      service_categories? @relation(fields: [category_id], references: [id], onUpdate: NoAction)
+  tenants                 tenants?            @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  stylist_services        stylist_services[]
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -473,77 +472,80 @@ model tenant_numbers {
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model tenants {
-  id                         String                          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  name                       String                          @db.VarChar(255)
-  slug                       String?                         @unique @db.VarChar(255)
-  address                    String?                         @db.VarChar(255)
-  city                       String?                         @db.VarChar(100)
-  phone                      String?                         @db.VarChar(50)
-  working_hours              Json?
-  created_at                 DateTime?                       @default(now()) @db.Timestamptz(6)
-  updated_at                 DateTime?                       @default(now()) @db.Timestamptz(6)
-  email                      String?                         @db.VarChar(255)
-  website                    String?                         @db.VarChar(255)
-  logo_url                   String?                         @db.VarChar(512)
-  tax_rate                   Decimal?                        @default(0.00) @db.Decimal(5, 4)
-  admin_fee_rate             Decimal?                        @default(0.00) @db.Decimal(5, 4)
-  products_for_staff_enabled Boolean                         @default(true)
-  admin_fee_enabled          Boolean                         @default(false)
-  loans_to_staff_enabled     Boolean                         @default(false)
-  allow_past_appointments    Boolean                         @default(false)
-  shared_stylists_enabled    Boolean                         @default(false)
-  tip_salon_percent          Decimal?                        @default(10.00) @db.Decimal(5, 2)
-  branch_color               String?                         @default("#3788d8") @db.VarChar(7)
-  openai_api_key             String?
-  elevenlabs_api_key         String?
-  elevenlabs_voice_id        String?
-  greeting_message           String?
-  brochure_url               String?                         @db.VarChar(512)
-  geofence_center_lat        Float?
-  geofence_center_lng        Float?
-  geofence_radius            Float?                          @default(200)
-  parent_tenant_id           String?                         @db.Uuid
-  is_primary_branch          Boolean                         @default(false)
-  cross_branch_schedule_block Boolean                        @default(true)
-  manage_all_branches_cash   Boolean                         @default(false)
-  price_override_enabled     Boolean                         @default(false)
-  multi_stylist_enabled      Boolean                         @default(false)
-  ticket_virtual_enabled     Boolean                         @default(false)
-  business_type              String?                         @default("peluqueria") @db.VarChar(50)
-  plan                       String                          @default("free") @db.VarChar(50)
-  stripe_customer_id         String?                         @db.VarChar(255)
-  stripe_subscription_id     String?                         @db.VarChar(255)
-  subscription_status        String?                         @db.VarChar(50)
-  current_period_end         DateTime?                       @db.Timestamptz(6)
-  chair_rental_enabled       Boolean                         @default(false)
-  stripe_connect_account_id  String?                         @db.VarChar(255)
-  stripe_connect_charges_enabled Boolean                     @default(false)
-  rental_block_grace_days    Int                             @default(3)
-  chair_rental_direct_mode   Boolean                         @default(false)
-  parent_tenant              tenants?                        @relation("TenantBranches", fields: [parent_tenant_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  child_tenants              tenants[]                       @relation("TenantBranches")
-  appointments               appointments[]
-  cash_sessions              cash_sessions[]
-  inventory_movements        inventory_movements[]
-  invoice_items              invoice_items[]
-  invoices                   invoices[]
-  payments                   payments[]
-  payroll_runs               payroll_runs[]
-  payrolls                   payrolls[]
-  product_categories         product_categories[]
-  products                   products[]
-  schedule_blocks            schedule_blocks[]
-  service_categories         service_categories[]
-  services                   services[]
-  staff_loan_payments        staff_loan_payments[]
-  staff_loans                staff_loans[]
-  staff_purchases            staff_purchases[]
-  tenant_numbers             tenant_numbers[]
-  users                      users[]
-  stylist_branch_assignments stylist_branch_assignments[]
-  stylist_queues             stylist_queues[]
-  campaigns                  campaigns[]
-  whatsapp_conversations     whatsapp_conversations[]
+  id                             String                       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name                           String                       @db.VarChar(255)
+  slug                           String?                      @unique @db.VarChar(255)
+  address                        String?                      @db.VarChar(255)
+  city                           String?                      @db.VarChar(100)
+  phone                          String?                      @db.VarChar(50)
+  working_hours                  Json?
+  created_at                     DateTime?                    @default(now()) @db.Timestamptz(6)
+  updated_at                     DateTime?                    @default(now()) @db.Timestamptz(6)
+  email                          String?                      @db.VarChar(255)
+  website                        String?                      @db.VarChar(255)
+  logo_url                       String?                      @db.VarChar(512)
+  tax_rate                       Decimal?                     @default(0.00) @db.Decimal(5, 4)
+  admin_fee_rate                 Decimal?                     @default(0.00) @db.Decimal(5, 4)
+  products_for_staff_enabled     Boolean                      @default(true)
+  admin_fee_enabled              Boolean                      @default(false)
+  admin_fee_on_service           Boolean                      @default(false)
+  loans_to_staff_enabled         Boolean                      @default(false)
+  allow_past_appointments        Boolean                      @default(false)
+  shared_stylists_enabled        Boolean                      @default(false)
+  tip_salon_percent              Decimal?                     @default(10.00) @db.Decimal(5, 2)
+  branch_color                   String?                      @default("#3788d8") @db.VarChar(7)
+  openai_api_key                 String?
+  elevenlabs_api_key             String?
+  elevenlabs_voice_id            String?
+  greeting_message               String?
+  brochure_url                   String?                      @db.VarChar(512)
+  geofence_center_lat            Float?
+  geofence_center_lng            Float?
+  geofence_radius                Float?                       @default(200)
+  parent_tenant_id               String?                      @db.Uuid
+  is_primary_branch              Boolean                      @default(false)
+  cross_branch_schedule_block    Boolean                      @default(true)
+  manage_all_branches_cash       Boolean                      @default(false)
+  price_override_enabled         Boolean                      @default(false)
+  multi_stylist_enabled          Boolean                      @default(false)
+  ticket_virtual_enabled         Boolean                      @default(false)
+  business_type                  String?                      @default("peluqueria") @db.VarChar(50)
+  plan                           String                       @default("free") @db.VarChar(50)
+  stripe_customer_id             String?                      @db.VarChar(255)
+  stripe_subscription_id         String?                      @db.VarChar(255)
+  subscription_status            String?                      @db.VarChar(50)
+  current_period_end             DateTime?                    @db.Timestamptz(6)
+  chair_rental_enabled           Boolean                      @default(false)
+  stripe_connect_account_id      String?                      @db.VarChar(255)
+  stripe_connect_charges_enabled Boolean                      @default(false)
+  rental_block_grace_days        Int                          @default(3)
+  chair_rental_direct_mode       Boolean                      @default(false)
+  chair_rental_manager_user_id   String?                      @db.Uuid
+  rental_admin_phone             String?                      @db.VarChar(50)
+  parent_tenant                  tenants?                     @relation("TenantBranches", fields: [parent_tenant_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  child_tenants                  tenants[]                    @relation("TenantBranches")
+  appointments                   appointments[]
+  cash_sessions                  cash_sessions[]
+  inventory_movements            inventory_movements[]
+  invoice_items                  invoice_items[]
+  invoices                       invoices[]
+  payments                       payments[]
+  payroll_runs                   payroll_runs[]
+  payrolls                       payrolls[]
+  product_categories             product_categories[]
+  products                       products[]
+  schedule_blocks                schedule_blocks[]
+  service_categories             service_categories[]
+  services                       services[]
+  staff_loan_payments            staff_loan_payments[]
+  staff_loans                    staff_loans[]
+  staff_purchases                staff_purchases[]
+  tenant_numbers                 tenant_numbers[]
+  users                          users[]
+  stylist_branch_assignments     stylist_branch_assignments[]
+  stylist_queues                 stylist_queues[]
+  campaigns                      campaigns[]
+  whatsapp_conversations         whatsapp_conversations[]
 
   @@index([parent_tenant_id], map: "idx_tenants_parent")
 }
@@ -552,64 +554,68 @@ model tenants {
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 /// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
 model users {
-  id                                                    String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenant_id                                             String?               @db.Uuid
+  id                                                    String                       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenant_id                                             String?                      @db.Uuid
   role_id                                               Int?
-  first_name                                            String                @db.VarChar(100)
-  last_name                                             String?               @db.VarChar(100)
-  email                                                 String                @unique @db.Citext
-  password_hash                                         String                @db.VarChar(255)
-  phone                                                 String?               @db.VarChar(50)
-  status                                                String?               @default("active") @db.VarChar(50)
-  last_service_at                                       DateTime?             @db.Timestamptz(6)
-  payment_type                                          String?               @db.VarChar(50)
-  base_salary                                           Decimal?              @default(0) @db.Decimal(12, 0)
-  commission_rate                                       Decimal?              @default(0) @db.Decimal(5, 4)
-  created_at                                            DateTime?             @default(now()) @db.Timestamptz(6)
-  updated_at                                            DateTime?             @default(now()) @db.Timestamptz(6)
-  last_turn_at                                          DateTime?             @db.Timestamptz(6)
+  first_name                                            String                       @db.VarChar(100)
+  last_name                                             String?                      @db.VarChar(100)
+  email                                                 String                       @unique @db.Citext
+  password_hash                                         String                       @db.VarChar(255)
+  phone                                                 String?                      @db.VarChar(50)
+  status                                                String?                      @default("active") @db.VarChar(50)
+  last_service_at                                       DateTime?                    @db.Timestamptz(6)
+  payment_type                                          String?                      @db.VarChar(50)
+  base_salary                                           Decimal?                     @default(0) @db.Decimal(12, 0)
+  commission_rate                                       Decimal?                     @default(0) @db.Decimal(5, 4)
+  created_at                                            DateTime?                    @default(now()) @db.Timestamptz(6)
+  updated_at                                            DateTime?                    @default(now()) @db.Timestamptz(6)
+  last_turn_at                                          DateTime?                    @db.Timestamptz(6)
   working_hours                                         Json?
-  is_active                                             Boolean?              @default(true)
-  schedule_type                                         String?               @default("salon") @db.VarChar(50)
+  is_active                                             Boolean?                     @default(true)
+  schedule_type                                         String?                      @default("salon") @db.VarChar(50)
   avatar_url                                            String?
-  password                                              String?               @db.VarChar(255)
-  current_lat                                           Decimal?              @db.Decimal(10, 8)
-  current_lng                                           Decimal?              @db.Decimal(11, 8)
-  is_inside_geofence                                    Boolean?              @default(false)
-  last_location_update                                  DateTime?             @db.Timestamp(6)
-  password_reset_token                                  String?               @db.VarChar(255)
-  password_reset_expires                                DateTime?             @db.Timestamptz(6)
-  employment_type                                       String                @default("employee") @db.VarChar(20)
-  monthly_rent_cop                                      Decimal?              @db.Decimal(12, 2)
-  rental_status                                         String?               @db.VarChar(20)
-  rental_stripe_customer_id                             String?               @db.VarChar(255)
-  rental_stripe_subscription_id                         String?               @db.VarChar(255)
-  rental_past_due_since                                 DateTime?             @db.Timestamptz(6)
-  campaigns_created                                     campaigns[]           @relation("campaign_creator")
+  password                                              String?                      @db.VarChar(255)
+  current_lat                                           Decimal?                     @db.Decimal(10, 8)
+  current_lng                                           Decimal?                     @db.Decimal(11, 8)
+  is_inside_geofence                                    Boolean?                     @default(false)
+  last_location_update                                  DateTime?                    @db.Timestamp(6)
+  password_reset_token                                  String?                      @db.VarChar(255)
+  password_reset_expires                                DateTime?                    @db.Timestamptz(6)
+  employment_type                                       String                       @default("employee") @db.VarChar(20)
+  monthly_rent_cop                                      Decimal?                     @db.Decimal(12, 2)
+  rental_status                                         String?                      @db.VarChar(20)
+  rental_stripe_customer_id                             String?                      @db.VarChar(255)
+  rental_stripe_subscription_id                         String?                      @db.VarChar(255)
+  rental_past_due_since                                 DateTime?                    @db.Timestamptz(6)
+  rental_blocked_days                                   Json?                        @db.JsonB
+  rental_readjust_blocked                               Boolean                      @default(false)
+  rental_last_dunning_at                                DateTime?                    @db.Timestamptz(6)
+  rental_manual_paid_days                               Json?                        @db.JsonB
+  campaigns_created                                     campaigns[]                  @relation("campaign_creator")
   campaign_recipients                                   campaign_recipients[]
-  appointments_appointments_client_idTousers            appointments[]        @relation("appointments_client_idTousers")
-  appointments_appointments_stylist_idTousers           appointments[]        @relation("appointments_stylist_idTousers")
-  cash_sessions_cash_sessions_closed_by_user_idTousers  cash_sessions[]       @relation("cash_sessions_closed_by_user_idTousers")
-  cash_sessions_cash_sessions_opened_by_user_idTousers  cash_sessions[]       @relation("cash_sessions_opened_by_user_idTousers")
+  appointments_appointments_client_idTousers            appointments[]               @relation("appointments_client_idTousers")
+  appointments_appointments_stylist_idTousers           appointments[]               @relation("appointments_stylist_idTousers")
+  cash_sessions_cash_sessions_closed_by_user_idTousers  cash_sessions[]              @relation("cash_sessions_closed_by_user_idTousers")
+  cash_sessions_cash_sessions_opened_by_user_idTousers  cash_sessions[]              @relation("cash_sessions_opened_by_user_idTousers")
   invoice_items                                         invoice_items[]
-  invoices                                              invoices[]            @relation("invoices_client")
-  invoices_opened                                       invoices[]            @relation("invoices_opened_by")
-  invoices_tipped                                       invoices[]            @relation("invoices_tip_recipient")
+  invoices                                              invoices[]                   @relation("invoices_client")
+  invoices_opened                                       invoices[]                   @relation("invoices_opened_by")
+  invoices_tipped                                       invoices[]                   @relation("invoices_tip_recipient")
   payments                                              payments[]
   payroll_runs                                          payroll_runs[]
   payrolls                                              payrolls[]
   schedule_blocks                                       schedule_blocks[]
   staff_loan_payments                                   staff_loan_payments[]
   staff_loans                                           staff_loans[]
-  staff_purchases_staff_purchases_seller_user_idTousers staff_purchases[]     @relation("staff_purchases_seller_user_idTousers")
-  staff_purchases_staff_purchases_stylist_idTousers     staff_purchases[]     @relation("staff_purchases_stylist_idTousers")
+  staff_purchases_staff_purchases_seller_user_idTousers staff_purchases[]            @relation("staff_purchases_seller_user_idTousers")
+  staff_purchases_staff_purchases_stylist_idTousers     staff_purchases[]            @relation("staff_purchases_stylist_idTousers")
   stylist_services                                      stylist_services[]
   stylist_branch_assignments                            stylist_branch_assignments[]
   stylist_queues                                        stylist_queues[]
-  wa_conversations_as_client                            whatsapp_conversations[] @relation("wa_conv_client")
-  wa_conversations_as_agent                             whatsapp_conversations[] @relation("wa_conv_agent")
-  roles                                                 roles?                @relation(fields: [role_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  tenants                                               tenants?              @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  wa_conversations_as_client                            whatsapp_conversations[]     @relation("wa_conv_client")
+  wa_conversations_as_agent                             whatsapp_conversations[]     @relation("wa_conv_agent")
+  roles                                                 roles?                       @relation(fields: [role_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenants                                               tenants?                     @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([tenant_id, email], map: "users_email_ci_uniq")
   @@index([last_service_at], map: "idx_users_last_service_at")
@@ -653,23 +659,23 @@ enum purchase_status_enum {
 }
 
 model campaigns {
-  id                 String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenant_id          String                @db.Uuid
-  name               String                @db.VarChar(255)
-  subject            String                @db.VarChar(500)
-  html_content       String
-  target_criteria    Json?                 @default("{}")
-  status             String                @default("draft") @db.VarChar(20)
-  total_recipients   Int                   @default(0)
-  sent_count         Int                   @default(0)
-  failed_count       Int                   @default(0)
-  created_at         DateTime?             @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime?             @default(now()) @db.Timestamptz(6)
-  scheduled_at       DateTime?             @db.Timestamptz(6)
-  completed_at       DateTime?             @db.Timestamptz(6)
-  created_by_user_id String?               @db.Uuid
-  tenants            tenants               @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  created_by         users?                @relation("campaign_creator", fields: [created_by_user_id], references: [id], onUpdate: NoAction)
+  id                  String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenant_id           String                @db.Uuid
+  name                String                @db.VarChar(255)
+  subject             String                @db.VarChar(500)
+  html_content        String
+  target_criteria     Json?                 @default("{}")
+  status              String                @default("draft") @db.VarChar(20)
+  total_recipients    Int                   @default(0)
+  sent_count          Int                   @default(0)
+  failed_count        Int                   @default(0)
+  created_at          DateTime?             @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime?             @default(now()) @db.Timestamptz(6)
+  scheduled_at        DateTime?             @db.Timestamptz(6)
+  completed_at        DateTime?             @db.Timestamptz(6)
+  created_by_user_id  String?               @db.Uuid
+  tenants             tenants               @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  created_by          users?                @relation("campaign_creator", fields: [created_by_user_id], references: [id], onUpdate: NoAction)
   campaign_recipients campaign_recipients[]
 }
 
@@ -688,20 +694,20 @@ model campaign_recipients {
 }
 
 model whatsapp_conversations {
-  id             String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  tenant_id      String               @db.Uuid
-  chat_id        String               @db.VarChar(100)
-  client_user_id String?              @db.Uuid
-  client_name    String?              @db.VarChar(255)
-  client_phone   String?              @db.VarChar(50)
-  status         String               @default("bot") @db.VarChar(20)
-  blocked        Boolean              @default(false)
-  assigned_to    String?              @db.Uuid
-  created_at     DateTime?            @default(now()) @db.Timestamptz(6)
-  updated_at     DateTime?            @default(now()) @db.Timestamptz(6)
-  tenants        tenants              @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  client_user    users?               @relation("wa_conv_client", fields: [client_user_id], references: [id], onUpdate: NoAction)
-  assigned_user  users?               @relation("wa_conv_agent", fields: [assigned_to], references: [id], onUpdate: NoAction)
+  id             String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  tenant_id      String              @db.Uuid
+  chat_id        String              @db.VarChar(100)
+  client_user_id String?             @db.Uuid
+  client_name    String?             @db.VarChar(255)
+  client_phone   String?             @db.VarChar(50)
+  status         String              @default("bot") @db.VarChar(20)
+  blocked        Boolean             @default(false)
+  assigned_to    String?             @db.Uuid
+  created_at     DateTime?           @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime?           @default(now()) @db.Timestamptz(6)
+  tenants        tenants             @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  client_user    users?              @relation("wa_conv_client", fields: [client_user_id], references: [id], onUpdate: NoAction)
+  assigned_user  users?              @relation("wa_conv_agent", fields: [assigned_to], references: [id], onUpdate: NoAction)
   messages       whatsapp_messages[]
 
   @@unique([tenant_id, chat_id])
@@ -709,14 +715,14 @@ model whatsapp_conversations {
 }
 
 model whatsapp_messages {
-  id              String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  conversation_id String                  @db.Uuid
-  sender_type     String                  @db.VarChar(20)
-  sender_name     String?                 @db.VarChar(255)
+  id              String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  conversation_id String                 @db.Uuid
+  sender_type     String                 @db.VarChar(20)
+  sender_name     String?                @db.VarChar(255)
   content         String
-  message_type    String?                 @default("text") @db.VarChar(20)
-  created_at      DateTime?               @default(now()) @db.Timestamptz(6)
-  conversation    whatsapp_conversations  @relation(fields: [conversation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  message_type    String?                @default("text") @db.VarChar(20)
+  created_at      DateTime?              @default(now()) @db.Timestamptz(6)
+  conversation    whatsapp_conversations @relation(fields: [conversation_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([conversation_id, created_at], map: "idx_wa_msg_conv_created")
 }

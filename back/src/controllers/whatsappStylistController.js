@@ -301,6 +301,20 @@ const STYLIST_TOOLS = [
             description: 'Devuelve un link al Customer Portal de Stripe para que el estilista del Coworking pueda cambiar/actualizar su tarjeta guardada. Útil cuando el cobro falló y hay que cambiar la tarjeta. SOLO úsalo si el estilista ya tiene una tarjeta previamente guardada.',
             parameters: { type: 'object', properties: {}, required: [] }
         }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'contactar_administrador',
+            description: 'Úsalo cuando el estilista del Coworking responde con dudas, problemas o emociones sobre su PAGO/COBRO, o pide ayuda humana. Ejemplos: "ya pagué", "no me pudieron cobrar", "no tengo dinero", "no puedo pagar ahora", "no me ha llegado", "quiero hablar con alguien / con la dueña / con el administrador", "necesito ayuda con el cobro". Tranquiliza al estilista y AVISA al administrador del salón (por WhatsApp) para que lo contacte. NO cobra ni resuelve el pago: solo escala a un humano y da tranquilidad.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    motivo: { type: 'string', description: 'Resumen breve, en las palabras del estilista, de lo que dijo o necesita, para reenviárselo al administrador. Ej: "Dice que ya pagó", "No tiene fondos esta semana", "Quiere hablar con la dueña sobre su cobro".' }
+                },
+                required: ['motivo']
+            }
+        }
     }
 ];
 
@@ -336,6 +350,7 @@ COWORKING — TU ESPACIO (solo si el estilista es renter):
 - Si pregunta cómo pagar / cómo guardar tarjeta / activar pago (primera vez): usa "configurar_pago_arriendo" y MUÉSTRALE el link tal cual para que lo abra en el navegador.
 - Si su tarjeta falló o quiere cambiarla: usa "actualizar_mi_tarjeta" y muéstrale el link.
 - El cobro es DIARIO (mensualidad ÷ 30). Si entra en mora, después de unos días queda bloqueado del sistema completo (no puede ni loguearse). Si ya está bloqueado, lo único que destraba es actualizar la tarjeta y que se cobre.
+- SI EL ESTILISTA RESPONDE CON DUDAS O PROBLEMAS DE PAGO/COBRO o pide ayuda humana (ej: "ya pagué", "no me pudieron cobrar", "no tengo dinero", "no puedo pagar ahora", "quiero hablar con alguien/la dueña/el administrador"): usa "contactar_administrador" con un "motivo" que resuma lo que dijo. Eso tranquiliza al estilista y le avisa al administrador para que lo contacte. NO prometas nada más allá de que el administrador se pondrá en contacto. NO intentes cobrar ni juzgar.
 
 QUÉ NO HACES:
 - NO cobras (no cierras tickets, no recibes pagos, no haces vueltas).
@@ -1284,6 +1299,55 @@ async function actualizarMiTarjeta({ stylist_id }) {
     };
 }
 
+// Normaliza un teléfono a internacional sin '+' (default Colombia 57). Los
+// teléfonos en BD se guardan sin código de país y WhatsApp/Evolution lo exige.
+function toWaNumber(rawPhone) {
+    const digits = String(rawPhone || '').replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.length === 10 && digits.startsWith('3')) return `57${digits}`;
+    return digits;
+}
+
+// El estilista respondió con dudas/problemas de pago y quiere ayuda humana.
+// Tranquiliza al estilista y avisa por WhatsApp al administrador del salón
+// (tenants.rental_admin_phone) para que lo contacte. No expone montos.
+async function contactarAdministrador({ stylist_id, tenant_id, motivo }) {
+    const renter = await prisma.users.findUnique({
+        where: { id: stylist_id },
+        select: { first_name: true, last_name: true, phone: true, tenant_id: true },
+    });
+    const effectiveTenantId = renter?.tenant_id || tenant_id;
+    const tenant = await prisma.tenants.findUnique({
+        where: { id: effectiveTenantId },
+        select: { name: true, rental_admin_phone: true },
+    });
+
+    const firstName = (renter?.first_name || '').split(' ')[0] || '';
+    const fullName = `${renter?.first_name || ''} ${renter?.last_name || ''}`.trim() || 'Un estilista';
+    const renterPhone = renter?.phone || '(sin teléfono)';
+    const salonName = tenant?.name || 'el salón';
+    const adminPhone = toWaNumber(tenant?.rental_admin_phone);
+
+    if (adminPhone) {
+        try {
+            const wahaService = require('../services/wahaService');
+            const adminMsg = `🔔 *Coworking — ${salonName}*\n\n${fullName} (tel: ${renterPhone}) necesita ayuda con su pago y quiere hablar contigo.\n\n📝 _"${motivo || 'Sin detalle'}"_\n\nPor favor, ponte en contacto con esta persona para ayudarle. 🙏`;
+            await wahaService.sendMessage(effectiveTenantId, `${adminPhone}@s.whatsapp.net`, adminMsg);
+            console.log(`[stylist] aviso a administrador (${adminPhone}) por renter ${stylist_id}`);
+        } catch (e) {
+            console.warn('[stylist] no se pudo avisar al administrador:', e.message);
+        }
+    } else {
+        console.warn(`[stylist] tenant ${effectiveTenantId} sin rental_admin_phone — no se pudo avisar al administrador (renter ${stylist_id})`);
+    }
+
+    return {
+        ok: true,
+        message: `No te preocupes${firstName ? ', ' + firstName : ''} 🙏 Ya le avisé al administrador del salón sobre tu caso para que se ponga en contacto contigo y te ayude a resolverlo. En un momento te escribe. 💛`,
+        _private_coworking: true,
+    };
+}
+
 // ─── Dispatcher ────────────────────────────────────────────────────────
 // `session` permite a tools como cambiar_sucursal mutar la sesión en memoria.
 async function executeFunction(name, args, stylistId, homeTenantId, session) {
@@ -1320,6 +1384,7 @@ async function executeFunction(name, args, stylistId, homeTenantId, session) {
         case 'configurar_pago_arriendo': return configurarPagoArriendo(ctx);
         case 'ver_mi_arriendo': return verMiArriendo(ctx);
         case 'actualizar_mi_tarjeta': return actualizarMiTarjeta(ctx);
+        case 'contactar_administrador': return contactarAdministrador(ctx);
         default: throw new Error(`Función desconocida: ${name}`);
     }
 }
