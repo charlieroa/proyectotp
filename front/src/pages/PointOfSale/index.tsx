@@ -76,6 +76,7 @@ const PointOfSale: React.FC<PointOfSaleProps> = ({ embedded }) => {
     const [newClientModalOpen, setNewClientModalOpen] = useState(false);
     const [updatingStatus, setUpdatingStatus] = useState<Record<string, boolean>>({});
     const [paymentSuccess, setPaymentSuccess] = useState<any | null>(null);
+    const [isAddingItem, setIsAddingItem] = useState(false);
     
     const [resModalOpen, setResModalOpen] = useState(false);
     const [resItem, setResItem] = useState<ServiceItem | null>(null);
@@ -98,6 +99,11 @@ const PointOfSale: React.FC<PointOfSaleProps> = ({ embedded }) => {
     type CatalogService = { id: string; name: string; price: number };
     const [availableServices, setAvailableServices] = useState<CatalogService[]>([]);
     const [serviceToAdd, setServiceToAdd] = useState<{ service: { value: string; label: string; data: CatalogService } | null; seller: StylistOption | null }>({ service: null, seller: null });
+
+    // Asignar estilista a un servicio huérfano (línea sin seller_id) — solo modo ticket.
+    const [assignSellerItem, setAssignSellerItem] = useState<ServiceItem | null>(null);
+    const [assignSellerValue, setAssignSellerValue] = useState<StylistOption | null>(null);
+    const [assigningSeller, setAssigningSeller] = useState(false);
 
     useEffect(() => {
         const fetchPrerequisites = async () => {
@@ -290,19 +296,37 @@ const PointOfSale: React.FC<PointOfSaleProps> = ({ embedded }) => {
 
         // En modo ticket virtual: persistimos la línea vía API y refrescamos el ticket.
         if (isTicketMode && ticketId) {
+            if (isAddingItem) return;
+            setIsAddingItem(true);
+            const payload = {
+                item_type: 'product',
+                related_id: product.id,
+                description: product.name,
+                quantity: 1,
+                unit_price: Number(product.sale_price || 0),
+                seller_id: productToAdd.seller.value,
+            };
             try {
-                await api.post(`/tickets/${ticketId}/items`, {
-                    item_type: 'product',
-                    related_id: product.id,
-                    description: product.name,
-                    quantity: 1,
-                    unit_price: Number(product.sale_price || 0),
-                    seller_id: productToAdd.seller.value,
-                });
+                const resp = await api.post(`/tickets/${ticketId}/items`, payload);
+                if (resp.data?.duplicate_warning) {
+                    const confirm = await Swal.fire({
+                        title: 'Producto repetido',
+                        text: `Ya agregaste "${product.name}" hace un momento. ¿Agregarlo otra vez?`,
+                        icon: 'warning',
+                        showCancelButton: true,
+                        confirmButtonText: 'Sí, agregar de nuevo',
+                        cancelButtonText: 'No',
+                    });
+                    if (confirm.isConfirmed) {
+                        await api.post(`/tickets/${ticketId}/items`, { ...payload, allow_duplicate: true });
+                    }
+                }
                 await reloadTicketCart();
                 setProductToAdd({ product: null, seller: defaultSeller });
             } catch (err: any) {
                 Swal.fire('Error', err?.response?.data?.error || 'No se pudo agregar el producto.', 'error');
+            } finally {
+                setIsAddingItem(false);
             }
             return;
         }
@@ -321,20 +345,38 @@ const PointOfSale: React.FC<PointOfSaleProps> = ({ embedded }) => {
     // Agregar servicio al ticket (solo modo ticket virtual)
     const addServiceToTicket = async () => {
         if (!ticketId || !serviceToAdd.service || !serviceToAdd.seller) return;
+        if (isAddingItem) return;
+        setIsAddingItem(true);
         const svc = serviceToAdd.service.data;
+        const payload = {
+            item_type: 'service',
+            related_id: svc.id,
+            description: svc.name,
+            quantity: 1,
+            unit_price: Number(svc.price || 0),
+            seller_id: serviceToAdd.seller.value,
+        };
         try {
-            await api.post(`/tickets/${ticketId}/items`, {
-                item_type: 'service',
-                related_id: svc.id,
-                description: svc.name,
-                quantity: 1,
-                unit_price: Number(svc.price || 0),
-                seller_id: serviceToAdd.seller.value,
-            });
+            const resp = await api.post(`/tickets/${ticketId}/items`, payload);
+            if (resp.data?.duplicate_warning) {
+                const confirm = await Swal.fire({
+                    title: 'Servicio repetido',
+                    text: `Ya agregaste "${svc.name}" con este estilista hace un momento. ¿Agregarlo otra vez?`,
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonText: 'Sí, agregar de nuevo',
+                    cancelButtonText: 'No',
+                });
+                if (confirm.isConfirmed) {
+                    await api.post(`/tickets/${ticketId}/items`, { ...payload, allow_duplicate: true });
+                }
+            }
             await reloadTicketCart();
             setServiceToAdd({ service: null, seller: null });
         } catch (err: any) {
             Swal.fire('Error', err?.response?.data?.error || 'No se pudo agregar el servicio.', 'error');
+        } finally {
+            setIsAddingItem(false);
         }
     };
 
@@ -451,6 +493,33 @@ const PointOfSale: React.FC<PointOfSaleProps> = ({ embedded }) => {
     const effectivePrice = (item: ServiceItem) => (item.priceOverride != null ? item.priceOverride : item.price);
 
     const servicesReadyForPayment = useMemo(() => cart.services.filter(s => s.status === 'checked_out'), [cart.services]);
+
+    // Servicios huérfanos: líneas a cobrar sin estilista asignado. Solo aplica en modo ticket,
+    // donde las líneas viven en el backend y se pueden reasignar vía PATCH.
+    const orphanServices = useMemo(
+        () => (isTicketMode ? servicesReadyForPayment.filter(s => !s.stylistId) : []),
+        [isTicketMode, servicesReadyForPayment]
+    );
+
+    const openAssignSeller = (item: ServiceItem) => {
+        setAssignSellerItem(item);
+        setAssignSellerValue(item.stylistId ? stylistOptions.find(o => o.value === item.stylistId) || null : null);
+    };
+    const submitAssignSeller = async () => {
+        if (!assignSellerItem || !assignSellerValue) return;
+        if (!isTicketMode || !ticketId || !assignSellerItem.ticketItemId) return;
+        setAssigningSeller(true);
+        try {
+            await api.patch(`/tickets/${ticketId}/items/${assignSellerItem.ticketItemId}`, { seller_id: assignSellerValue.value });
+            await reloadTicketCart();
+            setAssignSellerItem(null);
+            setAssignSellerValue(null);
+        } catch (err: any) {
+            Swal.fire(t("error"), err?.response?.data?.error || "No se pudo asignar el estilista.", "error");
+        } finally {
+            setAssigningSeller(false);
+        }
+    };
     const total = useMemo(() => {
         const servicesTotal = servicesReadyForPayment.reduce((sum, item) => sum + effectivePrice(item), 0);
         const productsTotal = cart.products.reduce((sum, item) => sum + (item.price * item.quantity), 0);
@@ -525,7 +594,7 @@ const PointOfSale: React.FC<PointOfSaleProps> = ({ embedded }) => {
     const paidTotal = cashAmountNum + (useCard ? cardAmountNum : 0);
     const totalWithTip = total + tipAmountNum;
     const change = paidTotal - totalWithTip;
-    const canPay = selectedClient && total > 0 && paidTotal >= totalWithTip && !isProcessingPayment;
+    const canPay = selectedClient && total > 0 && paidTotal >= totalWithTip && !isProcessingPayment && orphanServices.length === 0;
 
     // Estilistas con items (servicios o productos) en este ticket: opciones para "Propina para..."
     const tipRecipientOptions = useMemo(() => {
@@ -556,7 +625,10 @@ const PointOfSale: React.FC<PointOfSaleProps> = ({ embedded }) => {
                 });
                 await dispatch(getCalendarData());
                 const clientData = selectedClient?.data;
-                const clientEmail = clientData?.email || '';
+                const rawEmail = clientData?.email || '';
+                // Walk-ins sin correo reciben uno temporal (cliente_<tel>@temp.tupelukeria.com);
+                // no sirve para enviar la factura, así que lo tratamos como vacío.
+                const clientEmail = rawEmail.endsWith('@temp.tupelukeria.com') ? '' : rawEmail;
                 setPaymentSuccess({
                     invoiceId: response.data?.invoice?.id || ticketId,
                     change,
@@ -592,7 +664,10 @@ const PointOfSale: React.FC<PointOfSaleProps> = ({ embedded }) => {
             const response = await api.post('/payments', payload);
             await dispatch(getCalendarData());
             const clientData = selectedClient?.data;
-            const clientEmail = clientData?.email || '';
+            const rawEmail = clientData?.email || '';
+            // Walk-ins sin correo reciben uno temporal (cliente_<tel>@temp.tupelukeria.com);
+            // no sirve para enviar la factura, así que lo tratamos como vacío.
+            const clientEmail = rawEmail.endsWith('@temp.tupelukeria.com') ? '' : rawEmail;
             setPaymentSuccess({ invoiceId: response.data.invoiceId, change: change, clientEmail, clientName: `${clientData?.first_name || ''} ${clientData?.last_name || ''}`.trim() });
             if (clientEmail) setInvoiceEmail(clientEmail);
 
@@ -670,7 +745,7 @@ const PointOfSale: React.FC<PointOfSaleProps> = ({ embedded }) => {
                                     <h5>{t("payment_completed")}</h5>
                                     <p className="text-muted">{t("sale_recorded")}</p>
                                     <h3 className="fw-semibold">
-                                        {t("invoice_id")} <span className="text-primary text-decoration-underline">{paymentSuccess.invoiceId}</span>
+                                        {t("invoice_id")} <code className="text-muted" style={{ fontSize: '0.75em' }}>{paymentSuccess.invoiceId}</code>
                                     </h3>
                                     {paymentSuccess.change > 0 && (
                                         <h4 className="fw-semibold mt-3">
@@ -773,7 +848,7 @@ const PointOfSale: React.FC<PointOfSaleProps> = ({ embedded }) => {
                                                     color="primary"
                                                     className="w-100"
                                                     onClick={addServiceToTicket}
-                                                    disabled={!serviceToAdd.service || !serviceToAdd.seller || isProcessingPayment}
+                                                    disabled={!serviceToAdd.service || !serviceToAdd.seller || isProcessingPayment || isAddingItem}
                                                 >
                                                     Añadir
                                                 </Button>
@@ -803,7 +878,7 @@ const PointOfSale: React.FC<PointOfSaleProps> = ({ embedded }) => {
                                             />
                                         </Col>
                                         <Col sm={2} className="d-flex align-items-end">
-                                            <Button color="primary" className="w-100" onClick={addProductToCart} disabled={!productToAdd.product || !productToAdd.seller}>{t("add")}</Button>
+                                            <Button color="primary" className="w-100" onClick={addProductToCart} disabled={!productToAdd.product || !productToAdd.seller || isAddingItem}>{t("add")}</Button>
                                         </Col>
                                     </Row>
                                 </div>
@@ -873,9 +948,15 @@ const PointOfSale: React.FC<PointOfSaleProps> = ({ embedded }) => {
                                                                 {item.batchId && <Badge color="soft-info" pill style={{fontSize: 10}}><i className="ri-links-line me-1"></i>Agrupado</Badge>}
                                                             </div>
                                                             <h6 className="mb-1 fw-bold">{item.name}</h6>
-                                                            <div className="text-muted small">
-                                                                <i className="ri-user-line me-1"></i>{item.stylist}
-                                                            </div>
+                                                            {(!item.stylistId && isTicketMode) ? (
+                                                                <Button color="soft-danger" size="sm" className="mt-1 py-0 px-2" style={{ fontSize: 11 }} onClick={() => openAssignSeller(item)}>
+                                                                    <i className="ri-user-add-line me-1"></i>Sin estilista — asignar
+                                                                </Button>
+                                                            ) : (
+                                                                <div className="text-muted small">
+                                                                    <i className="ri-user-line me-1"></i>{item.stylist}
+                                                                </div>
+                                                            )}
                                                         </div>
                                                         <div className="text-end" style={{flexShrink: 0}}>
                                                             {item.priceOverride != null ? (
@@ -975,6 +1056,14 @@ const PointOfSale: React.FC<PointOfSaleProps> = ({ embedded }) => {
                                         </div>
                                     )}
                                 </div>
+                                {orphanServices.length > 0 && (
+                                    <div className="alert alert-danger d-flex align-items-center gap-2 mt-3 mb-0 py-2 px-3" role="alert">
+                                        <i className="ri-error-warning-line fs-5"></i>
+                                        <span className="small">
+                                            Hay {orphanServices.length} servicio{orphanServices.length === 1 ? '' : 's'} sin estilista. Asigna quién lo hizo (botón rojo en cada línea) para poder cobrar.
+                                        </span>
+                                    </div>
+                                )}
                                 <div className="d-grid mt-3">
                                     <Button color="primary" size="lg" disabled={!canPay} onClick={handlePayNow}>
                                         {isProcessingPayment && <Spinner size="sm" className="me-2"/>}
@@ -1029,6 +1118,35 @@ const PointOfSale: React.FC<PointOfSaleProps> = ({ embedded }) => {
                 <ModalFooter>
                     <Button color="light" onClick={() => setPriceModalOpen(false)}>Cancelar</Button>
                     <Button color="primary" onClick={submitPriceOverride}>Guardar</Button>
+                </ModalFooter>
+            </Modal>
+
+            <Modal isOpen={assignSellerItem !== null} toggle={() => { setAssignSellerItem(null); setAssignSellerValue(null); }} centered>
+                <ModalHeader toggle={() => { setAssignSellerItem(null); setAssignSellerValue(null); }}>
+                    <i className="ri-user-add-line me-2"></i>¿Quién hizo este servicio?
+                </ModalHeader>
+                <ModalBody>
+                    {assignSellerItem && (
+                        <div className="mb-3 p-2 bg-light rounded">
+                            <i className="ri-scissors-line me-1 text-success"></i>
+                            <strong>{assignSellerItem.name}</strong> · {formatCurrency(effectivePrice(assignSellerItem))}
+                        </div>
+                    )}
+                    <Label className="form-label">Estilista</Label>
+                    <Select
+                        isSearchable
+                        placeholder={t("select_stylist_pos") || "Selecciona un estilista..."}
+                        options={stylistOptions}
+                        value={assignSellerValue}
+                        onChange={(opt: StylistOption | null) => setAssignSellerValue(opt)}
+                    />
+                    <small className="text-muted d-block mt-2">La comisión de este servicio se le asignará al estilista seleccionado.</small>
+                </ModalBody>
+                <ModalFooter>
+                    <Button color="light" onClick={() => { setAssignSellerItem(null); setAssignSellerValue(null); }}>{t("cancel_appointment")}</Button>
+                    <Button color="primary" onClick={submitAssignSeller} disabled={!assignSellerValue || assigningSeller}>
+                        {assigningSeller && <Spinner size="sm" className="me-2" />}Asignar
+                    </Button>
                 </ModalFooter>
             </Modal>
 

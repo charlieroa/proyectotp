@@ -135,7 +135,10 @@ export const getCalendarData = (targetTenantId?: string) => async (dispatch: any
         ? `${tk.users.first_name || ""} ${tk.users.last_name || ""}`.trim()
         : tk.client_name_adhoc || "Walk-in";
       const itemCount = Array.isArray(tk.invoice_items) ? tk.invoice_items.length : 0;
-      const dayISO = (tk.created_at || new Date().toISOString()).slice(0, 10);
+      // created_at viene en UTC; el ticket debe pintarse en el día LOCAL en que se abrió,
+      // no en el día UTC (si no, un ticket de las 9pm hora Colombia salta al día siguiente).
+      const createdDate = tk.created_at ? new Date(tk.created_at) : new Date();
+      const dayISO = `${createdDate.getFullYear()}-${String(createdDate.getMonth() + 1).padStart(2, '0')}-${String(createdDate.getDate()).padStart(2, '0')}`;
       return {
         id: `ticket-${tk.id}`,
         title: `🎫 ${clientName}`,

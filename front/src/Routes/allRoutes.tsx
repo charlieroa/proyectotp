@@ -84,7 +84,7 @@ const authProtectedRoutes = [
 
   // Dashboard
   { path: "/dashboard", component: DashboardPrincipal() },
-  // Dashboard v2 — preview del rediseño Luxe (sin lógica real, datos mock)
+  // Dashboard v2 — hub multi-sucursal: agenda, tickets, caja, POS embebido y fichero (datos reales)
   { path: "/dashboard-v2", component: DashboardV2() },
 
   // Super Admin

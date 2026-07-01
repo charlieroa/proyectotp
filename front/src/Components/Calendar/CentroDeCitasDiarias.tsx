@@ -37,7 +37,7 @@ const formatCOPString = (digits: string) => {
 };
 
 // --- Modales ---
-const ModalAbrirCaja: React.FC<{ isOpen: boolean; onClose: () => void; onSessionOpened: () => void; targetTenantId?: string; }> = ({ isOpen, onClose, onSessionOpened, targetTenantId }) => {
+export const ModalAbrirCaja: React.FC<{ isOpen: boolean; onClose: () => void; onSessionOpened: () => void; targetTenantId?: string; }> = ({ isOpen, onClose, onSessionOpened, targetTenantId }) => {
     const { t } = useTranslation();
     const [amountDigits, setAmountDigits] = useState('');
     const [saving, setSaving] = useState(false);
@@ -73,7 +73,7 @@ const ModalAbrirCaja: React.FC<{ isOpen: boolean; onClose: () => void; onSession
     );
 };
 
-const ModalResumenCierre: React.FC<{ isOpen: boolean; onClose: () => void; onSessionClosed: () => void; sessionData: any | null; targetTenantId?: string; }> = ({ isOpen, onClose, onSessionClosed, sessionData, targetTenantId }) => {
+export const ModalResumenCierre: React.FC<{ isOpen: boolean; onClose: () => void; onSessionClosed: () => void; sessionData: any | null; targetTenantId?: string; }> = ({ isOpen, onClose, onSessionClosed, sessionData, targetTenantId }) => {
     const { t } = useTranslation();
     const { formatCurrency } = useCurrency();
     const [saving, setSaving] = useState(false);
@@ -91,13 +91,20 @@ const ModalResumenCierre: React.FC<{ isOpen: boolean; onClose: () => void; onSes
         const expenses = sessionData?.summary?.expenses_by_category || [];
         const totalCashIncomes = incomes.find((inc: any) => inc.payment_method === 'cash')?.total || 0;
         const totalExpenses = expenses.reduce((acc: number, exp: any) => acc + Number(exp.total), 0);
+        const salesByMethod = sessionData?.summary?.sales_by_method || [];
+        const totalSales = Number(sessionData?.summary?.total_sales || 0);
 
         return {
             details, incomes, expenses,
             expectedCash: sessionData?.expected_cash_amount || 0,
-            totalCashIncomes, totalExpenses
+            totalCashIncomes, totalExpenses,
+            salesByMethod, totalSales
         };
     }, [sessionData]);
+
+    const salesMethodLabels: Record<string, string> = {
+        cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia', other: 'Otro'
+    };
 
     const handleCloseSession = async () => {
         try {
@@ -149,6 +156,21 @@ const ModalResumenCierre: React.FC<{ isOpen: boolean; onClose: () => void; onSes
                     </Col>
                 </Row>
                 <hr />
+                <div className="bg-light p-3 rounded mb-3">
+                    <h6 className="mb-2"><i className="ri-shopping-bag-3-line text-primary"></i> Ventas del día (todos los métodos)</h6>
+                    <div className="vstack gap-1">
+                        {summary.salesByMethod.length === 0 && <p className="text-muted m-0">Sin ventas registradas.</p>}
+                        {summary.salesByMethod.map((s: any) => (
+                            <div key={s.method} className="d-flex justify-content-between">
+                                <span>{salesMethodLabels[s.method] || s.method} ({s.count})</span>
+                                <span className="fw-medium">{formatCurrency(s.total)}</span>
+                            </div>
+                        ))}
+                        <hr className="my-1" />
+                        <div className="d-flex justify-content-between"><strong>Total vendido</strong><strong className="text-success">{formatCurrency(summary.totalSales)}</strong></div>
+                    </div>
+                    <small className="text-muted">No incluye propinas. Tarjeta/transferencia no afectan el efectivo de caja.</small>
+                </div>
                 <div className="bg-light p-3 rounded">
                     <div className="d-flex justify-content-between"><span className="text-muted">{t("initial_base")}</span><span>{formatCurrency(summary.details.initial_amount)}</span></div>
                     <div className="d-flex justify-content-between mt-2"><span className="text-muted">{t("plus_cash_income")}</span><span className="text-success">{formatCurrency(summary.totalCashIncomes)}</span></div>
@@ -340,12 +362,17 @@ const CentroDeCitasDiarias = ({ events, onNewAppointmentClick, targetTenantId }:
 
     // Tickets virtuales del día seleccionado — separados porque no son citas.
     const ticketsDelDia = useMemo(() => {
-        const dayISO = selectedDate.toISOString().slice(0, 10);
+        // Mismo criterio de día LOCAL que las citas (gruposPorCliente): created_at viene en UTC,
+        // así que comparar el string crudo metía los tickets de la noche en el día siguiente.
+        const startOfDay = new Date(selectedDate); startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(selectedDate); endOfDay.setHours(23, 59, 59, 999);
         return events
             .filter((ev: any) => ev.extendedProps?._isTicket)
             .filter((ev: any) => {
-                const created = (ev.extendedProps?.created_at || '').slice(0, 10);
-                return created === dayISO;
+                const raw = ev.extendedProps?.created_at;
+                if (!raw) return false;
+                const created = new Date(raw);
+                return !isNaN(created.getTime()) && created >= startOfDay && created <= endOfDay;
             })
             .filter((ev: any) => {
                 if (!searchTerm) return true;

@@ -29,8 +29,12 @@ type Props = {
   onChanged?: () => void;
   /** El caller decide cómo abrir el modal de reagendar. */
   onReschedule?: (appt: ApptDetail) => void;
-  /** Si el caller tiene su propio flujo de "iniciar/checkin" lo puede sobrescribir. */
-  onCheckedIn?: (appt: ApptDetail) => void;
+  /** Se llama tras el check-in con el ticket_id creado (si el tenant tiene ticket virtual). */
+  onCheckedIn?: (appt: ApptDetail, ticketId?: string) => void;
+  /** Si es true, pregunta "¿Abrir ya el ticket?" antes de iniciar el servicio. */
+  confirmBeforeCheckIn?: boolean;
+  /** Texto del botón de iniciar/check-in. Por defecto "Iniciar servicio". */
+  checkInLabel?: string;
 };
 
 const AppointmentDetailDrawer: React.FC<Props> = ({
@@ -40,6 +44,8 @@ const AppointmentDetailDrawer: React.FC<Props> = ({
   onChanged,
   onReschedule,
   onCheckedIn,
+  confirmBeforeCheckIn,
+  checkInLabel,
 }) => {
   const navigate = useNavigate();
   const { formatCurrency } = useCurrency();
@@ -69,11 +75,25 @@ const AppointmentDetailDrawer: React.FC<Props> = ({
 
   const handleCheckIn = async () => {
     if (busy) return;
+    if (confirmBeforeCheckIn) {
+      const result = await Swal.fire({
+        title: "¿Abrir ya el ticket?",
+        text: `Se iniciará la atención de ${a.client_name || "el cliente"} y se abrirá el ticket con ${a.service_name}.`,
+        icon: "question",
+        showCancelButton: true,
+        confirmButtonColor: "#0ab39c",
+        cancelButtonColor: "#878a99",
+        confirmButtonText: "Sí, abrir ticket",
+        cancelButtonText: "No",
+        reverseButtons: true,
+      });
+      if (!result.isConfirmed) return;
+    }
     setBusy("checkin");
     try {
-      await api.patch(`/appointments/${a.id}/checkin`);
+      const { data } = await api.patch(`/appointments/${a.id}/checkin`);
       Swal.fire({ icon: "success", title: "Servicio iniciado", timer: 1200, showConfirmButton: false });
-      onCheckedIn?.(a);
+      onCheckedIn?.(a, data?.ticket_id);
       onChanged?.();
       onClose();
     } catch (err: any) {
@@ -176,7 +196,7 @@ const AppointmentDetailDrawer: React.FC<Props> = ({
               <>
                 <Button color="warning" onClick={handleCheckIn} disabled={!!busy}>
                   {busy === "checkin" ? <Spinner size="sm" /> : <i className="ri-play-circle-line me-1" />}
-                  Iniciar servicio
+                  {checkInLabel || "Iniciar servicio"}
                 </Button>
                 {onReschedule && (
                   <Button color="soft-primary" onClick={() => { onReschedule(a); onClose(); }}>

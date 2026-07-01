@@ -13,8 +13,11 @@ import {
 } from "../DashboardPrincipal/superCalendarTheme";
 import { api } from "../../services/api";
 import QuickAppointmentDrawer from "../../Components/Calendar/QuickAppointmentDrawer";
+import AppointmentDetailDrawer, { ApptDetail } from "../../Components/Calendar/AppointmentDetailDrawer";
 import TicketsModal from "../../Components/Tickets/TicketsModal";
 import PointOfSale from "../PointOfSale";
+import { ModalAbrirCaja, ModalResumenCierre } from "../../Components/Calendar/CentroDeCitasDiarias";
+import useCalendarSocket from "../../hooks/useCalendarSocket";
 
 // ─── Types ─────────────────────────────────────────────────
 type ApptStatus = "scheduled" | "rescheduled" | "pending_approval" | "checked_in" | "checked_out" | "completed" | "cancelled";
@@ -187,10 +190,86 @@ const shiftDate = (iso: string, days: number): string => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
+// ─── Mini calendario de mes (cambiar de día sin la barra superior) ──
+const MiniCalendar: React.FC<{ value: string; onChange: (iso: string) => void }> = ({ value, onChange }) => {
+  // Mes mostrado; se ancla al día seleccionado y se puede navegar.
+  const [anchor, setAnchor] = useState<string>(value);
+  useEffect(() => { setAnchor(value); }, [value]);
+
+  const base = new Date(`${anchor}T00:00:00`);
+  const year = base.getFullYear();
+  const month = base.getMonth();
+  const todayStr = todayISO();
+
+  const startWeekday = (new Date(year, month, 1).getDay() + 6) % 7; // Lunes = 0
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells: (string | null)[] = [];
+  for (let i = 0; i < startWeekday; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push(`${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
+  }
+  const monthLabel = base.toLocaleDateString("es-CO", { month: "long", year: "numeric" });
+  const shiftMonth = (delta: number) => {
+    const d = new Date(year, month + delta, 1);
+    setAnchor(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`);
+  };
+
+  const weekdays = ["L", "M", "M", "J", "V", "S", "D"];
+
+  return (
+    <div style={{ padding: "10px 14px", borderBottom: `1px solid ${SC.border}`, background: SC.surface }}>
+      <div className="d-flex align-items-center" style={{ marginBottom: 8 }}>
+        <button type="button" onClick={() => shiftMonth(-1)} title="Mes anterior"
+          style={{ width: 24, height: 24, borderRadius: RAD.sm, border: `1px solid ${SC.border2}`, background: SC.surface, color: SC.muted, cursor: "pointer", padding: 0 }}>
+          <i className="ri-arrow-left-s-line" />
+        </button>
+        <span className="flex-grow-1 text-center text-capitalize" style={{ fontSize: FS.sm, fontWeight: 600, color: SC.text }}>{monthLabel}</span>
+        <button type="button" onClick={() => shiftMonth(1)} title="Mes siguiente"
+          style={{ width: 24, height: 24, borderRadius: RAD.sm, border: `1px solid ${SC.border2}`, background: SC.surface, color: SC.muted, cursor: "pointer", padding: 0 }}>
+          <i className="ri-arrow-right-s-line" />
+        </button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 }}>
+        {weekdays.map((w, i) => (
+          <div key={i} style={{ textAlign: "center", fontSize: 9, fontWeight: 600, color: SC.dim, textTransform: "uppercase", padding: "2px 0" }}>{w}</div>
+        ))}
+        {cells.map((iso, i) => {
+          if (!iso) return <div key={`e${i}`} />;
+          const day = Number(iso.slice(-2));
+          const isSelected = iso === value;
+          const isToday = iso === todayStr;
+          return (
+            <button
+              key={iso}
+              type="button"
+              onClick={() => onChange(iso)}
+              style={{
+                aspectRatio: "1 / 1",
+                border: isToday && !isSelected ? `1px solid ${INDIGO}` : "1px solid transparent",
+                borderRadius: RAD.sm,
+                background: isSelected ? INDIGO : "transparent",
+                color: isSelected ? "#fff" : isToday ? INDIGO : SC.text,
+                fontSize: 11,
+                fontWeight: isSelected || isToday ? 700 : 500,
+                cursor: "pointer",
+                display: "grid",
+                placeItems: "center",
+                padding: 0,
+                fontFeatureSettings: "'tnum'",
+              }}
+            >
+              {day}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 // ─── Page ──────────────────────────────────────────────────
 const DashboardV2: React.FC = () => {
   const [date, setDate] = useState<string>(todayISO());
-  const [agendaMode, setAgendaMode] = useState<"list" | "grid">("list");
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
   const [search, setSearch] = useState<string>("");
 
@@ -199,16 +278,37 @@ const DashboardV2: React.FC = () => {
   const [stylistsData, setStylistsData] = useState<StylistsResponse | null>(null);
   const [ticketsData, setTicketsData] = useState<BranchTicketsResponse | null>(null);
   const [ficheroQueue, setFicheroQueue] = useState<FicheroQueueCategory[] | null>(null);
+  const [refreshTick, setRefreshTick] = useState<number>(0); // bump → refetch agenda/tickets en tiempo real (socket)
 
   const [appointmentDrawerOpen, setAppointmentDrawerOpen] = useState<boolean>(false);
   const [appointmentDefaultDate, setAppointmentDefaultDate] = useState<Date | null>(null);
+  const [selectedAppt, setSelectedAppt] = useState<ApptDetail | null>(null);
+  const [apptDetailOpen, setApptDetailOpen] = useState<boolean>(false);
+  const [miniCalOpen, setMiniCalOpen] = useState<boolean>(false);
   const [ticketsModalOpen, setTicketsModalOpen] = useState<boolean>(false);
   const [showAllTickets, setShowAllTickets] = useState<boolean>(false);
   const [posOpen, setPosOpen] = useState<{ ticketId: string; targetTenantId: string } | null>(null);
   const [anticipoOpen, setAnticipoOpen] = useState<boolean>(false);
   const [prestamoOpen, setPrestamoOpen] = useState<boolean>(false);
+  // Caja de la sucursal activa (sesión del cajero logueado en ese tenant)
+  const [cashSession, setCashSession] = useState<any | null>(null);
+  const [cashOpenModal, setCashOpenModal] = useState<boolean>(false);
+  const [cashCloseModal, setCashCloseModal] = useState<boolean>(false);
 
   const navigate = useNavigate();
+
+  // Trae la sesión de caja abierta del usuario para la sucursal activa.
+  const fetchCashSession = useCallback(async () => {
+    if (!activeBranchId) { setCashSession(null); return; }
+    try {
+      const { data } = await api.get('/cash/current', { params: { target_tenant_id: activeBranchId } });
+      setCashSession(data); // null si no hay caja abierta
+    } catch (e) {
+      setCashSession(null);
+    }
+  }, [activeBranchId]);
+
+  useEffect(() => { fetchCashSession(); }, [fetchCashSession]);
 
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -244,9 +344,18 @@ const DashboardV2: React.FC = () => {
     return () => clearInterval(id);
   }, [autoRefresh, fetchBranches]);
 
-  // Fetch stylists-day for active branch when grid mode
+  // Tiempo real: el backend emite appointment:created/updated/status/cancelled a la sala
+  // tenant:<branchId> (p.ej. citas creadas por el bot de WhatsApp). Al recibir cualquiera,
+  // refrescamos sucursales (agenda lista) y bumpeamos refreshTick para grid/tickets.
+  const onCalendarChange = useCallback(() => {
+    fetchBranches();
+    setRefreshTick((t) => t + 1);
+  }, [fetchBranches]);
+  useCalendarSocket({ tenantId: activeBranchId || undefined, onAnyChange: onCalendarChange });
+
+  // Fetch stylists-day for active branch (vista de calendario)
   useEffect(() => {
-    if (agendaMode !== "grid" || !activeBranchId) {
+    if (!activeBranchId) {
       setStylistsData(null);
       return;
     }
@@ -260,7 +369,7 @@ const DashboardV2: React.FC = () => {
       }
     })();
     return () => { cancelled = true; };
-  }, [agendaMode, activeBranchId, date]);
+  }, [activeBranchId, date, refreshTick]);
 
   // Fetch branch-tickets for active branch
   useEffect(() => {
@@ -279,7 +388,7 @@ const DashboardV2: React.FC = () => {
       }
     })();
     return () => { cancelled = true; };
-  }, [activeBranchId, date]);
+  }, [activeBranchId, date, refreshTick]);
 
   // Fetch fichero full queue (include_absent=true → no filtra geofence)
   const fetchFicheroQueue = useCallback(async () => {
@@ -343,6 +452,24 @@ const DashboardV2: React.FC = () => {
     return out.sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
   }, [activeBranch, search]);
 
+  // Datos del calendario filtrados por la búsqueda (cliente / servicio / estilista)
+  const filteredStylistsData = useMemo<StylistsResponse | null>(() => {
+    if (!stylistsData || !search) return stylistsData;
+    const s = search.toLowerCase();
+    return {
+      ...stylistsData,
+      stylists: stylistsData.stylists.map((st) => ({
+        ...st,
+        appointments: st.appointments.filter(
+          (a) =>
+            a.client_name.toLowerCase().includes(s) ||
+            a.service_name.toLowerCase().includes(s) ||
+            `${st.first_name} ${st.last_name || ""}`.toLowerCase().includes(s)
+        ),
+      })),
+    };
+  }, [stylistsData, search]);
+
   // Footer KPIs aggregated
   const footerKpis = useMemo(() => {
     const branches = branchesData?.branches || [];
@@ -366,6 +493,25 @@ const DashboardV2: React.FC = () => {
       low_stock: lowStockTotal,
     };
   }, [branchesData]);
+
+  // Abrir el detalle de una cita (clic en agenda lista o grid)
+  const openApptDetail = useCallback((a: ApiAppt) => {
+    setSelectedAppt({
+      id: a.id,
+      start_time: a.start_time,
+      end_time: a.end_time,
+      status: a.status,
+      service_name: a.service_name,
+      service_price: a.service_price,
+      stylist_name: a.stylist_name,
+      stylist_id: a.stylist_id,
+      client_id: a.client_id,
+      client_name: a.client_name,
+      tenant_id: activeBranchId || undefined,
+      branch_name: activeBranch ? branchShortName(activeBranch.name) : undefined,
+    });
+    setApptDetailOpen(true);
+  }, [activeBranchId, activeBranch]);
 
   return (
     <div className="page-content page-content-flush">
@@ -473,7 +619,7 @@ const DashboardV2: React.FC = () => {
                 className="dv2-two-col"
                 style={{
                   display: "grid",
-                  gridTemplateColumns: agendaMode === "grid" ? "minmax(0, 3fr) minmax(0, 1fr)" : "minmax(0, 1.2fr) minmax(0, 1fr)",
+                  gridTemplateColumns: "minmax(0, 3fr) minmax(0, 1fr)",
                   gap: SP.xxl,
                   marginTop: SP.lg,
                 }}
@@ -487,7 +633,23 @@ const DashboardV2: React.FC = () => {
                       count={branchAppts.length}
                       right={
                         <>
-                          <ToggleSeg mode={agendaMode} onChange={setAgendaMode} />
+                          <button
+                            type="button"
+                            title="Cambiar de día"
+                            onClick={() => setMiniCalOpen((v) => !v)}
+                            style={{
+                              height: 26,
+                              padding: "0 10px",
+                              borderRadius: RAD.sm,
+                              border: `1px solid ${SC.border2}`,
+                              background: miniCalOpen ? SC.surface2 : SC.surface,
+                              color: miniCalOpen ? SC.text : SC.muted,
+                              fontSize: FS.sm,
+                              cursor: "pointer",
+                            }}
+                          >
+                            <i className="ri-calendar-2-line" />
+                          </button>
                           {branchesData.branches.length > 1 && (
                             <Input
                               type="select"
@@ -504,19 +666,22 @@ const DashboardV2: React.FC = () => {
                         </>
                       }
                     />
-                    {agendaMode === "list" ? (
-                      <Timeline appts={branchAppts} />
-                    ) : (
-                      <CalendarGridFromApi
-                        data={stylistsData}
-                        onSlotClick={(hour) => {
-                          const d = new Date(`${date}T00:00:00`);
-                          d.setHours(Math.floor(hour), Math.round((hour % 1) * 60), 0, 0);
-                          setAppointmentDefaultDate(d);
-                          setAppointmentDrawerOpen(true);
-                        }}
+                    {miniCalOpen && (
+                      <MiniCalendar
+                        value={date}
+                        onChange={(iso) => { setDate(iso); }}
                       />
                     )}
+                    <CalendarGridFromApi
+                      data={filteredStylistsData}
+                      onApptClick={openApptDetail}
+                      onSlotClick={(hour) => {
+                        const d = new Date(`${date}T00:00:00`);
+                        d.setHours(Math.floor(hour), Math.round((hour % 1) * 60), 0, 0);
+                        setAppointmentDefaultDate(d);
+                        setAppointmentDrawerOpen(true);
+                      }}
+                    />
                   </CardBody>
                 </Card>
 
@@ -532,6 +697,15 @@ const DashboardV2: React.FC = () => {
                       right={
                         <>
                           {(ticketsData?.summary.open_count ?? 0) > 0 && <span className="dv2-pulse" />}
+                          {cashSession ? (
+                            <Button color="danger" outline size="sm" className="d-inline-flex align-items-center gap-1" onClick={() => setCashCloseModal(true)}>
+                              <i className="mdi mdi-door-closed" /> Cerrar caja
+                            </Button>
+                          ) : (
+                            <Button color="success" outline size="sm" className="d-inline-flex align-items-center gap-1" onClick={() => setCashOpenModal(true)}>
+                              <i className="ri-door-open-line" /> Abrir caja
+                            </Button>
+                          )}
                           <Button color="primary" size="sm" className="d-inline-flex align-items-center gap-1" onClick={() => setTicketsModalOpen(true)}>
                             <i className="ri-bill-line" /> Abrir ticket
                           </Button>
@@ -577,9 +751,37 @@ const DashboardV2: React.FC = () => {
         onCreated={() => fetchBranches()}
       />
 
+      <AppointmentDetailDrawer
+        isOpen={apptDetailOpen}
+        onClose={() => setApptDetailOpen(false)}
+        appointment={selectedAppt}
+        confirmBeforeCheckIn
+        checkInLabel="Iniciar y abrir ticket"
+        onChanged={() => { fetchBranches(); setRefreshTick((t) => t + 1); }}
+        onCheckedIn={(_appt, ticketId) => {
+          if (ticketId && activeBranchId) {
+            setPosOpen({ ticketId, targetTenantId: activeBranchId });
+          }
+        }}
+      />
+
       <TicketsModal
         isOpen={ticketsModalOpen}
         onClose={() => setTicketsModalOpen(false)}
+      />
+
+      <ModalAbrirCaja
+        isOpen={cashOpenModal}
+        onClose={() => setCashOpenModal(false)}
+        onSessionOpened={fetchCashSession}
+        targetTenantId={activeBranchId || undefined}
+      />
+      <ModalResumenCierre
+        isOpen={cashCloseModal}
+        onClose={() => setCashCloseModal(false)}
+        onSessionClosed={fetchCashSession}
+        sessionData={cashSession}
+        targetTenantId={activeBranchId || undefined}
       />
 
       <AnticipoModal
@@ -901,43 +1103,6 @@ const Toolbar: React.FC<{
   </div>
 );
 
-// ─── Toggle list/grid ──────────────────────────────────────
-const ToggleSeg: React.FC<{ mode: "list" | "grid"; onChange: (m: "list" | "grid") => void }> = ({ mode, onChange }) => (
-  <div className="d-inline-flex" style={{ border: `1px solid ${SC.border2}`, borderRadius: RAD.sm, overflow: "hidden", background: SC.surface }}>
-    <button
-      type="button"
-      onClick={() => onChange("list")}
-      title="Lista"
-      style={{
-        height: 26, padding: "0 10px",
-        background: mode === "list" ? SC.surface2 : "transparent",
-        color: mode === "list" ? SC.text : SC.muted,
-        fontSize: FS.sm,
-        border: 0,
-        cursor: "pointer",
-      }}
-    >
-      <i className="ri-list-check" />
-    </button>
-    <button
-      type="button"
-      onClick={() => onChange("grid")}
-      title="Calendario"
-      style={{
-        height: 26, padding: "0 10px",
-        background: mode === "grid" ? SC.surface2 : "transparent",
-        color: mode === "grid" ? SC.text : SC.muted,
-        fontSize: FS.sm,
-        border: 0,
-        borderLeft: `1px solid ${SC.border2}`,
-        cursor: "pointer",
-      }}
-    >
-      <i className="ri-calendar-2-line" />
-    </button>
-  </div>
-);
-
 // ─── Section title ─────────────────────────────────────────
 const SectionTitle: React.FC<{
   dotColor: string;
@@ -1072,114 +1237,6 @@ const KpiCell: React.FC<{ label: string; value: string; divider?: boolean; amber
     <div style={{ fontSize: FS.h2, fontWeight: 700, letterSpacing: "-0.02em", color: amber ? SC.warn : SC.text, lineHeight: 1.1, fontFeatureSettings: "'tnum'" }}>{value}</div>
   </div>
 );
-
-// ─── Timeline (list mode) ──────────────────────────────────
-const Timeline: React.FC<{ appts: ApiAppt[] }> = ({ appts }) => {
-  if (appts.length === 0) {
-    return <Empty icon="ri-calendar-line" title="Sin citas" hint="Esta sucursal no tiene citas para el día seleccionado." />;
-  }
-  // Group by hour
-  const byHour = new Map<number, ApiAppt[]>();
-  for (const a of appts) {
-    const h = new Date(a.start_time).getHours();
-    if (!byHour.has(h)) byHour.set(h, []);
-    byHour.get(h)!.push(a);
-  }
-  const hours = Array.from(byHour.keys()).sort((a, b) => a - b);
-  const NOW = new Date().getHours();
-
-  return (
-    <div style={{ maxHeight: 600, overflow: "auto" }}>
-      {hours.map((h, i) => {
-        const isPast = h < NOW;
-        const isNow = h === NOW;
-        return (
-          <div
-            key={h}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "52px 1fr",
-              borderBottom: i < hours.length - 1 ? `1px solid ${SC.border}` : "none",
-            }}
-          >
-            <div
-              style={{
-                padding: "10px 8px",
-                borderRight: `1px solid ${SC.border}`,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "flex-end",
-                gap: 2,
-                fontFamily: "var(--font-mono, ui-monospace)",
-                fontSize: 11,
-                color: isNow ? INDIGO : SC.muted,
-                fontWeight: isNow ? 700 : 500,
-              }}
-            >
-              <span>{fmtTime(h)}</span>
-              {isNow && <span style={{ fontSize: 8, color: INDIGO, textTransform: "uppercase", letterSpacing: "0.05em" }}>ahora</span>}
-            </div>
-            <div style={{ padding: "6px 0", display: "flex", flexDirection: "column", gap: 4, opacity: isPast ? 0.55 : 1 }}>
-              {byHour.get(h)!.map((a) => <ApptRow key={a.id} appt={a} />)}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-};
-
-const ApptRow: React.FC<{ appt: ApiAppt }> = ({ appt }) => {
-  const { hour, minute } = apptToDecimal(appt.start_time);
-  const stylistInitials = initialsOf(appt.stylist_name);
-  const present = appt.status === "checked_in" || appt.status === "checked_out";
-  return (
-    <div
-      className="dv2-row"
-      style={{
-        display: "grid",
-        gridTemplateColumns: "52px 1fr auto auto",
-        gap: 8,
-        alignItems: "center",
-        padding: "6px 12px 6px 10px",
-        marginRight: 8,
-        borderLeft: `3px solid ${STATUS_COLOR[appt.status]}`,
-        borderRadius: "0 4px 4px 0",
-        fontSize: FS.base,
-        cursor: "pointer",
-      }}
-    >
-      <span style={{ fontFamily: "var(--font-mono, ui-monospace)", fontSize: FS.sm, color: SC.muted, fontWeight: 500 }}>
-        {fmtTime(hour, minute)}
-      </span>
-      <div style={{ minWidth: 0 }}>
-        <div className="text-truncate" style={{ fontWeight: 500, color: SC.text }}>{appt.service_name || "Servicio"}</div>
-        <div className="text-truncate" style={{ fontSize: FS.sm, color: SC.dim }}>
-          {appt.client_name}{appt.stylist_name ? ` · ${appt.stylist_name}` : ""}
-        </div>
-      </div>
-      <span
-        className="d-inline-grid"
-        style={{
-          width: 22, height: 22,
-          borderRadius: 999,
-          background: colorFromString(stylistInitials),
-          color: "#fff",
-          fontSize: 9,
-          fontWeight: 600,
-          placeItems: "center",
-          boxShadow: present ? `0 0 0 2px ${SC.surface}, 0 0 0 4px ${SC.success}` : "none",
-        }}
-        title={appt.stylist_name}
-      >
-        {stylistInitials}
-      </span>
-      <span style={{ fontSize: FS.sm, fontWeight: 600, color: SC.text, fontFeatureSettings: "'tnum'" }}>
-        {appt.service_price ? fmtCO(appt.service_price) : ""}
-      </span>
-    </div>
-  );
-};
 
 // ─── Tickets card (real invoices) ──────────────────────────
 const PREVIEW_LIMIT = 5;
@@ -1628,7 +1685,7 @@ const layoutAppts = <T extends { id: string; start: number; end: number }>(styli
 type GridStylist = { id: string; initials: string; name: string; present: boolean; revenue: number; count: number };
 type GridAppt = { id: string; stylistId: string; start: number; end: number; service: string; client: string; price: number; status: ApptStatus };
 
-const CalendarGridFromApi: React.FC<{ data: StylistsResponse | null; onSlotClick?: (hour: number) => void }> = ({ data, onSlotClick }) => {
+const CalendarGridFromApi: React.FC<{ data: StylistsResponse | null; onSlotClick?: (hour: number) => void; onApptClick?: (a: ApiAppt) => void }> = ({ data, onSlotClick, onApptClick }) => {
   if (!data) {
     return <div style={{ padding: 40, display: "grid", placeItems: "center" }}><Spinner size="sm" color="primary" /></div>;
   }
@@ -1646,7 +1703,9 @@ const CalendarGridFromApi: React.FC<{ data: StylistsResponse | null; onSlotClick
   }));
 
   const appts: GridAppt[] = [];
+  const apptIndex = new Map<string, ApiAppt>();
   for (const s of data.stylists) {
+    const stylistFullName = `${s.first_name} ${s.last_name || ""}`.trim();
     for (const a of s.appointments) {
       const start = apptToDecimal(a.start_time).decimal;
       const end = a.end_time ? apptToDecimal(a.end_time).decimal : start + 0.75;
@@ -1660,13 +1719,31 @@ const CalendarGridFromApi: React.FC<{ data: StylistsResponse | null; onSlotClick
         price: a.price,
         status: a.status,
       });
+      apptIndex.set(a.id, {
+        id: a.id,
+        start_time: a.start_time,
+        end_time: a.end_time,
+        status: a.status,
+        service_name: a.service_name,
+        service_price: a.price,
+        stylist_id: s.stylist_id,
+        stylist_name: stylistFullName,
+        client_name: a.client_name,
+      });
     }
   }
 
-  return <CalendarGrid stylists={stylists} appointments={appts} onSlotClick={onSlotClick} />;
+  return (
+    <CalendarGrid
+      stylists={stylists}
+      appointments={appts}
+      onSlotClick={onSlotClick}
+      onApptClick={onApptClick ? (id) => { const a = apptIndex.get(id); if (a) onApptClick(a); } : undefined}
+    />
+  );
 };
 
-const CalendarGrid: React.FC<{ stylists: GridStylist[]; appointments: GridAppt[]; onSlotClick?: (hour: number) => void }> = ({ stylists, appointments, onSlotClick }) => {
+const CalendarGrid: React.FC<{ stylists: GridStylist[]; appointments: GridAppt[]; onSlotClick?: (hour: number) => void; onApptClick?: (id: string) => void }> = ({ stylists, appointments, onSlotClick, onApptClick }) => {
   const hours = HOUR_END - HOUR_START;
   const totalHeight = hours * HOUR_H;
   const totalWidth = 52 + stylists.length * STYLIST_COL_MIN;
@@ -1821,6 +1898,7 @@ const CalendarGrid: React.FC<{ stylists: GridStylist[]; appointments: GridAppt[]
                 return (
                   <div
                     key={a.id}
+                    onClick={onApptClick ? (e) => { e.stopPropagation(); onApptClick(a.id); } : undefined}
                     style={{
                       position: "absolute",
                       top,

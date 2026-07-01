@@ -53,7 +53,13 @@ type SessionDetail = {
         total_cash_expense: number;
         expected_cash: number;
         movement_count: number;
+        sales_by_method?: { method: string; count: number; total: number }[];
+        total_sales?: number;
     };
+};
+
+const SALES_METHOD_LABELS: Record<string, string> = {
+    cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia', other: 'Otro'
 };
 
 type Pagination = { page: number; limit: number; total: number; totalPages: number; };
@@ -412,6 +418,27 @@ const MovimientosCaja: React.FC = () => {
                     </Card>
                 </Col>
             </Row>
+
+            {/* Ventas del día por método (incluye tarjeta/transferencia) */}
+            {summary.sales_by_method && summary.sales_by_method.length > 0 && (
+                <Card className="mb-3 border-start border-primary border-3">
+                    <CardBody className="py-3">
+                        <p className="text-muted mb-2 small"><i className="ri-shopping-bag-3-line"></i> Ventas del día (todos los métodos · sin propinas)</p>
+                        <Row className="g-2">
+                            {summary.sales_by_method.map((s) => (
+                                <Col key={s.method} xs="auto">
+                                    <span className="badge bg-light text-dark border fs-6">
+                                        {SALES_METHOD_LABELS[s.method] || s.method} ({s.count}): <strong>{formatCurrency(s.total)}</strong>
+                                    </span>
+                                </Col>
+                            ))}
+                            <Col xs="auto">
+                                <span className="badge bg-primary fs-6">Total: {formatCurrency(summary.total_sales || 0)}</span>
+                            </Col>
+                        </Row>
+                    </CardBody>
+                </Card>
+            )}
 
             {/* Session Info */}
             <Card className="mb-3">

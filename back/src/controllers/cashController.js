@@ -3,6 +3,34 @@
 // =============================================
 const prisma = require('../config/prisma');
 const { canAccessTenant } = require('./ficheroController');
+const { getOrCreateOpenSession } = require('../utils/cashSession');
+
+// Ventas de una sesión agrupadas por método de pago (cash/card/transfer/...).
+// Sirve para mostrar en el cierre "cuánto se vendió" incluyendo tarjeta, que no
+// entra al efectivo esperado. El monto vendido sale de invoices.total_amount
+// (sin propina); si el pago no tiene invoice asociada, se usa payments.amount.
+async function getSessionSalesByMethod(client, sessionId) {
+    const rows = await client.$queryRawUnsafe(
+        `SELECT
+            CASE
+                WHEN p.payment_method IN ('cash', 'efectivo') THEN 'cash'
+                WHEN p.payment_method IN ('card', 'credit_card', 'tarjeta') THEN 'card'
+                WHEN p.payment_method IN ('transfer', 'transferencia') THEN 'transfer'
+                ELSE COALESCE(p.payment_method, 'other')
+            END AS method,
+            COUNT(*)::int AS count,
+            COALESCE(SUM(COALESCE(inv.total_amount, p.amount)), 0) AS total
+         FROM payments p
+         LEFT JOIN invoices inv ON p.invoice_id = inv.id
+         WHERE p.cash_session_id = $1::uuid
+         GROUP BY 1
+         ORDER BY 3 DESC`,
+        sessionId
+    );
+    const by_method = rows.map(r => ({ method: r.method, count: Number(r.count), total: Number(r.total) }));
+    const total = by_method.reduce((acc, r) => acc + r.total, 0);
+    return { by_method, total };
+}
 
 // =============================================
 // ===          FUNCIONES DE SESIONES          ===
@@ -115,6 +143,12 @@ exports.getCurrentSession = async (req, res) => {
         // El `totalCashExpenses` ya es negativo, por eso se suma.
         const expected_cash_amount = Number(session.initial_amount) + Number(totalCashIncomes) + totalCashExpenses;
 
+        // Ventas del d\u00eda por m\u00e9todo de pago (incluye tarjeta/transferencia, que NO
+        // afectan el efectivo esperado pero s\u00ed son ventas). Se leen de `payments`
+        // ligados a la sesi\u00f3n; el monto vendido sale de invoices.total_amount (sin
+        // propina). Si un pago no tiene invoice, se usa el monto del pago.
+        const sales = await getSessionSalesByMethod(prisma, sessionId);
+
         res.status(200).json({
             session_details: session,
             expected_cash_amount,
@@ -122,7 +156,9 @@ exports.getCurrentSession = async (req, res) => {
                 incomes_by_payment_method: summary.incomes_by_payment_method || [],
                 expenses_by_category: summary.expenses_by_category || [],
                 attended_appointments_count: summary.attended_appointments_count || 0,
-                total_propinas: Number(summary.total_propinas || 0)
+                total_propinas: Number(summary.total_propinas || 0),
+                sales_by_method: sales.by_method,
+                total_sales: sales.total
             }
         });
 
@@ -243,14 +279,16 @@ exports.createCashMovement = async (req, res) => {
     if ((type === 'payroll_advance' || type === 'expense') && numericAmount > 0) { numericAmount = -Math.abs(numericAmount); }
     if (type === 'income' && numericAmount < 0) { numericAmount = Math.abs(numericAmount); }
     try {
-        const openSession = await prisma.cash_sessions.findFirst({
+        let openSession = await prisma.cash_sessions.findFirst({
             where: { tenant_id, status: 'OPEN', opened_by_user_id: user_id },
             select: { id: true }
         });
-        const cash_session_id = openSession ? openSession.id : null;
-        if (!cash_session_id && (payment_method === 'cash')) {
-            return res.status(400).json({ error: 'No se puede registrar un movimiento en efectivo porque no tienes una sesi\u00f3n de caja abierta.' });
+        // Apertura autom\u00e1tica (protocolo): un movimiento en efectivo abre la caja
+        // del cajero con base $0 si a\u00fan no tiene una sesi\u00f3n abierta.
+        if (!openSession && payment_method === 'cash') {
+            openSession = await getOrCreateOpenSession(prisma, tenant_id, user_id);
         }
+        const cash_session_id = openSession ? openSession.id : null;
         const newMovement = await prisma.cash_movements.create({
             data: {
                 tenant_id,
@@ -350,6 +388,9 @@ exports.getSessionDetail = async (req, res) => {
 
         const expectedCash = Number(session.initial_amount) + totalCashIncome + totalCashExpense;
 
+        // Ventas por método (incluye tarjeta/transferencia), igual que en el cierre.
+        const sales = await getSessionSalesByMethod(prisma, id);
+
         res.status(200).json({
             session,
             movements,
@@ -359,7 +400,9 @@ exports.getSessionDetail = async (req, res) => {
                 total_cash_income: totalCashIncome,
                 total_cash_expense: totalCashExpense,
                 expected_cash: expectedCash,
-                movement_count: movements.length
+                movement_count: movements.length,
+                sales_by_method: sales.by_method,
+                total_sales: sales.total
             }
         });
     } catch (error) {
