@@ -8,6 +8,7 @@ import { api } from "../../../services/api";
 import { ScreenProps } from "../types";
 import { T, R, FONT, fmtCOP, colorFor, initials } from "../theme";
 import { Toggle, Mono, Loading, Empty, Avatar } from "../components/ui";
+import Coworking from "./Coworking";
 
 type TabKey = "datos" | "personal" | "servicios" | "comisiones" | "horarios" | "bot" | "coworking" | "planes";
 
@@ -220,7 +221,7 @@ const Configuracion: React.FC<ScreenProps> = ({ tenantId, tenantName }) => {
         />
       )}
       {tab === "bot" && <BotTab salon={tenantName} />}
-      {tab === "coworking" && <CoworkingTab />}
+      {tab === "coworking" && <Coworking />}
       {tab === "planes" && <PlanesTab plan={plan} />}
     </div>
   );
@@ -607,142 +608,6 @@ const PlanesTab: React.FC<{ plan: string }> = ({ plan }) => {
     </>
   );
 };
-
-// ── COWORKING (arriendo de cupos) ─────────────────────────────
-type Renter = {
-  id: string; first_name: string; last_name?: string | null; email?: string | null; phone?: string | null;
-  monthly_rent_cop?: number | null; rental_status?: string | null; rental_past_due_since?: string | null;
-  rental_stripe_subscription_id?: string | null;
-};
-const cowTone = (s?: string | null) =>
-  s === "active" ? { l: "Al día", c: T.green, bg: T.greenBg }
-  : s === "past_due" ? { l: "En mora", c: T.amber, bg: T.amberBg }
-  : s === "blocked" ? { l: "Bloqueado", c: T.red, bg: T.redBg }
-  : { l: "Sin activar", c: T.dim, bg: T.surface3 };
-
-const CoworkingTab: React.FC = () => {
-  const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState<any>(null);
-  const [renters, setRenters] = useState<Renter[]>([]);
-  const [income, setIncome] = useState<any>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-
-  const load = useCallback(() => {
-    setLoading(true);
-    const month = new Date().toISOString().slice(0, 7);
-    Promise.allSettled([
-      api.get("/chair-rentals/status"),
-      api.get("/chair-rentals/renters"),
-      api.get("/chair-rentals/income-summary", { params: { month } }),
-    ]).then(([st, rt, inc]) => {
-      if (st.status === "fulfilled") setStatus(st.value.data || null);
-      if (rt.status === "fulfilled") setRenters(rt.value.data?.renters || []);
-      if (inc.status === "fulfilled") setIncome(inc.value.data || null);
-    }).finally(() => setLoading(false));
-  }, []);
-  useEffect(() => { load(); }, [load]);
-
-  const grace = status?.grace_days ?? 3;
-  const daysPastDue = (r: Renter) => {
-    if (!r.rental_past_due_since) return 0;
-    return Math.max(0, Math.floor((Date.now() - new Date(r.rental_past_due_since).getTime()) / 86400000));
-  };
-  const counts = useMemo(() => {
-    const c = { active: 0, past_due: 0, blocked: 0 };
-    renters.forEach((r) => { if (r.rental_status === "active") c.active++; else if (r.rental_status === "past_due") c.past_due++; else if (r.rental_status === "blocked") c.blocked++; });
-    return c;
-  }, [renters]);
-
-  const paymentLink = async (id: string) => {
-    setBusy(id);
-    try { const { data } = await api.post(`/chair-rentals/renters/${id}/payment-link`); if (data?.url) window.open(data.url, "_blank"); }
-    catch { /* noop */ } finally { setBusy(null); }
-  };
-  if (loading) return <Loading label="Cargando coworking…" />;
-
-  const connected = !!(status?.connected || status?.direct_mode);
-  const enabled = !!status?.chair_rental_enabled;
-
-  return (
-    <>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14, marginBottom: 16 }}>
-        <div>
-          <div style={{ fontWeight: 800, fontSize: 16 }}>Coworking · arriendo de cupos</div>
-          <div style={{ fontSize: 12.5, color: T.muted }}>Estilistas independientes que arriendan una silla. Cobro diario automático.</div>
-        </div>
-        <a href="/settings?tab=7" style={{ ...btnDark, textDecoration: "none", display: "inline-block" }}>Gestión avanzada</a>
-      </div>
-
-      {/* estado de conexión Stripe */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, background: T.surface, border: `1px solid ${connected && enabled ? T.greenBorder : T.border}`, borderRadius: R.xl, padding: "14px 18px", marginBottom: 16 }}>
-        <span style={{ width: 10, height: 10, borderRadius: "50%", background: connected && enabled ? T.green : T.amber, flex: "none" }} />
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 700, fontSize: 13.5 }}>
-            {connected && enabled ? "Coworking activo" : connected ? "Conectado — falta activar el cobro" : "Sin conectar a Stripe"}
-          </div>
-          <div style={{ fontSize: 12, color: T.muted }}>
-            {connected ? `Días de gracia antes de bloquear: ${grace}` : "Conecta una cuenta para cobrar el arriendo diario."}
-          </div>
-        </div>
-        {!connected && <a href="/settings?tab=7" style={{ ...btnDark, textDecoration: "none" }}>Conectar</a>}
-      </div>
-
-      {/* KPIs */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 16 }}>
-        <KpiBox label="Arrendatarios" value={String(renters.length)} />
-        <KpiBox label="Al día" value={String(counts.active)} color={T.green} />
-        <KpiBox label="En mora" value={String(counts.past_due)} color={T.amber} />
-        <KpiBox label="Ingreso del mes" value={fmtCOP(income?.net_cop ?? 0)} color={T.green} />
-      </div>
-
-      {/* lista de renters */}
-      <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: R.xxl, overflow: "hidden" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1.4fr", padding: "11px 20px", fontSize: 11, fontWeight: 700, letterSpacing: ".5px", color: T.dim, background: T.surface2 }}>
-          <span>ARRENDATARIO</span><span style={{ textAlign: "right" }}>MENSUAL</span><span style={{ textAlign: "right" }}>DIARIO</span><span style={{ textAlign: "right" }}>ESTADO</span>
-        </div>
-        {renters.length === 0 ? (
-          <Empty icon="🪑" title="Sin arrendatarios" hint="Aún no hay estilistas en el coworking. Usa Gestión avanzada para agregar." />
-        ) : renters.map((r) => {
-          const name = `${r.first_name} ${r.last_name || ""}`.trim();
-          const tone = cowTone(r.rental_status);
-          const monthly = Number(r.monthly_rent_cop) || 0;
-          const dpd = daysPastDue(r);
-          return (
-            <div key={r.id} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1.4fr", alignItems: "center", padding: "12px 20px", borderTop: `1px solid ${T.border3}` }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                <Avatar ini={initials(name)} color={colorFor(name)} size={34} radius={10} />
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</div>
-                  <div style={{ fontSize: 11.5, color: T.dim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.phone || r.email || "—"}</div>
-                </div>
-              </div>
-              <Mono style={{ textAlign: "right", fontWeight: 700, fontSize: 13 }}>{fmtCOP(monthly)}</Mono>
-              <Mono style={{ textAlign: "right", fontSize: 12.5, color: T.muted }}>{fmtCOP(Math.round(monthly / 30))}</Mono>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
-                <span style={{ background: tone.bg, color: tone.c, fontWeight: 700, fontSize: 11, padding: "4px 10px", borderRadius: 7 }}>
-                  {tone.l}{r.rental_status === "past_due" && dpd > 0 ? ` · ${dpd}d` : ""}
-                </span>
-                <button onClick={() => paymentLink(r.id)} disabled={busy === r.id} title="Enlace para actualizar tarjeta / pagar" style={{ border: `1px solid ${T.border}`, background: T.surface, color: T.muted, borderRadius: 8, padding: "6px 8px", cursor: "pointer", display: "flex" }}>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="2.5" /><path d="M2.5 9.5h19" /></svg>
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div style={{ fontSize: 11.5, color: T.dim, marginTop: 10 }}>
-        Los cobros, calendario diario, reembolsos y alta de arrendatarios (con tarjeta) se gestionan en <a href="/settings?tab=7" style={{ color: T.green, fontWeight: 600 }}>Gestión avanzada</a>.
-      </div>
-    </>
-  );
-};
-
-const KpiBox: React.FC<{ label: string; value: string; color?: string }> = ({ label, value, color }) => (
-  <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: R.xl, padding: "15px 17px" }}>
-    <div style={{ fontSize: 12, color: T.muted, fontWeight: 600 }}>{label}</div>
-    <Mono style={{ fontSize: 20, fontWeight: 800, marginTop: 5, display: "block", color: color || T.text }}>{value}</Mono>
-  </div>
-);
 
 const btnDark: React.CSSProperties = { background: T.ink, color: T.onInk, border: 0, borderRadius: R.md, padding: "11px 18px", fontWeight: 700, fontSize: 13, fontFamily: FONT, cursor: "pointer" };
 

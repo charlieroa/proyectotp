@@ -45,6 +45,7 @@ const V2: React.FC = () => {
   const [date, setDate] = useState<string>(todayISO());
   const [showAI, setShowAI] = useState(false);
   const [dark, setDark] = useState<boolean>(() => localStorage.getItem("v2-theme") === "dark");
+  const [newApptSignal, setNewApptSignal] = useState(0);
   const tenant = useTenant();
   const user = useCurrentUser();
 
@@ -56,7 +57,7 @@ const V2: React.FC = () => {
   }, [dark]);
 
   const goTo = (s: SectionKey) => setSection(s);
-  const screenProps = { tenantId: tenant.id, tenantName: tenant.name, date, onOpenAI: () => setShowAI(true), goTo };
+  const screenProps = { tenantId: tenant.id, tenantName: tenant.name, date, onOpenAI: () => setShowAI(true), goTo, newApptSignal };
 
   const Screen = useMemo(() => {
     switch (section) {
@@ -67,7 +68,7 @@ const V2: React.FC = () => {
       default: return <Operacion {...screenProps} />;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [section, tenant.id, tenant.name, date]);
+  }, [section, tenant.id, tenant.name, date, newApptSignal]);
 
   // agrupar nav por sección
   const groups: string[] = [];
@@ -94,7 +95,7 @@ const V2: React.FC = () => {
         </div>
 
         <div style={{ padding: "6px 14px 8px" }}>
-          <button onClick={() => setSection("op")} style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, justifyContent: "center", background: T.ink, color: "#fff", border: 0, borderRadius: 12, padding: 11, fontWeight: 700, fontSize: 13.5, fontFamily: FONT, cursor: "pointer" }}>
+          <button onClick={() => { setSection("op"); setNewApptSignal((n) => n + 1); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, justifyContent: "center", background: T.ink, color: "#fff", border: 0, borderRadius: 12, padding: 11, fontWeight: 700, fontSize: 13.5, fontFamily: FONT, cursor: "pointer" }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg> Nueva atención
           </button>
         </div>
@@ -135,6 +136,7 @@ const V2: React.FC = () => {
       {/* Main column */}
       <div className="v2-root" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
         <header style={{ height: 62, flex: "none", background: T.bg, backdropFilter: "blur(10px)", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 14, padding: "0 26px", position: "sticky", top: 0, zIndex: 30 }}>
+          <SuiteSwitcher />
           {/* Date nav */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12, padding: "7px 8px" }}>
             <button onClick={() => setDate(shiftDate(date, -1))} style={{ border: 0, background: "transparent", cursor: "pointer", display: "flex", color: T.muted }}>
@@ -182,6 +184,44 @@ const V2: React.FC = () => {
       </div>
 
       <AIDrawer open={showAI} onClose={() => setShowAI(false)} userName={user.name} />
+    </div>
+  );
+};
+
+// ── Switch de suite: Tupelukeria ↔ Bolti (mismo login) ────────
+const SuiteSwitcher: React.FC = () => {
+  const [open, setOpen] = useState(false);
+  const Bolt: React.FC<{ s: number; stroke?: string }> = ({ s, stroke = "#fff" }) => (
+    <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2 4.5 13.5H11l-1 8.5 8.5-12H12z" /></svg>
+  );
+  return (
+    <div style={{ position: "relative", flex: "none" }}>
+      <button onClick={() => setOpen((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 8, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 11, padding: "7px 11px", fontFamily: FONT, cursor: "pointer", color: T.text }}>
+        <span style={{ width: 24, height: 24, borderRadius: 7, background: T.ink, display: "flex", alignItems: "center", justifyContent: "center" }}><Bolt s={13} /></span>
+        <span style={{ fontWeight: 800, fontSize: 13 }}>Tupelukeria</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.dim} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+          <div style={{ position: "absolute", top: 48, left: 0, width: 300, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, boxShadow: "0 18px 44px rgba(0,0,0,.18)", padding: 10, zIndex: 50 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".8px", color: T.faint, padding: "8px 10px 6px" }}>TU SUITE</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 10px", borderRadius: 11, background: T.surface3 }}>
+              <span style={{ width: 38, height: 38, borderRadius: 11, background: T.ink, display: "flex", alignItems: "center", justifyContent: "center" }}><Bolt s={19} /></span>
+              <div style={{ flex: 1 }}><div style={{ fontWeight: 700, fontSize: 13.5 }}>Tupelukeria</div><div style={{ fontSize: 11.5, color: T.muted }}>Operación del salón</div></div>
+              <span style={{ background: T.greenBg, color: T.green, fontWeight: 700, fontSize: 10, padding: "4px 9px", borderRadius: 7 }}>ACTUAL</span>
+            </div>
+            <a href="https://bolti.co" target="_blank" rel="noreferrer" style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 10px", borderRadius: 11, textDecoration: "none", color: T.text }}>
+              <span style={{ width: 38, height: 38, borderRadius: 11, background: "linear-gradient(135deg,#2f6fed,#1aa3e0)", display: "flex", alignItems: "center", justifyContent: "center" }}><Bolt s={19} /></span>
+              <div style={{ flex: 1 }}><div style={{ fontWeight: 700, fontSize: 13.5 }}>Bolti</div><div style={{ fontSize: 11.5, color: T.muted }}>Contabilidad y facturación DIAN</div></div>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.dim} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 17 17 7M9 7h8v8" /></svg>
+            </a>
+            <div style={{ borderTop: `1px solid ${T.border2}`, margin: "6px 4px 0", padding: "9px 10px 4px", fontSize: 11.5, color: T.dim, display: "flex", alignItems: "center", gap: 7 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={T.green} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 5 5L20 7" /></svg> Mismo login · datos sincronizados
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 };

@@ -6,6 +6,7 @@ export interface ScreenProps {
   date: string; // ISO YYYY-MM-DD (día seleccionado en el header)
   onOpenAI: () => void;
   goTo: (section: SectionKey) => void; // navegar a otra sección del shell
+  newApptSignal?: number; // el shell lo incrementa al pulsar "Nueva atención" (abre el modal de cita)
 }
 
 export type SectionKey = "op" | "crm" | "inv" | "nomina" | "config";

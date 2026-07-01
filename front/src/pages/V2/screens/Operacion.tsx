@@ -9,6 +9,7 @@ import { T, FONT, fmtCOP, fmtCOPShort, colorFor, initials } from "../theme";
 import { Kpi, KpiGrid, Panel, Mono, Empty, Loading } from "../components/ui";
 import { useBranchesDay } from "../data/useV2Data";
 import AppointmentDetailDrawer, { ApptDetail } from "../../../Components/Calendar/AppointmentDetailDrawer";
+import AppointmentModal from "../../../Components/Calendar/AppointmentModal";
 import PointOfSale from "../../PointOfSale";
 import { ModalAbrirCaja, ModalResumenCierre } from "../../../Components/Calendar/CentroDeCitasDiarias";
 
@@ -29,7 +30,7 @@ const fmtTime = (iso: string): string => {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
-const Operacion: React.FC<ScreenProps> = ({ date }) => {
+const Operacion: React.FC<ScreenProps> = ({ date, newApptSignal }) => {
   const { branches, activeId, setActiveId, loading, error, refresh } = useBranchesDay(date);
   const active = useMemo(() => branches.find((b) => b.id === activeId) || null, [branches, activeId]);
   const [tab, setTab] = useState<Tab>("agenda");
@@ -43,9 +44,13 @@ const Operacion: React.FC<ScreenProps> = ({ date }) => {
   const [cashOpen, setCashOpen] = useState(false);
   const [cashClose, setCashClose] = useState(false);
 
-  // drawers
+  // drawers / modales
   const [appt, setAppt] = useState<ApptDetail | null>(null);
   const [pos, setPos] = useState<{ ticketId: string; targetTenantId: string } | null>(null);
+  const [newAppt, setNewAppt] = useState(false);
+
+  // el shell dispara "Nueva atención" incrementando newApptSignal → abre el modal de cita
+  useEffect(() => { if (newApptSignal) setNewAppt(true); }, [newApptSignal]);
 
   const fetchStylists = useCallback(() => {
     if (!activeId) return setStylists([]);
@@ -97,11 +102,13 @@ const Operacion: React.FC<ScreenProps> = ({ date }) => {
   const kCobrado = active.revenue_today || 0;
   const kTickets = active.open_tickets?.count ?? 0;
 
+  // etapa actual del flujo según la pestaña (Cita → Ticket → Caja → Nómina)
+  const stage = tab === "agenda" ? 1 : tab === "tickets" ? 2 : 3;
   const steps = [
-    { n: "1", t: "Cita", s: "entra a la agenda" },
-    { n: "2", t: "Ticket", s: "se atiende y suma" },
-    { n: "3", t: "Caja", s: "se cobra" },
-    { n: "4", t: "Nómina", s: "reparte comisión" },
+    { t: "Cita", s: "entra a la agenda" },
+    { t: "Ticket", s: "se atiende y suma" },
+    { t: "Caja", s: "se cobra" },
+    { t: "Nómina", s: "reparte comisión" },
   ];
 
   return (
@@ -113,27 +120,42 @@ const Operacion: React.FC<ScreenProps> = ({ date }) => {
             Un solo flujo: la cita entra, se vuelve ticket, se cobra en caja y alimenta la nómina.
           </p>
         </div>
-        {branches.length > 1 && (
-          <select value={activeId || ""} onChange={(e) => setActiveId(e.target.value)} style={{ ...selStyle }}>
-            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flex: "none" }}>
+          {branches.length > 1 && (
+            <select value={activeId || ""} onChange={(e) => setActiveId(e.target.value)} style={{ ...selStyle }}>
+              {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          )}
+          <button onClick={() => setNewAppt(true)} style={{ ...btnDark, display: "flex", alignItems: "center", gap: 7 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
+            Nueva cita
+          </button>
+        </div>
       </div>
 
-      {/* stepper */}
+      {/* stepper con estado (activo / hecho / pendiente) */}
       <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 16, padding: "13px 15px", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
-        {steps.map((s, i) => (
-          <React.Fragment key={s.n}>
-            <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "4px 8px" }}>
-              <div style={{ width: 24, height: 24, borderRadius: 8, background: T.ink, color: T.onInk, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 12, flex: "none" }}>{s.n}</div>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 13 }}>{s.t}</div>
-                <div style={{ fontSize: 11, color: T.dim }}>{s.s}</div>
+        {steps.map((s, i) => {
+          const n = i + 1;
+          const activeStep = n === stage;
+          const done = n < stage;
+          const boxBg = activeStep ? T.greenBg2 : T.surface;
+          const boxBd = activeStep ? T.green : done ? T.greenBorder : T.border2;
+          const numBg = activeStep ? T.green : done ? T.greenBorder : T.surface3;
+          const numCol = activeStep ? "#fff" : done ? T.greenDark : T.dim;
+          const titleCol = activeStep ? T.greenDark : done ? T.text : T.muted;
+          const subCol = activeStep ? T.green : T.faint;
+          return (
+            <React.Fragment key={s.t}>
+              <div style={{ flex: 1, border: `1.5px solid ${boxBd}`, borderRadius: 12, padding: "10px 13px", background: boxBg }}>
+                <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 6, fontSize: 10, fontWeight: 700, marginBottom: 5, background: numBg, color: numCol }}>{n}</div>
+                <div style={{ fontWeight: 700, fontSize: 13, color: titleCol }}>{s.t}</div>
+                <div style={{ fontSize: 11, color: subCol }}>{s.s}</div>
               </div>
-            </div>
-            {i < steps.length - 1 && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.faint} strokeWidth="2" strokeLinecap="round" style={{ flex: "none" }}><path d="m9 6 6 6-6 6" /></svg>}
-          </React.Fragment>
-        ))}
+              {i < steps.length - 1 && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.faint} strokeWidth="2" strokeLinecap="round" style={{ flex: "none" }}><path d="m9 6 6 6-6 6" /></svg>}
+            </React.Fragment>
+          );
+        })}
       </div>
 
       {/* tabs */}
@@ -258,6 +280,15 @@ const Operacion: React.FC<ScreenProps> = ({ date }) => {
 
       <ModalAbrirCaja isOpen={cashOpen} onClose={() => setCashOpen(false)} onSessionOpened={fetchCash} targetTenantId={activeId || undefined} />
       <ModalResumenCierre isOpen={cashClose} onClose={() => setCashClose(false)} onSessionClosed={fetchCash} sessionData={cash} targetTenantId={activeId || undefined} />
+
+      {/* Modal de agendamiento (crea cita nueva) — reutiliza el modal real del calendario */}
+      <AppointmentModal
+        isOpen={newAppt}
+        onClose={() => { setNewAppt(false); refreshAll(); }}
+        selectedEvent={null}
+        defaultDate={new Date(`${date}T00:00:00`)}
+        targetTenantId={activeId || undefined}
+      />
 
       <Offcanvas isOpen={!!pos} toggle={() => setPos(null)} direction="end" style={{ width: "min(1100px, 100vw)" }}>
         <OffcanvasHeader toggle={() => setPos(null)} className="border-bottom"><span style={{ fontWeight: 600 }}>Cobrar ticket</span></OffcanvasHeader>
