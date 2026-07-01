@@ -305,12 +305,30 @@ exports.createInvoiceAndPayments = async (req, res) => {
       return { invoiceId, calculatedTotal, tipAmount };
     });
 
+    // Factura electrónica (DIAN) vía API de Bolti. Solo emite si el salón tiene
+    // credenciales configuradas. La venta ya está cobrada; si falla queda en
+    // invoices.fe_error. El primer método de pago se usa para el medio de pago DIAN.
+    let fe = null;
+    try {
+      const boltiFE = require('../services/boltiInvoiceService');
+      fe = await boltiFE.emitElectronicInvoice(effectiveTenantId, result.invoiceId, {
+        documentType: req.body?.client_document_type,
+        documentNumber: req.body?.client_document_number,
+        email: String(req.body?.invoice_email || req.body?.client_email || '').trim() || undefined,
+        paymentMethod: payments?.[0]?.payment_method,
+      });
+      if (fe && !fe.skipped) console.log(`[Bolti FE] factura ${result.invoiceId}: ${fe.dian_status || (fe.success ? 'ok' : 'error')} ${fe.cufe || fe.error || ''}`);
+    } catch (feErr) {
+      console.error('createInvoiceAndPayments: emisión FE falló:', feErr?.message || feErr);
+    }
+
     return res.status(201).json({
       success: true,
       message: 'Pago y factura creados con éxito',
       invoiceId: result.invoiceId,
       total_amount: result.calculatedTotal,
       tip_amount: result.tipAmount,
+      fe,
     });
   } catch (error) {
     console.error('Error al crear la factura y el pago:', error);

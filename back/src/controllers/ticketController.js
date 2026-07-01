@@ -273,7 +273,7 @@ exports.addItem = async (req, res) => {
 
     const {
       item_type, related_id, description, quantity, unit_price,
-      seller_id, commission_percent, override_reason
+      seller_id, commission_percent, override_reason, allow_duplicate
     } = req.body || {};
 
     if (!item_type || !['service', 'product', 'custom'].includes(item_type)) {
@@ -331,6 +331,43 @@ exports.addItem = async (req, res) => {
     const commission_value = resolvedCommissionPct != null
       ? Math.round((total_price * Number(resolvedCommissionPct) / 100) * 100) / 100
       : null;
+
+    // Guard anti-duplicado: doble-submit o re-toque del front crea líneas
+    // idénticas (mismo servicio+vendedor+precio) que inflaban la nómina. Si ya
+    // existe una línea igual en la misma factura dentro de los últimos 5 min,
+    // NO la suprimimos en silencio (podría ser una venta legítima repetida):
+    // devolvemos un aviso para que el front pida confirmación explícita. El
+    // front reintenta con allow_duplicate:true cuando el usuario confirma.
+    if (!allow_duplicate) {
+      const dupRows = await prisma.$queryRawUnsafe(
+        `SELECT * FROM invoice_items
+          WHERE invoice_id = $1::uuid
+            AND item_type = $2
+            AND (related_id IS NOT DISTINCT FROM $3::uuid)
+            AND (seller_id IS NOT DISTINCT FROM $4::uuid)
+            AND total_price = $5::numeric
+            AND created_at > NOW() - INTERVAL '5 minutes'
+          ORDER BY created_at DESC
+          LIMIT 1`,
+        invoice.id,
+        item_type,
+        related_id || null,
+        seller_id || null,
+        total_price
+      );
+      if (dupRows && dupRows.length > 0) {
+        console.warn('addItem: posible duplicado, se solicita confirmación', {
+          invoice_id: invoice.id,
+          description: String(description).trim(),
+        });
+        const full = await loadTicket(invoice.id, tenant_id);
+        return res.status(200).json({
+          duplicate_warning: true,
+          item: dupRows[0],
+          ticket: full,
+        });
+      }
+    }
 
     // commission_percent/value/frozen_at/admin_fee_* son 'text' en la BD aunque
     // el schema Prisma los declare Decimal/DateTime. Usamos SQL crudo para evitar
@@ -442,9 +479,34 @@ exports.patchItem = async (req, res) => {
     // Comisión: recalculo según el nuevo total_price
     let commissionPct = item.commission_percent != null
       ? Number(item.commission_percent) : null;
+    let commissionSource = item.commission_source || null;
     if (req.body.commission_percent !== undefined) {
       commissionPct = req.body.commission_percent === null
         ? null : Number(req.body.commission_percent);
+      commissionSource = commissionPct != null ? 'ticket' : null;
+    } else if (
+      req.body.seller_id !== undefined &&
+      seller_id && seller_id !== item.seller_id &&
+      item.item_type === 'service' && item.related_id &&
+      commissionPct == null
+    ) {
+      // Se asignó el estilista a un servicio huérfano (sin comisión propia): resolver
+      // su comisión igual que addItem (par estilista+servicio, o default del servicio),
+      // si no, ese servicio nunca entraría a la nómina de nadie.
+      const styl = await prisma.stylist_services.findUnique({
+        where: { user_id_service_id: { user_id: seller_id, service_id: item.related_id } },
+        select: { commission_percent: true }
+      }).catch(() => null);
+      if (styl?.commission_percent != null) {
+        commissionPct = Number(styl.commission_percent);
+      } else {
+        const svc = await prisma.services.findFirst({
+          where: { id: item.related_id, tenant_id },
+          select: { commission_percent: true }
+        });
+        commissionPct = svc?.commission_percent != null ? Number(svc.commission_percent) : null;
+      }
+      commissionSource = commissionPct != null ? 'ticket' : null;
     }
     const commissionValue = commissionPct != null
       ? Math.round((total_price * commissionPct / 100) * 100) / 100
@@ -460,6 +522,7 @@ exports.patchItem = async (req, res) => {
         total_price    = ${total_price}::numeric,
         commission_percent    = ${commissionPct != null ? String(commissionPct) : null},
         commission_value      = ${commissionValue}::numeric,
+        commission_source     = ${commissionSource},
         override_reason       = ${override_reason},
         overridden_by_user_id = ${overridden_by_user_id}::uuid
       WHERE id = ${itemId}::uuid
@@ -642,6 +705,23 @@ exports.closeTicket = async (req, res) => {
     const full = await loadTicket(invoice.id, tenant_id);
     emit(tenant_id, 'ticket:closed', full);
 
+    // Factura electrónica (DIAN) vía API de Bolti. Solo emite si el salón tiene
+    // configuradas las credenciales (bolti_fe_enabled + bolti_api_key). El cobro
+    // ya quedó hecho; si la emisión falla queda registrada en invoices.fe_error.
+    let fe = null;
+    try {
+      const boltiFE = require('../services/boltiInvoiceService');
+      fe = await boltiFE.emitElectronicInvoice(tenant_id, invoice.id, {
+        documentType: req.body?.client_document_type,
+        documentNumber: req.body?.client_document_number,
+        email: String(req.body?.invoice_email || req.body?.client_email || '').trim() || undefined,
+        paymentMethod: method,
+      });
+      if (fe && !fe.skipped) console.log(`[Bolti FE] ticket ${invoice.id}: ${fe.dian_status || (fe.success ? 'ok' : 'error')} ${fe.cufe || fe.error || ''}`);
+    } catch (feErr) {
+      console.error('closeTicket: emisión FE falló:', feErr?.message || feErr);
+    }
+
     // Factura por correo: si el cliente la pidió (se envió invoice_email),
     // mandamos el comprobante por Resend. No es bloqueante: si falla el
     // correo, el cobro ya quedó hecho.
@@ -682,7 +762,7 @@ exports.closeTicket = async (req, res) => {
       }
     }
 
-    return res.json({ ok: true, invoice: result, ticket: full, invoice_emailed });
+    return res.json({ ok: true, invoice: result, ticket: full, invoice_emailed, fe });
   } catch (err) {
     console.error('closeTicket error:', err);
     return res.status(err.status || 500).json({ error: err.message || 'Error interno.' });
