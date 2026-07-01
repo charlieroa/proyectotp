@@ -10,12 +10,12 @@ import Flatpickr from 'react-flatpickr';
 
 // --- INTERFACES Y TIPOS ---
 interface WidgetData { label: string; icon: string; counter: number; prefix?: string; badge: string; separator?: string; duration?: number; }
-interface Client { client_name: string; service_name: string; service_price: number; net_commission: number; admin_fee: number; }
+interface Client { item_id?: string; service_date?: string; client_name: string; service_name: string; service_price: number; net_commission: number; admin_fee: number; }
 interface InventoryItem { product_name: string; commission_value: number; }
 interface Expense { description: string; amount: number; }
-interface Stylist { id: string; name: string; avatar: string; netToPay: number; stylistTips: number; clients: Client[]; inventory: InventoryItem[]; expenses: Expense[]; hasAdjustments?: boolean; }
+interface Stylist { id: string; name: string; avatar: string; netToPay: number; stylistTips: number; clients: Client[]; inventory: InventoryItem[]; expenses: Expense[]; hasAdjustments?: boolean; unassigned?: boolean; }
 interface ApiSummaryWidgets { cash: number; creditCard: number; inventorySold: number; stylistExpenses: number; }
-interface ApiStylistDetail { stylist_id: string; stylist_name: string; net_paid: number; stylist_tips?: number; details: { services: Client[]; products: InventoryItem[]; expenses: Expense[]; } }
+interface ApiStylistDetail { stylist_id: string | null; stylist_name: string; net_paid: number; stylist_tips?: number; unassigned?: boolean; details: { services: Client[]; products: InventoryItem[]; expenses: Expense[]; } }
 
 // --- FORMATEADOR Y COMPONENTES ---
 const BreadCrumb = ({ title, pageTitle, onBack, backLabel }: { title: string, pageTitle: string, onBack?: () => void, backLabel?: string }) => (
@@ -98,6 +98,12 @@ const PayrollPreview = () => {
     const [transferMode, setTransferMode] = useState(false);
     const [transferTargetId, setTransferTargetId] = useState<string>('');
 
+    // --- ESTADO PARA ASIGNAR ESTILISTA A SERVICIOS "SIN ASIGNAR" ---
+    const [assignModal, setAssignModal] = useState(false);
+    const [assignItem, setAssignItem] = useState<Client | null>(null);
+    const [assignTargetId, setAssignTargetId] = useState<string>('');
+    const [isAssigning, setIsAssigning] = useState(false);
+
     const startDateParam = searchParams.get('startDate');
     const endDateParam = searchParams.get('endDate');
 
@@ -168,11 +174,15 @@ const PayrollPreview = () => {
     const handleSaveEdit = async () => {
         if (!selectedStylist || editIndex < 0 || !editType) return;
 
-        // --- TRANSFER MODE ---
+        // --- TRANSFER MODE (reasignar el servicio a otro estilista; PERSISTE en BD) ---
         if (transferMode && editType === 'service' && transferTargetId) {
             const targetStylist = allStylistsData.find(s => s.id === transferTargetId);
             if (!targetStylist) return;
             const serviceItem = selectedStylist.clients[editIndex];
+            if (!serviceItem.item_id) {
+                Swal.fire(t("error"), t("transfer_no_item_id") || "Este servicio no tiene identificador y no se puede trasladar.", 'error');
+                return;
+            }
             const confirm = await Swal.fire({
                 title: t("confirm_transfer") || "Confirmar traslado",
                 html: `<p>${t("transfer_confirm_msg") || "¿Está seguro de trasladar este servicio?"}</p>
@@ -188,30 +198,22 @@ const PayrollPreview = () => {
             });
             if (!confirm.isConfirmed) return;
 
-            // Remove from current stylist
-            const updatedSource = { ...selectedStylist, clients: [...selectedStylist.clients] };
-            updatedSource.clients.splice(editIndex, 1);
-            const recalcSource = { ...updatedSource, netToPay: recalcNetToPay(updatedSource), hasAdjustments: true };
-
-            // Add to target stylist
-            const updatedTarget = { ...targetStylist, clients: [...targetStylist.clients, serviceItem] };
-            const recalcTarget = { ...updatedTarget, netToPay: recalcNetToPay(updatedTarget), hasAdjustments: true };
-
-            setAllStylistsData(prev => prev.map(s => {
-                if (s.id === recalcSource.id) return recalcSource;
-                if (s.id === recalcTarget.id) return recalcTarget;
-                return s;
-            }));
-            setSelectedStylist(recalcSource);
-            setEditModal(false);
-
-            Swal.fire({
-                title: t("transferred") || "Trasladado",
-                text: `${serviceItem.service_name} → ${targetStylist.name}`,
-                icon: 'success',
-                timer: 2000,
-                showConfirmButton: false
-            });
+            // Persistir el cambio en la BD (mueve seller_id y, si es de una cita,
+            // también appointments.stylist_id). Luego recargar datos frescos.
+            try {
+                await api.post('/payrolls/assign-seller', { item_id: serviceItem.item_id, seller_id: transferTargetId });
+                setEditModal(false);
+                await Swal.fire({
+                    title: t("transferred") || "Trasladado",
+                    text: `${serviceItem.service_name} → ${targetStylist.name}`,
+                    icon: 'success',
+                    timer: 2000,
+                    showConfirmButton: false
+                });
+                setFetchTrigger(prev => prev + 1); // recargar desde la API (refleja plataforma + Excel)
+            } catch (err: any) {
+                Swal.fire(t("error"), err?.response?.data?.error || (t("transfer_error") || "No se pudo trasladar el servicio."), 'error');
+            }
             return;
         }
 
@@ -241,6 +243,35 @@ const PayrollPreview = () => {
         setEditModal(false);
     };
 
+    // --- ASIGNAR ESTILISTA A UN SERVICIO SIN ASIGNAR (persiste en BD) ---
+    const assignableStylists = allStylistsData.filter(s => !s.unassigned);
+
+    const handleOpenAssign = (item: Client) => {
+        setAssignItem(item);
+        setAssignTargetId('');
+        setAssignModal(true);
+    };
+
+    const handleConfirmAssign = async () => {
+        if (!assignItem?.item_id || !assignTargetId) return;
+        setIsAssigning(true);
+        try {
+            await api.post('/payrolls/assign-seller', { item_id: assignItem.item_id, seller_id: assignTargetId });
+            setAssignModal(false);
+            setAssignItem(null);
+            await Swal.fire({
+                title: t("assigned") || "Asignado",
+                text: t("service_assigned_ok") || "El servicio se asignó al estilista.",
+                icon: 'success', timer: 1600, showConfirmButton: false
+            });
+            setFetchTrigger(prev => prev + 1); // recargar datos frescos desde la API
+        } catch (err: any) {
+            Swal.fire(t("error"), err?.response?.data?.error || (t("assign_error") || "No se pudo asignar el servicio."), 'error');
+        } finally {
+            setIsAssigning(false);
+        }
+    };
+
     useEffect(() => {
         if (!startDate || !endDate) {
             Swal.fire(t("error"), t("no_date_range"), 'error').then(() => navigate('/payroll'));
@@ -259,8 +290,9 @@ const PayrollPreview = () => {
                     const nameParts = s.stylist_name.split(' ');
                     const initials = `${nameParts[0][0]}${nameParts.length > 1 ? nameParts[1][0] : ''}`.toUpperCase();
                     return {
-                        id: s.stylist_id,
+                        id: s.stylist_id || '__unassigned__',
                         name: s.stylist_name,
+                        unassigned: !!s.unassigned,
                         netToPay: s.net_paid,
                         stylistTips: s.stylist_tips || 0,
                         avatar: `https://placehold.co/100x100/EFEFEF/333333?text=${initials}`,
@@ -308,7 +340,7 @@ const PayrollPreview = () => {
         if (result.isConfirmed) {
             setIsSaving(true);
             try {
-                const savePromises = allStylistsData.map(stylist => api.post('/payrolls', {
+                const savePromises = allStylistsData.filter(s => !s.unassigned).map(stylist => api.post('/payrolls', {
                     stylist_id: stylist.id,
                     start_date: startDate,
                     end_date: endDate,
@@ -416,8 +448,10 @@ const PayrollPreview = () => {
                                             <span>{stylist.name}</span>
                                         </div>
                                         <div className="text-end">
-                                            {stylist.hasAdjustments && <span className="badge bg-warning text-dark me-1" style={{fontSize: '9px'}}>{t("adjusted")}</span>}
-                                            <span className={`badge ${selectedStylist?.id === stylist.id ? 'bg-white text-primary' : 'bg-light text-dark'}`}>{formatCurrency(stylist.netToPay)}</span>
+                                            {stylist.unassigned
+                                                ? <span className="badge bg-danger me-1"><i className="ri-error-warning-line me-1"></i>{stylist.clients.length}</span>
+                                                : (stylist.hasAdjustments && <span className="badge bg-warning text-dark me-1" style={{fontSize: '9px'}}>{t("adjusted")}</span>)}
+                                            {!stylist.unassigned && <span className={`badge ${selectedStylist?.id === stylist.id ? 'bg-white text-primary' : 'bg-light text-dark'}`}>{formatCurrency(stylist.netToPay)}</span>}
                                         </div>
                                     </a>
                                 ))}
@@ -427,6 +461,12 @@ const PayrollPreview = () => {
                             {selectedStylist ? (
                                 <div>
                                     <h5 className="card-title mb-3">{t("details_of")} {selectedStylist.name}</h5>
+                                    {selectedStylist.unassigned && (
+                                        <div className="alert alert-warning py-2 px-3 mb-3">
+                                            <i className="ri-error-warning-line me-1"></i>
+                                            {t("unassigned_services_msg") || "Estos servicios se vendieron sin estilista asignado. Asígnalos al estilista que los realizó para que entren a su nómina."}
+                                        </div>
+                                    )}
                                     {selectedStylist.stylistTips > 0 && (
                                         <div className="alert alert-info py-2 px-3 mb-3 d-flex justify-content-between align-items-center">
                                             <span><i className="ri-hand-coin-line me-1"></i> {t("period_tips")}</span>
@@ -456,20 +496,31 @@ const PayrollPreview = () => {
                                                             const realIndex = (servicesPage - 1) * ITEMS_PER_PAGE + index;
                                                             return (
                                                             <tr key={`client-${realIndex}`}>
-                                                                <td>{c.client_name}</td>
+                                                                <td>{c.client_name}
+                                                                    {selectedStylist.unassigned && c.service_date &&
+                                                                        <div className="text-muted" style={{fontSize: '11px'}}><i className="ri-calendar-line me-1"></i>{c.service_date}</div>}
+                                                                </td>
                                                                 <td>{c.service_name}</td>
                                                                 <td className='text-end'>{formatCurrency(c.service_price)}</td>
                                                                 <td className='text-end fw-bold text-success'>
-                                                                    {formatCurrency(c.net_commission)}
-                                                                    {c.admin_fee > 0 &&
+                                                                    {selectedStylist.unassigned ? <span className="text-muted">—</span> : formatCurrency(c.net_commission)}
+                                                                    {!selectedStylist.unassigned && c.admin_fee > 0 &&
                                                                         <p className='text-muted fw-normal mb-0' style={{fontSize: '11px'}}>
                                                                             ({t("admin_discount")}: -{formatCurrency(c.admin_fee)})
                                                                         </p>
                                                                     }
                                                                 </td>
                                                                 <td className="text-end">
-                                                                    <button className="btn btn-soft-primary btn-sm me-1" title={t("edit")} onClick={() => handleOpenEdit('service', realIndex)}><i className="ri-pencil-line"></i></button>
-                                                                    <button className="btn btn-soft-danger btn-sm" title={t("delete")} onClick={() => handleDeleteItem('service', realIndex)}><i className="ri-delete-bin-line"></i></button>
+                                                                    {selectedStylist.unassigned ? (
+                                                                        <button className="btn btn-soft-success btn-sm" title={t("assign") || "Asignar"} onClick={() => handleOpenAssign(c)}>
+                                                                            <i className="ri-user-add-line me-1"></i>{t("assign") || "Asignar"}
+                                                                        </button>
+                                                                    ) : (
+                                                                        <>
+                                                                            <button className="btn btn-soft-primary btn-sm me-1" title={t("edit")} onClick={() => handleOpenEdit('service', realIndex)}><i className="ri-pencil-line"></i></button>
+                                                                            <button className="btn btn-soft-danger btn-sm" title={t("delete")} onClick={() => handleDeleteItem('service', realIndex)}><i className="ri-delete-bin-line"></i></button>
+                                                                        </>
+                                                                    )}
                                                                 </td>
                                                             </tr>
                                                             );
@@ -638,6 +689,42 @@ const PayrollPreview = () => {
                     ) : (
                         <button className="btn btn-primary" onClick={handleSaveEdit}>{t("save_changes")}</button>
                     )}
+                </ModalFooter>
+            </Modal>
+
+            {/* Modal para asignar estilista a un servicio sin asignar */}
+            <Modal isOpen={assignModal} toggle={() => setAssignModal(false)} centered>
+                <ModalHeader toggle={() => setAssignModal(false)}>
+                    {t("assign_stylist") || "Asignar estilista"}
+                </ModalHeader>
+                <ModalBody>
+                    {assignItem && (
+                        <div className="mb-3">
+                            <div className="d-flex justify-content-between">
+                                <strong>{assignItem.service_name}</strong>
+                                <span>{formatCurrency(assignItem.service_price)}</span>
+                            </div>
+                            <small className="text-muted">
+                                {assignItem.client_name}{assignItem.service_date ? ` · ${assignItem.service_date}` : ''}
+                            </small>
+                        </div>
+                    )}
+                    <FormGroup>
+                        <Label>{t("select_stylist") || "Seleccionar estilista"}</Label>
+                        <Input type="select" value={assignTargetId} onChange={e => setAssignTargetId(e.target.value)}>
+                            <option value="">{t("select") || "-- Seleccionar --"}</option>
+                            {assignableStylists.map(s => (
+                                <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                        </Input>
+                    </FormGroup>
+                </ModalBody>
+                <ModalFooter>
+                    <button className="btn btn-light" onClick={() => setAssignModal(false)} disabled={isAssigning}>{t("cancel")}</button>
+                    <button className="btn btn-success" onClick={handleConfirmAssign} disabled={!assignTargetId || isAssigning}>
+                        {isAssigning ? <Spinner size="sm" className="me-1"/> : <i className="ri-user-add-line me-1"></i>}
+                        {t("assign") || "Asignar"}
+                    </button>
                 </ModalFooter>
             </Modal>
         </div>

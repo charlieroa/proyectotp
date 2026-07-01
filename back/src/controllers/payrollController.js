@@ -3,21 +3,59 @@ const prisma = require('../config/prisma');
 // Sanitiza strings para eliminar null bytes (0x00) que PostgreSQL no acepta en UTF-8
 const sanitizeStr = (val) => (typeof val === 'string' ? val.replace(/\0/g, '') : val);
 
+// Cota superior EXCLUSIVA para que el rango incluya TODO el día final.
+// Ojo: `new Date('2026-06-23')` parsea como medianoche UTC; con el server en America/Bogota
+// (UTC-5) eso cae el 22 a las 19:00 local, así que `.getDate()+1` se "comía" el día y dejaba
+// el rango mismo-día (23 a 23) vacío. Construyendo con `new Date(y, m-1, d+1)` se usa la TZ
+// local del server, dando la medianoche local del día siguiente (= mismo instante que el
+// caso "23 a 24" que ya funcionaba). raw 'YYYY-MM-DD' -> ISO del día siguiente a medianoche.
+const exclusiveEndISO = (ymd) => {
+    const [y, m, d] = String(ymd).split('-').map(Number);
+    return new Date(y, (m - 1), d + 1).toISOString();
+};
+
+/**
+ * Calcula la comisión neta de un servicio para el estilista según el modo de % administrativo.
+ *
+ * Modo A (admin_fee_on_service = false, por defecto):
+ *   El % se aplica sobre la PARTE DEL SALÓN (lo que queda tras la comisión) y se descuenta al estilista.
+ *   Ej: 100, estilista 60%, admin 5% -> salón=40, admin=40*5%=2, estilista=60-2=58.
+ *
+ * Modo B (admin_fee_on_service = true):
+ *   El % se descuenta del TOTAL del servicio primero, y sobre lo que queda se reparte estilista/salón.
+ *   Ej: 50000, admin 5% -> 50000-2500=47500, estilista 60%=28500, salón 40%=19000.
+ *
+ * `admin_fee` devuelto = cuánto menos recibió el estilista por el cobro administrativo (para mostrar).
+ */
+const computeServiceCommission = (price, commission_rate, cfg) => {
+    const rate = Number(commission_rate || 0);
+    const p = Number(price || 0);
+    const feeRate = (cfg && cfg.admin_fee_enabled && cfg.admin_fee_rate) ? Number(cfg.admin_fee_rate) : 0;
+    const gross_full = p * rate;
+    let net_commission;
+    if (cfg && cfg.admin_fee_on_service) {
+        net_commission = (p - p * feeRate) * rate;
+    } else {
+        const salon_share = p - gross_full;
+        net_commission = gross_full - salon_share * feeRate;
+    }
+    const admin_fee = gross_full - net_commission;
+    return { net_commission, admin_fee };
+};
+
 /**
  * Función centralizada para calcular el desglose de la nómina para un estilista.
  * (VERSIÓN CORREGIDA FINAL - Migrada a Prisma)
  */
 const calculateStylistPayrollBreakdown = async (tenant_id, stylist, start_date, raw_end_date) => {
-    // Hacer end_date inclusivo: si viene '2026-03-31', buscar hasta '2026-04-01 00:00:00'
-    const endDateObj = new Date(raw_end_date);
-    endDateObj.setDate(endDateObj.getDate() + 1);
-    const end_date = endDateObj.toISOString();
+    // end_date inclusivo del día final (ver exclusiveEndISO).
+    const end_date = exclusiveEndISO(raw_end_date);
 
     const tenantRow = await prisma.tenants.findUnique({
         where: { id: tenant_id },
-        select: { admin_fee_enabled: true, admin_fee_rate: true, tip_salon_percent: true }
+        select: { admin_fee_enabled: true, admin_fee_rate: true, admin_fee_on_service: true, tip_salon_percent: true }
     });
-    const { admin_fee_enabled, admin_fee_rate, tip_salon_percent } = tenantRow || {};
+    const { admin_fee_enabled, admin_fee_rate, admin_fee_on_service, tip_salon_percent } = tenantRow || {};
 
     // 1. Obtener Ingresos (Servicios y Productos)
     // Servicios: filtrar por fecha de CITA (ap.start_time), no de factura
@@ -25,16 +63,18 @@ const calculateStylistPayrollBreakdown = async (tenant_id, stylist, start_date, 
     const salesRows = await prisma.$queryRawUnsafe(
         `SELECT
             ii.item_type, ii.total_price, ii.commission_value,
-            s.name as service_name, u_client.first_name || ' ' || u_client.last_name as client_name
+            COALESCE(s.name, s2.name, ii.description) as service_name,
+            COALESCE(u_client.first_name || ' ' || u_client.last_name, inv.client_name_adhoc) as client_name
          FROM invoice_items ii
          JOIN invoices inv ON ii.invoice_id = inv.id
          LEFT JOIN appointments ap ON ii.related_id = ap.id AND ii.item_type = 'service'
          LEFT JOIN services s ON ap.service_id = s.id
+         LEFT JOIN services s2 ON ii.related_id = s2.id AND ii.item_type = 'service'
          LEFT JOIN users u_client ON inv.client_id = u_client.id
          WHERE inv.tenant_id = $1::uuid AND COALESCE(ap.stylist_id, ii.seller_id) = $4::uuid
            AND inv.status IN ('paid', 'closed', 'completed')
            AND (
-             (ii.item_type = 'service' AND ap.start_time >= $2::timestamptz AND ap.start_time < $3::timestamptz)
+             (ii.item_type = 'service' AND COALESCE(ap.start_time, inv.created_at) >= $2::timestamptz AND COALESCE(ap.start_time, inv.created_at) < $3::timestamptz)
              OR
              (ii.item_type = 'product' AND inv.created_at >= $2::timestamptz AND inv.created_at < $3::timestamptz)
            )`,
@@ -61,10 +101,10 @@ const calculateStylistPayrollBreakdown = async (tenant_id, stylist, start_date, 
 
     // Calcular comisiones de servicios detalladamente
     salesRows.filter(item => item.item_type === 'service').forEach(service => {
-        const gross_commission = Number(service.total_price) * Number(stylist.commission_rate || 0);
-        const salon_share = Number(service.total_price) - gross_commission;
-        const admin_fee = (admin_fee_enabled && admin_fee_rate) ? salon_share * Number(admin_fee_rate) : 0;
-        const net_commission = gross_commission - admin_fee;
+        const { net_commission, admin_fee } = computeServiceCommission(
+            service.total_price, stylist.commission_rate,
+            { admin_fee_enabled, admin_fee_rate, admin_fee_on_service }
+        );
 
         service_commissions_total += net_commission;
         details.services.push({
@@ -158,17 +198,15 @@ exports.getPayrollDetailedPreview = async (req, res) => {
         return res.status(400).json({ error: 'Se requieren start_date y end_date.' });
     }
 
-    // Hacer end_date inclusivo: si viene '2026-03-31', buscar hasta '2026-04-01 00:00:00'
-    const endDateObj = new Date(raw_end_date);
-    endDateObj.setDate(endDateObj.getDate() + 1);
-    const end_date = endDateObj.toISOString();
+    // end_date inclusivo del día final (ver exclusiveEndISO).
+    const end_date = exclusiveEndISO(raw_end_date);
 
     try {
         const tenantRow = await prisma.tenants.findUnique({
             where: { id: tenant_id },
-            select: { admin_fee_enabled: true, admin_fee_rate: true, tip_salon_percent: true }
+            select: { admin_fee_enabled: true, admin_fee_rate: true, admin_fee_on_service: true, tip_salon_percent: true }
         });
-        const { admin_fee_enabled, admin_fee_rate, tip_salon_percent } = tenantRow || {};
+        const { admin_fee_enabled, admin_fee_rate, admin_fee_on_service, tip_salon_percent } = tenantRow || {};
 
         const localStylists = await prisma.users.findMany({
             where: { tenant_id, role_id: 3, status: 'active' },
@@ -186,7 +224,7 @@ exports.getPayrollDetailedPreview = async (req, res) => {
                AND inv.status IN ('paid','closed','completed')
                AND u.tenant_id != $1::uuid
                AND (
-                 (ii.item_type = 'service' AND ap.start_time >= $2::timestamptz AND ap.start_time < $3::timestamptz)
+                 (ii.item_type = 'service' AND COALESCE(ap.start_time, inv.created_at) >= $2::timestamptz AND COALESCE(ap.start_time, inv.created_at) < $3::timestamptz)
                  OR
                  (ii.item_type = 'product' AND inv.created_at >= $2::timestamptz AND inv.created_at < $3::timestamptz)
                )`,
@@ -203,7 +241,7 @@ exports.getPayrollDetailedPreview = async (req, res) => {
 
         // Servicios: filtrar por fecha de CITA (ap.start_time)
         const servicesRows = await prisma.$queryRawUnsafe(
-            `SELECT ap.stylist_id, u.first_name || ' ' || u.last_name as client_name, s.name as service_name, ii.total_price as service_price FROM invoice_items ii JOIN invoices inv ON ii.invoice_id = inv.id JOIN appointments ap ON ii.related_id = ap.id JOIN services s ON ap.service_id = s.id JOIN users u ON inv.client_id = u.id WHERE ii.item_type = 'service' AND inv.tenant_id = $1::uuid AND ap.start_time >= $2::timestamptz AND ap.start_time < $3::timestamptz AND inv.status IN ('paid','closed','completed')`,
+            `SELECT ii.id as item_id, COALESCE(ap.stylist_id, ii.seller_id) as stylist_id, COALESCE(u.first_name || ' ' || u.last_name, inv.client_name_adhoc, 'Cliente') as client_name, COALESCE(s.name, s2.name, ii.description) as service_name, ii.total_price as service_price, inv.created_at::date as service_date FROM invoice_items ii JOIN invoices inv ON ii.invoice_id = inv.id LEFT JOIN appointments ap ON ii.related_id = ap.id AND ii.item_type = 'service' LEFT JOIN services s ON ap.service_id = s.id LEFT JOIN services s2 ON ii.related_id = s2.id AND ii.item_type = 'service' LEFT JOIN users u ON inv.client_id = u.id WHERE ii.item_type = 'service' AND inv.tenant_id = $1::uuid AND COALESCE(ap.start_time, inv.created_at) >= $2::timestamptz AND COALESCE(ap.start_time, inv.created_at) < $3::timestamptz AND inv.status IN ('paid','closed','completed')`,
             tenant_id, start_date, end_date
         );
 
@@ -279,10 +317,10 @@ exports.getPayrollDetailedPreview = async (req, res) => {
             let service_commissions_total = 0;
 
             servicesRows.filter(s => s.stylist_id === stylist.id).forEach(service => {
-                const gross_commission = Number(service.service_price) * Number(stylist.commission_rate || 0);
-                const salon_share = Number(service.service_price) - gross_commission;
-                const admin_fee = (admin_fee_enabled && admin_fee_rate) ? salon_share * Number(admin_fee_rate) : 0;
-                const net_commission = gross_commission - admin_fee;
+                const { net_commission, admin_fee } = computeServiceCommission(
+                    service.service_price, stylist.commission_rate,
+                    { admin_fee_enabled, admin_fee_rate, admin_fee_on_service }
+                );
                 service_commissions_total += net_commission;
                 details.services.push({ ...service, net_commission, admin_fee });
             });
@@ -315,9 +353,51 @@ exports.getPayrollDetailedPreview = async (req, res) => {
             return s.net_paid > 0 || s.details.services.length > 0 || s.details.products.length > 0 || s.details.expenses.length > 0;
         }).sort((a, b) => b.net_paid - a.net_paid);
 
+        // Servicios SIN estilista (seller_id nulo y sin cita): antes se descartaban
+        // por completo. Los mostramos agrupados como "Sin asignar" para que el admin
+        // vea el ingreso y asigne el estilista correcto. No generan comisión pagable.
+        const unassignedServices = servicesRows.filter(s => !s.stylist_id);
+        if (unassignedServices.length > 0) {
+            stylist_breakdowns.push({
+                stylist_id: null,
+                stylist_name: 'Sin asignar',
+                net_paid: 0,
+                stylist_tips: 0,
+                payment_type: 'commission',
+                unassigned: true,
+                details: {
+                    services: unassignedServices.map(s => ({ ...s, net_commission: 0, admin_fee: 0 })),
+                    products: [],
+                    expenses: [],
+                },
+            });
+        }
+
         // CÁLCULO DE WIDGETS CORREGIDO: Usamos los datos ya procesados
+        // Mismo criterio de fecha que los servicios/propinas: fecha de la cita si
+        // existe, si no la fecha de la factura. Así los totales de efectivo/tarjeta
+        // reconcilian con el desglose por estilista (antes el widget usaba
+        // inv.created_at y descuadraba con citas agendadas otro día).
         const paymentTotalsRows = await prisma.$queryRawUnsafe(
-            `SELECT COALESCE(SUM(p.amount) FILTER (WHERE p.payment_method = 'cash'), 0) AS cash, COALESCE(SUM(p.amount) FILTER (WHERE p.payment_method = 'credit_card'), 0) AS "creditCard" FROM payments p JOIN invoices inv ON p.invoice_id = inv.id WHERE p.tenant_id = $1::uuid AND inv.created_at >= $2::timestamptz AND inv.created_at < $3::timestamptz`,
+            `SELECT
+                COALESCE(SUM(p.amount) FILTER (WHERE p.payment_method IN ('cash', 'efectivo')), 0) AS cash,
+                COALESCE(SUM(p.amount) FILTER (WHERE p.payment_method IN ('card', 'credit_card', 'debit_card', 'tarjeta')), 0) AS "creditCard"
+             FROM payments p JOIN invoices inv ON p.invoice_id = inv.id
+             WHERE p.tenant_id = $1::uuid
+               AND COALESCE(
+                     (SELECT MIN(ap.start_time)
+                        FROM invoice_items ii
+                        LEFT JOIN appointments ap ON ii.related_id = ap.id
+                       WHERE ii.invoice_id = inv.id AND ii.item_type = 'service'),
+                     inv.created_at
+                   ) >= $2::timestamptz
+               AND COALESCE(
+                     (SELECT MIN(ap.start_time)
+                        FROM invoice_items ii
+                        LEFT JOIN appointments ap ON ii.related_id = ap.id
+                       WHERE ii.invoice_id = inv.id AND ii.item_type = 'service'),
+                     inv.created_at
+                   ) < $3::timestamptz`,
             tenant_id, start_date, end_date
         );
         const inventorySoldRows = await prisma.$queryRawUnsafe(
@@ -588,9 +668,8 @@ exports.exportPayrollExcel = async (req, res) => {
     try {
         const XLSX = require('xlsx');
 
-        const endDateObj = new Date(raw_end_date);
-        endDateObj.setDate(endDateObj.getDate() + 1);
-        const end_date = endDateObj.toISOString();
+        // end_date inclusivo del día final (ver exclusiveEndISO).
+        const end_date = exclusiveEndISO(raw_end_date);
 
         const stylists = await prisma.users.findMany({
             where: { tenant_id, role_id: 3, status: 'active' },
@@ -653,6 +732,97 @@ exports.exportPayrollExcel = async (req, res) => {
     } catch (error) {
         console.error('Error al exportar nómina a Excel:', error);
         res.status(500).json({ error: 'Error al generar el archivo Excel' });
+    }
+};
+
+// --- ASIGNAR / REASIGNAR ESTILISTA A UN SERVICIO (desde la nómina) ---
+// Sirve tanto para servicios huérfanos (seller_id NULL) como para CORREGIR la
+// atribución de un servicio ya asignado al estilista equivocado, aunque la
+// factura esté cerrada. Recalcula la comisión del par estilista+servicio.
+//
+// Clave: la nómina atribuye el servicio con COALESCE(ap.stylist_id, ii.seller_id).
+// Para servicios que vienen de una CITA, manda `appointments.stylist_id`, así que
+// además de ii.seller_id hay que mover la cita; si no, reasignar no cambiaría nada
+// ni en la plataforma ni en el Excel.
+exports.assignServiceSeller = async (req, res) => {
+    const { tenant_id } = req.user;
+    const { item_id, seller_id } = req.body || {};
+    if (!item_id || !seller_id) {
+        return res.status(400).json({ error: 'Se requieren item_id y seller_id.' });
+    }
+    try {
+        const item = await prisma.invoice_items.findFirst({
+            where: { id: item_id, tenant_id, item_type: 'service' },
+            select: { id: true, related_id: true, total_price: true }
+        });
+        if (!item) return res.status(404).json({ error: 'Servicio no encontrado.' });
+
+        // El estilista puede ser cross-branch, pero debe ser rol 3 (estilista).
+        const stylist = await prisma.users.findFirst({
+            where: { id: seller_id, role_id: 3 },
+            select: { id: true }
+        });
+        if (!stylist) return res.status(404).json({ error: 'Estilista no encontrado.' });
+
+        // related_id puede apuntar a una CITA (servicio agendado) o a un SERVICIO
+        // (venta POS suelta). Para citas, el id de servicio real está en la cita.
+        let appt = null;
+        let serviceIdForPct = item.related_id;
+        if (item.related_id) {
+            appt = await prisma.appointments.findFirst({
+                where: { id: item.related_id, tenant_id },
+                select: { id: true, service_id: true }
+            }).catch(() => null);
+            if (appt) serviceIdForPct = appt.service_id;
+        }
+
+        // % comisión: primero el par estilista+servicio, si no el del servicio.
+        let pct = null;
+        if (serviceIdForPct) {
+            const pair = await prisma.stylist_services.findUnique({
+                where: { user_id_service_id: { user_id: seller_id, service_id: serviceIdForPct } },
+                select: { commission_percent: true }
+            }).catch(() => null);
+            if (pair?.commission_percent != null) {
+                pct = Number(pair.commission_percent);
+            } else {
+                const svc = await prisma.services.findFirst({
+                    where: { id: serviceIdForPct, tenant_id },
+                    select: { commission_percent: true }
+                });
+                if (svc?.commission_percent != null) pct = Number(svc.commission_percent);
+            }
+        }
+        const total = Number(item.total_price || 0);
+        const commission_value = pct != null ? Math.round((total * pct / 100) * 100) / 100 : null;
+
+        // Si el servicio viene de una cita, mover también la cita (la nómina atribuye
+        // por ap.stylist_id antes que por ii.seller_id).
+        if (appt) {
+            await prisma.$executeRawUnsafe(
+                `UPDATE appointments SET stylist_id = $1::uuid WHERE id = $2::uuid AND tenant_id = $3::uuid`,
+                seller_id, appt.id, tenant_id
+            );
+        }
+
+        await prisma.$executeRawUnsafe(
+            `UPDATE invoice_items
+               SET seller_id = $1::uuid,
+                   commission_percent = $2,
+                   commission_value = $3::numeric,
+                   commission_source = 'payroll_assign'
+             WHERE id = $4::uuid AND tenant_id = $5::uuid`,
+            seller_id,
+            pct != null ? String(pct) : null,
+            commission_value,
+            item_id,
+            tenant_id
+        );
+
+        return res.status(200).json({ message: 'Servicio asignado.', item_id, seller_id, moved_appointment: !!appt, commission_percent: pct, commission_value });
+    } catch (error) {
+        console.error('Error al asignar estilista al servicio:', error);
+        return res.status(500).json({ error: 'Error interno del servidor' });
     }
 };
 

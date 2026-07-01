@@ -4,6 +4,7 @@
 // Migrado a Prisma ORM
 // =============================================
 const prisma = require('../config/prisma');
+const { getOrCreateOpenSession } = require('../utils/cashSession');
 
 // Helpers
 const isUUID = (v) => typeof v === 'string' && v.length >= 10;
@@ -106,12 +107,10 @@ exports.createLoan = async (req, res) => {
 
             // 3) Desembolso (caja) opcional
             if (disburse_from_cash) {
-                const openSession = await tx.cash_sessions.findFirst({
-                    where: { tenant_id, status: 'OPEN' },
-                    select: { id: true }
-                });
-                const cash_session_id = openSession ? openSession.id : null;
-                assert(cash_session_id, 'No hay una sesión de caja abierta para desembolsar el préstamo.');
+                // Apertura automática (protocolo): el cajero no necesita abrir caja
+                // manualmente para desembolsar el préstamo.
+                const openSession = await getOrCreateOpenSession(tx, tenant_id, cashier_id);
+                const cash_session_id = openSession.id;
 
                 await tx.cash_movements.create({
                     data: {

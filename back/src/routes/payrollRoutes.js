@@ -49,4 +49,10 @@ router.get(
     payrollController.getPayrollsByTenant
 );
 
+// POST /api/payrolls/assign-seller -> Asignar estilista a un servicio que quedó sin asignar.
+router.post(
+    '/assign-seller',
+    payrollController.assignServiceSeller
+);
+
 module.exports = router;
