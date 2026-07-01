@@ -386,6 +386,12 @@ function normalizeHumanTimeToHHMM(input) {
   if (/de\s*la\s*noche/i.test(raw)) isNoche = true;
   if (/de\s*la\s*mañana|de\s*la\s*manana/i.test(raw)) isMañana = true;
 
+  // Minutos escritos en palabras: "y media" (30), "y cuarto" (15), "en punto" (0)
+  let minuteFromWords = null;
+  if (/\by\s*media\b/i.test(raw)) minuteFromWords = 30;
+  else if (/\by\s*cuarto\b/i.test(raw)) minuteFromWords = 15;
+  else if (/\ben\s*punto\b/i.test(raw)) minuteFromWords = 0;
+
   // Patrón: HH:mm o HH.mm (con o sin am/pm) - Soporta "9:30" y "9.30"
   const hhmmMatch = raw.match(/(\d{1,2})[:.](\d{2})/);
   if (hhmmMatch) {
@@ -410,10 +416,25 @@ function normalizeHumanTimeToHHMM(input) {
     }
   }
 
+  // Patrón: números escritos en palabras — "a las tres", "doce", "tres y media"
+  if (hour === null) {
+    const wordToNum = { una: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10, once: 11, doce: 12 };
+    for (const [word, num] of Object.entries(wordToNum)) {
+      if (new RegExp(`\\b${word}\\b`, 'i').test(raw)) {
+        hour = num;
+        console.log(`   Hora extraída (palabra): "${word}" → ${hour} | ${isTarde ? 'tarde' : isNoche ? 'noche' : isMañana ? 'mañana' : 'sin franja'}`);
+        break;
+      }
+    }
+  }
+
   if (hour === null) {
     console.log('   ⚠️ No se pudo extraer la hora');
     return '';
   }
+
+  // Aplicar minutos escritos ("y media" / "y cuarto" / "en punto") si se detectaron
+  if (minuteFromWords !== null) minute = minuteFromWords;
 
   // ===== AJUSTAR HORA SEGÚN AM/PM =====
 

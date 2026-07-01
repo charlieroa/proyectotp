@@ -224,6 +224,50 @@ exports.searchService = async (req, res) => {
             });
         }
 
+        // 🆕 MATCH EXACTO DE SERVICIO (gana a la categoría): cubre el caso en que un servicio
+        // y una categoría se llaman igual (ej. servicio "Barba" dentro de la categoría "Barba").
+        // Sin esto, la búsqueda caía siempre en la categoría → devolvía "multiple" → el service_id
+        // nunca se fijaba en el contexto → verificar_disponibilidad corría sin servicio y se colgaba.
+        const exactSvcMatch = await db.query(
+            `SELECT s.id, s.name, s.price, s.duration_minutes, COALESCE(s.max_concurrent_stylists, 1) AS max_concurrent_stylists
+             FROM services s
+             INNER JOIN stylist_services ss ON s.id = ss.service_id
+             INNER JOIN users u ON ss.user_id = u.id
+             WHERE s.tenant_id = $1::uuid
+               AND u.tenant_id = $1::uuid
+               AND u.role_id = 3
+               AND COALESCE(NULLIF(u.status, ''), 'active') = 'active'
+               AND (LOWER(TRIM(s.name)) = $2 OR LOWER(TRIM(s.name)) = $3 OR LOWER(TRIM(s.name)) = $4)
+             GROUP BY s.id, s.name, s.price, s.duration_minutes, s.max_concurrent_stylists
+             ORDER BY s.name ASC
+             LIMIT 2`,
+            [tenantId, serviceName, serviceOriginal, serviceNameNormalized]
+        );
+        if (exactSvcMatch.rows.length === 1) {
+            const svc = exactSvcMatch.rows[0];
+            console.log(`   🎯 Match exacto de servicio: "${svc.name}" (${svc.id}) → resolviendo directo`);
+            const stylistsRes = await db.query(
+                `SELECT DISTINCT u.id, u.first_name || ' ' || COALESCE(u.last_name, '') AS name
+                 FROM stylist_services ss
+                 INNER JOIN users u ON ss.user_id = u.id
+                 WHERE ss.service_id = $1::uuid AND u.tenant_id = $2::uuid AND u.role_id = 3
+                   AND COALESCE(NULLIF(u.status, ''), 'active') = 'active'
+                 ORDER BY name ASC`,
+                [svc.id, tenantId]
+            );
+            return res.status(200).json({
+                found: true, multiple: false,
+                service: {
+                    id: svc.id, name: svc.name,
+                    price: Number(svc.price) || 0,
+                    duration_minutes: Number(svc.duration_minutes) || 60,
+                    max_concurrent_stylists: Number(svc.max_concurrent_stylists) || 1
+                },
+                stylists: stylistsRes.rows.map(s => ({ id: s.id, name: s.name.trim() })),
+                message: `${svc.name} ($${Number(svc.price) || 0}).`
+            });
+        }
+
         // 🆕 BUSCAR POR CATEGORÍA primero: si el texto coincide con un nombre de categoría, devolver servicios de esa categoría
         // Prioridad: 1) match exacto, 2) match parcial — y solo categorías que tengan servicios con estilistas
         const catMatch = await db.query(
@@ -280,7 +324,7 @@ exports.searchService = async (req, res) => {
                          INNER JOIN users u ON ss.user_id = u.id
                          WHERE ss.service_id = $1::uuid AND u.tenant_id = $2::uuid AND u.role_id = 3
                            AND COALESCE(NULLIF(u.status, ''), 'active') = 'active'
-                         ORDER BY u.first_name ASC`,
+                         ORDER BY name ASC`,
                         [svc.id, tenantId]
                     );
                     return res.status(200).json({

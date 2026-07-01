@@ -298,6 +298,9 @@ function extractDateTimeFromMessage(message) {
         /\b(\d{1,2})\s*(am|pm|a\.m\.|p\.m\.)\b/i,  // "9 am", "2pm"
         /(?:tipo|como\s+a\s+las?)\s+(\d{1,2})(?:[:.](\d{2}))?/i,  // "tipo 9.30"
         /\b(\d{1,2})[:.](\d{2})\b/,  // "14:00", "9.30"
+        // 🆕 Horas escritas en palabras: "a las tres", "tres de la tarde", "doce y media"
+        /a\s+las?\s+(?:una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)(?:\s+y\s+(?:media|cuarto))?(?:\s+(?:de\s+la\s+(?:mañana|tarde|noche)|en\s+punto))?/i,
+        /\b(?:una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)(?:\s+y\s+(?:media|cuarto))?\s+de\s+la\s+(?:mañana|tarde|noche)/i,
     ];
 
     for (const pattern of timePatterns) {
@@ -552,7 +555,10 @@ exports.handleWahaWebhook = async (req, res) => {
                              FROM users u
                              JOIN tenants t_user ON t_user.id = u.tenant_id
                              JOIN tenants t_wa   ON t_wa.id   = $1::uuid
-                             WHERE u.phone = $2
+                             -- Match tolerante al código de país: el número entrante trae "57"
+                             -- pero en BD los teléfonos suelen guardarse sin él. Comparamos los
+                             -- últimos 10 dígitos (celular colombiano) de ambos lados.
+                             WHERE right(regexp_replace(u.phone, '[^0-9]', '', 'g'), 10) = right($2, 10)
                                AND u.role_id = 3
                                AND COALESCE(u.status, 'active') = 'active'
                                AND (
@@ -1473,7 +1479,7 @@ exports.handleWahaWebhook = async (req, res) => {
                             pendingData.step = 'email';
                             pendingData.collected.name = senderName;
                             pendingClientDataCache.set(cacheKey, pendingData);
-                            await wahaService.sendMessage(tenantId, chatId, `Gracias ${firstName}. Ahora necesito tu correo electrónico para enviarte la confirmación de tu cita.`);
+                            await wahaService.sendMessage(tenantId, chatId, `Gracias ${firstName}. Si quieres recibir la confirmación y notificaciones de tu cita, déjanos tu correo electrónico. Es opcional: si prefieres no dejarlo, escribe *no* y la agendo igual.`);
                             return res.status(200).send('OK');
                         }
 
@@ -1496,6 +1502,8 @@ exports.handleWahaWebhook = async (req, res) => {
 
                 if (pendingData.step === 'email') {
                     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                    // Email OPCIONAL: si el cliente declina, agendamos igual (sin correo).
+                    const declinePattern = /^\s*(no|no\s*gracias|no\s*tengo|no\s*quiero|no\s*por\s*ahora|omitir|om[ií]telo|saltar|skip|luego|despu[eé]s|paso|sin\s*correo|sin\s*email|ninguno|nel|n\/a)\s*\.?\s*$/i;
                     if (emailPattern.test(msg)) {
                         await db.query(
                             `UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2::uuid`,
@@ -1513,8 +1521,19 @@ exports.handleWahaWebhook = async (req, res) => {
                             await wahaService.sendMessage(tenantId, chatId, bookResult.error || 'No se pudo agendar la cita, intenta de nuevo.');
                         }
                         return res.status(200).send('OK');
+                    } else if (declinePattern.test(msg)) {
+                        // El cliente prefiere no dejar correo → agendar sin email
+                        console.log(`   ℹ️ [DATOS] Cliente declinó dejar email → agendando sin correo`);
+                        pendingClientDataCache.delete(cacheKey);
+                        const bookResult = await callBookAppointmentMulti(tenantId, clientId, pendingData.bookingParams);
+                        if (bookResult.booked) {
+                            await wahaService.sendMessage(tenantId, chatId, `Listo, tu cita quedó agendada. Te esperamos 💇`);
+                        } else {
+                            await wahaService.sendMessage(tenantId, chatId, bookResult.error || 'No se pudo agendar la cita, intenta de nuevo.');
+                        }
+                        return res.status(200).send('OK');
                     } else {
-                        await wahaService.sendMessage(tenantId, chatId, 'Necesito un correo electrónico válido. Por ejemplo: tucorreo@gmail.com');
+                        await wahaService.sendMessage(tenantId, chatId, 'Si quieres dejarnos tu correo escríbelo (ej: tucorreo@gmail.com), o escribe *no* y agendo tu cita sin correo.');
                         return res.status(200).send('OK');
                     }
                 }
@@ -1772,8 +1791,9 @@ TU PERSONALIDAD: VENDEDOR ESTRELLA
   * SÍ di: "${senderName}, aprovecha que vienes y sal con todo, te recomiendo complementar con un [servicio]. No dejes pasar la oportunidad."
   * Usa frases motivadoras naturales: "sal brillando", "aprovecha la visita", "quedate con el look completo", "date ese gusto".
 - Cuando muestres listas de servicios, usa formato limpio SIN emojis en cada línea:
-  * 1. Corte Caballero - $35,000 (45 min)
-  * 2. Barba mas corte - $35,000 (45 min)
+  * 1. [Nombre del servicio] - $[precio] ([duración] min)
+  * 2. [Nombre del servicio] - $[precio] ([duración] min)
+- ⚠️ Los nombres, precios y duraciones de ARRIBA son SOLO un ejemplo de FORMATO. NUNCA los uses como datos reales. Toma SIEMPRE el nombre, el precio y la duración EXACTOS que devuelve la función buscar_servicio (campos name, price, duration_minutes). Está PROHIBIDO inventar o redondear precios y duraciones.
 - Cuando muestres categorías, formato limpio:
   * 1. Barberia
   * 2. Cortes
@@ -1825,11 +1845,12 @@ OCASIONES ESPECIALES (detalle, regalo, cumpleaños, aniversario, sorpresa):
 - Si hay múltiples servicios → mostrar opciones y pedir confirmación
 - Si hay un solo servicio → guardar service_id y mostrar estilistas
 - ⚠️ CRÍTICO: Si el resultado tiene "stylists" con una lista, SOLO muestra esos estilistas. NO inventes estilistas.
+- ⚠️ Si "stylists" viene vacío o no hay estilistas asignados, di que no hay estilistas disponibles para ese servicio. NUNCA uses nombres de ejemplo de estas instrucciones (son solo formato) como si fueran estilistas reales.
 
 CASO ESPECIAL - Usuario dice TODO de una vez (servicio + estilista + fecha + hora):
 - Llama buscar_servicio solo para obtener el service_id (sin mostrar resultado al usuario)
 - Luego llama verificar_disponibilidad INMEDIATAMENTE con todos los datos
-- Responde DIRECTAMENTE: "Carlos esta disponible mañana a las 9:30 AM. Te confirmo?"
+- Responde DIRECTAMENTE: "[Nombre del estilista] esta disponible mañana a las 9:30 AM. Te confirmo?"
 - NO digas: "Estos estilistas ofrecen..." si el usuario ya especificó un estilista
 
 PASO 2: ELEGIR ESTILISTA / FECHA
@@ -1866,7 +1887,7 @@ PASO 3.5: SERVICIOS MULTI-ESTILISTA
 - Si buscar_servicio devuelve un servicio con max_concurrent_stylists > 1, ese servicio requiere VARIOS estilistas simultáneos.
 - Ejemplo: un masaje a 4 manos necesita 2 estilistas.
 - Debes presentar al cliente los estilistas disponibles y decirle cuántos necesita:
-  "Este servicio necesita [N] estilistas. Tenemos disponibles: 1. Carlos, 2. Dario, 3. María. ¿Con cuáles prefieres?"
+  "Este servicio necesita [N] estilistas. Tenemos disponibles: 1. [Nombre], 2. [Nombre], 3. [Nombre]. ¿Con cuáles prefieres?"
 - El cliente puede elegir estilistas o dejar que tú elijas.
 - Al agendar, usa stylistIds (array de UUIDs) y stylistNames (array de nombres) en agendar_cita.
 - Si el servicio tiene max_concurrent_stylists = 1 (o no tiene el campo), funciona normal con un solo estilista.
@@ -1915,6 +1936,12 @@ Cuando el cliente dice frases como:
 
 REGLA ESPECIAL - SALÓN NO CONFIGURADO:
 - Si buscar_servicio devuelve "not_configured: true", responde EXACTAMENTE con el mensaje devuelto. NO intentes buscar más.
+
+⛔ INTEGRIDAD DE DATOS (NUNCA INVENTAR):
+- Precios, duraciones y nombres de servicios → SOLO de buscar_servicio (price, duration_minutes, name). Nunca de tu memoria ni de ejemplos del prompt.
+- Estilistas → SOLO de los campos "stylists" del resultado. Si viene vacío, di que no hay disponibles.
+- Horarios y disponibilidad ("quién está disponible a tal hora") → SOLO de verificar_disponibilidad (slots_12h / available). NUNCA inventes ni asumas que alguien está libre sin haber llamado la función.
+- Si la función no devolvió el dato → di que no lo tienes o vuelve a llamar la función. PROHIBIDO rellenar con cifras u horas inventadas o redondeadas.
 
 REGLA DE ORO:
 - Si el usuario pide un servicio → LLAMA buscar_servicio INMEDIATAMENTE
@@ -2186,7 +2213,37 @@ REGLA DE ORO:
             };
 
             console.log(`   📋 Params finales:`, JSON.stringify(checkParams));
-            functionResult = await callCheckAvailability(tenantId, checkParams);
+
+            // 🛟 Recuperación: si se perdió el servicio del contexto, NO mostrar error crudo.
+            // Pedir/elegir el servicio de nuevo en lugar de devolver "serviceId inválido".
+            if (!_uuid.test(checkParams.serviceId || '')) {
+                console.log(`   ⚠️ serviceId ausente/inválido en contexto → reintentando buscar_servicio`);
+                const recover = await callSearchService(
+                    tenantId,
+                    functionArgs.service || bookingContext.service || 'servicio',
+                    checkParams.date,
+                    checkParams.time,
+                    checkParams.stylistName
+                );
+                // Si la recuperación resolvió un único servicio, encadenar la verificación con su UUID
+                if (recover && recover.found && recover.service && !recover.multiple) {
+                    updatedContext.service = recover.service.name;
+                    updatedContext.service_id = recover.service.id;
+                    checkParams.serviceId = recover.service.id;
+                    console.log(`   ✅ Servicio recuperado: ${recover.service.name} (${recover.service.id})`);
+                    functionResult = await callCheckAvailability(tenantId, checkParams);
+                } else {
+                    // No se pudo resolver: devolver al GPT para que pregunte el servicio (sin error técnico)
+                    functionResult = {
+                        ...(recover || {}),
+                        needsService: true,
+                        can_book: false,
+                        hint: 'Aún no tenemos el servicio seleccionado. Pregunta amablemente al cliente qué servicio desea (o muestra las opciones/categorías de buscar_servicio). NO menciones errores técnicos ni "serviceId".'
+                    };
+                }
+            } else {
+                functionResult = await callCheckAvailability(tenantId, checkParams);
+            }
 
             if (functionResult.stylist && functionResult.stylist.id) {
                 updatedContext.stylist = functionResult.stylist.name;
@@ -2275,7 +2332,7 @@ REGLA DE ORO:
                         missing: missingData,
                         message: missingData.includes('nombre')
                             ? 'Antes de confirmar tu cita necesito unos datos. ¿Cuál es tu nombre completo (nombre y apellido)?'
-                            : 'Antes de confirmar tu cita necesito tu correo electrónico para enviarte la confirmación.'
+                            : 'Para enviarte la confirmación y notificaciones de tu cita, ¿quieres dejarnos tu correo electrónico? Es opcional: si prefieres no dejarlo, escribe *no* y la agendo igual.'
                     };
                 } else if (isMultiStylist) {
                     // Multi-stylist booking: crear múltiples citas con mismo batch_id
@@ -2461,6 +2518,9 @@ REGLA DE ORO:
 
     return { response: assistantMessage.content, updatedContext: null };
 }
+
+// __E2E_EXPORT__ (temporal): expone processWithAI para pruebas end-to-end
+exports.__processWithAI = processWithAI;
 
 /* =================================================================== */
 /* ==============   PROCESAR CON IA ADMIN (WHATSAPP)   =============== */
