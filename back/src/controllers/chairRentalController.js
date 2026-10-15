@@ -444,11 +444,18 @@ exports.listRenters = async (req, res) => {
         rental_status: true,
         rental_past_due_since: true,
         rental_stripe_subscription_id: true,
+        rental_stripe_customer_id: true,
         created_at: true,
       },
       orderBy: { created_at: 'desc' },
     });
-    return res.json({ renters });
+    // No exponer el id del customer de Stripe al front: solo si ya existe.
+    return res.json({
+      renters: renters.map(({ rental_stripe_customer_id, ...r }) => ({
+        ...r,
+        has_customer: !!rental_stripe_customer_id,
+      })),
+    });
   } catch (e) {
     return fail(res, e);
   }
@@ -657,21 +664,24 @@ exports.getRenter = async (req, res) => {
 
     let subscription = null;
     let invoices = [];
+    let cardStatus = null;
 
     // Lee/auto-repara la tarjeta (y arranca la sub si falta) sin depender del webhook.
     const { card: defaultCard, subscriptionId } = await reconcileRenterCard({ acctId, renter });
 
-    if (renter.rental_stripe_customer_id) {
+    // Las lecturas a Stripe son independientes: se lanzan en paralelo (antes iban
+    // una tras otra y el detalle tardaba varios segundos).
+    const invoicesTask = (async () => {
+      if (!renter.rental_stripe_customer_id) return [];
       // Incluye customers duplicados históricos del renter (mismo email) para que
       // los cobros "ocultos" del customer viejo aparezcan en el historial.
       const customerIds = await listRenterCustomerIds({ acctId, renter });
-      for (const customerId of customerIds) {
-        try {
-          const list = await stripe.invoices.list(
+      const perCustomer = await Promise.all(customerIds.map(async (customerId) => {
+        const [list, adhoc] = await Promise.all([
+          stripe.invoices.list(
             { customer: customerId, limit: 100, expand: ['data.charge'] },
             acctOpts
-          );
-          invoices.push(...list.data.map((i) => ({
+          ).then((l) => l.data.map((i) => ({
             id: i.id,
             number: i.number,
             status: i.status,
@@ -687,53 +697,50 @@ exports.getRenter = async (req, res) => {
             refunded_cash: i.metadata?.tpia_refund_cash === '1',
             // Reembolso real en Stripe (devuelto a la tarjeta).
             refunded: i.charge?.refunded === true || (i.charge?.amount_refunded || 0) > 0,
-          })));
-        } catch (e) {
-          console.warn(`[chairRental] no se pudieron listar invoices de ${customerId}:`, e.message);
-        }
-        // Sumar los cobros manuales ad-hoc (PaymentIntents sin invoice) al historial.
-        try {
-          const adhoc = await connect.listAdhocCharges({
-            connectedAccountId: acctId,
-            customerId,
-          });
-          invoices.push(...adhoc);
-        } catch (e) {
-          console.warn(`[chairRental] no se pudieron listar ad-hoc de ${customerId}:`, e.message);
-        }
-      }
-      invoices.sort((a, b) => (b.created || 0) - (a.created || 0));
-    }
+          }))).catch((e) => {
+            console.warn(`[chairRental] no se pudieron listar invoices de ${customerId}:`, e.message);
+            return [];
+          }),
+          // Cobros manuales ad-hoc (PaymentIntents sin invoice).
+          connect.listAdhocCharges({ connectedAccountId: acctId, customerId }).catch((e) => {
+            console.warn(`[chairRental] no se pudieron listar ad-hoc de ${customerId}:`, e.message);
+            return [];
+          }),
+        ]);
+        return [...list, ...adhoc];
+      }));
+      return perCustomer.flat().sort((a, b) => (b.created || 0) - (a.created || 0));
+    })();
 
-    if (subscriptionId) {
-      try {
-        const sub = await stripe.subscriptions.retrieve(subscriptionId, acctOpts);
-        subscription = {
+    const subscriptionTask = subscriptionId
+      ? stripe.subscriptions.retrieve(subscriptionId, acctOpts).then((sub) => ({
           id: sub.id,
           status: sub.status,
+          paused: !!sub.pause_collection,
+          pause_behavior: sub.pause_collection?.behavior || null,
           current_period_end: sub.current_period_end,
           current_period_start: sub.current_period_start,
           cancel_at_period_end: sub.cancel_at_period_end,
-        };
-      } catch (e) {
-        console.warn('[chairRental] no se pudo leer subscription:', e.message);
-      }
-    }
+        })).catch((e) => {
+          console.warn('[chairRental] no se pudo leer subscription:', e.message);
+          return null;
+        })
+      : Promise.resolve(null);
 
     // Estado real de la tarjeta (activa / sin_fondos / rechazada) según el
     // último intento de cobro en Stripe.
-    let cardStatus = null;
-    if (defaultCard && renter.rental_stripe_customer_id) {
-      try {
-        cardStatus = await connect.getCardStatus({
+    const cardStatusTask = defaultCard && renter.rental_stripe_customer_id
+      ? connect.getCardStatus({
           connectedAccountId: acctId,
           customerId: renter.rental_stripe_customer_id,
           card: defaultCard,
-        });
-      } catch (e) {
-        console.warn('[chairRental] no se pudo leer estado de tarjeta:', e.message);
-      }
-    }
+        }).catch((e) => {
+          console.warn('[chairRental] no se pudo leer estado de tarjeta:', e.message);
+          return null;
+        })
+      : Promise.resolve(null);
+
+    [invoices, subscription, cardStatus] = await Promise.all([invoicesTask, subscriptionTask, cardStatusTask]);
 
     return res.json({
       renter: {
@@ -1224,6 +1231,104 @@ exports.unmarkDayPaid = async (req, res) => {
 };
 
 // ─────────────────────────────────────────────────────────────
+// POST /api/chair-rentals/renters/:id/set-status   (owner)
+// body: { status: 'active' | 'past_due' | 'blocked', note? }
+// Cambio MANUAL del estado del renter (override del dueño). Caso principal:
+// pasarlo a 'active' ("pagado") cuando cobró por otro medio (efectivo o un
+// cobro extra). Al activar, anula las invoices de arriendo abiertas (para que
+// Stripe deje de reintentarlas y el webhook no lo devuelva a mora) y registra
+// esos días como pagados manualmente en el calendario (auditoría).
+// ─────────────────────────────────────────────────────────────
+exports.setRenterStatus = async (req, res) => {
+  try {
+    const tenant = await tenantOrThrow(req.user.tenant_id);
+    const status = String(req.body?.status || '').trim();
+    if (!['active', 'past_due', 'blocked'].includes(status)) {
+      return res.status(400).json({ error: "status debe ser 'active', 'past_due' o 'blocked'" });
+    }
+    const note = typeof req.body?.note === 'string' ? req.body.note.trim().slice(0, 200) : '';
+
+    const renter = await prisma.users.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true, tenant_id: true, employment_type: true, email: true,
+        monthly_rent_cop: true, rental_status: true, rental_past_due_since: true,
+        rental_stripe_customer_id: true, rental_manual_paid_days: true,
+      },
+    });
+    if (!renter || renter.tenant_id !== tenant.id || renter.employment_type !== 'renter') {
+      return res.status(404).json({ error: 'Renter no encontrado' });
+    }
+
+    const data = { rental_status: status, updated_at: new Date() };
+    let voided = 0;
+    const manualDays = [];
+
+    if (status === 'active') {
+      data.rental_past_due_since = null;
+
+      // Anular las invoices del arriendo que sigan abiertas (últimos 60 días).
+      // Sin esto, el siguiente reintento fallido de Stripe dispara el webhook de
+      // mora y el estado vuelve a past_due solo. Cada día anulado queda como
+      // pagado manual en el calendario, con la nota del dueño.
+      if (renter.rental_stripe_customer_id) {
+        const acctId = acctIdFor(tenant);
+        const acctOpts = acctId ? { stripeAccount: acctId } : undefined;
+        const dailyCop = renter.monthly_rent_cop
+          ? Math.round(connect.calcDailyCentsFromMonthly(Number(renter.monthly_rent_cop)) / 100)
+          : 0;
+        try {
+          const nowSec = Math.floor(Date.now() / 1000);
+          const map = normalizeManualPaidDays(renter.rental_manual_paid_days);
+          const customerIds = await listRenterCustomerIds({ acctId, renter });
+          for (const customerId of customerIds) {
+            const invs = await connect.listInvoicesInRange({
+              connectedAccountId: acctId,
+              customerId,
+              gte: nowSec - 60 * 24 * 3600,
+              lte: nowSec + 24 * 3600,
+            });
+            for (const inv of invs) {
+              if (inv.status !== 'open') continue;
+              try {
+                await stripe.invoices.voidInvoice(inv.id, acctOpts);
+                voided++;
+                const day = bogotaDayKey(inv.created);
+                map.set(day, {
+                  date: day,
+                  amount_cop: Math.round((inv.amount_due || 0) / 100) || dailyCop,
+                  note: note || 'Pagado por otro medio (cambio de estado manual)',
+                  marked_by: req.user.id,
+                  at: new Date().toISOString(),
+                });
+                manualDays.push(day);
+              } catch (e) {
+                console.warn('[chairRental] set-status void error:', e.message);
+              }
+            }
+          }
+          if (manualDays.length) {
+            data.rental_manual_paid_days = Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
+          }
+        } catch (e) {
+          console.warn('[chairRental] set-status invoices lookup error:', e.message);
+        }
+      }
+    } else if (status === 'past_due') {
+      data.rental_past_due_since = renter.rental_past_due_since || new Date();
+    }
+    // 'blocked' conserva rental_past_due_since (la deuda sigue vigente).
+
+    await prisma.users.update({ where: { id: renter.id }, data });
+
+    console.log(`[chairRental] renter ${renter.id} → ${status} (cambio manual por ${req.user.id}${note ? `: ${note}` : ''}, ${voided} invoices anuladas)`);
+    return res.json({ ok: true, status, voided, manual_paid_days: manualDays.sort() });
+  } catch (e) {
+    return fail(res, e);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
 // POST /api/chair-rentals/renters/:id/toggle-block-day   (owner)
 // body: { date: "YYYY-MM-DD" }
 // Alterna un día como "bloqueado" (no se cobra). Si la suscripción diaria
@@ -1625,7 +1730,9 @@ exports.getPendingRefunds = async (req, res) => {
     const tenant = await tenantOrThrow(req.user.tenant_id);
     const acctId = acctIdFor(tenant);
     const nowSec = Math.floor(Date.now() / 1000);
-    const gte = nowSec - 60 * 24 * 3600;
+    // Ventana configurable (?days=, 7–365). Por defecto 60 días.
+    const days = Math.min(365, Math.max(7, Number(req.query.days) || 60));
+    const gte = nowSec - days * 24 * 3600;
     const lte = nowSec + 24 * 3600;
 
     const renters = await prisma.users.findMany({
@@ -1662,8 +1769,27 @@ exports.getPendingRefunds = async (req, res) => {
               gte,
               lte,
             }));
+            // Cobros manuales ("Cobro extra"): no generan invoice, así que antes nunca
+            // se detectaban como doble cobro aunque el día ya estuviera pagado.
+            try {
+              const adhoc = await connect.listAdhocCharges({ connectedAccountId: acctId, customerId, limit: 100 });
+              invoices.push(...adhoc.filter((p) => p.created >= gte));
+            } catch (e) {
+              console.warn(`[chairRental] pending-refunds: ad-hoc de ${customerId} omitidos:`, e.message);
+            }
           }
           const paid = invoices.filter((i) => i.status === 'paid' && (i.amount_paid || 0) > 0);
+          const isRefunded = (i) =>
+            i.refunded === true || i.charge?.refunded === true || (i.charge?.amount_refunded || 0) > 0;
+          const itemOf = (day, reason, e) => ({
+            day,
+            reason,
+            amount_cop: Math.round(e.amount_paid / 100),
+            invoice_id: e.id,
+            source: e.adhoc ? 'manual' : 'subscription',
+            description: e.description || null,
+            paid_at: e.status_transitions?.paid_at || e.created,
+          });
 
           const byDay = {};
           for (const inv of paid) {
@@ -1674,21 +1800,18 @@ exports.getPendingRefunds = async (req, res) => {
           const blocked = normalizeBlockedDays(r.rental_blocked_days);
           const items = [];
           for (const [k, invs] of Object.entries(byDay)) {
-            const notRefunded = invs.filter(
-              (i) => !(i.charge?.refunded === true || (i.charge?.amount_refunded || 0) > 0)
-            );
+            const notRefunded = invs.filter((i) => !isRefunded(i));
             if (notRefunded.length === 0) continue;
             if (blocked.includes(k) && !r.rental_readjust_blocked) {
               // Día bloqueado con política "saltar": TODO cobro de ese día se devuelve.
-              for (const e of notRefunded) {
-                items.push({ day: k, reason: 'blocked_day', amount_cop: Math.round(e.amount_paid / 100), invoice_id: e.id });
-              }
+              for (const e of notRefunded) items.push(itemOf(k, 'blocked_day', e));
             } else if (notRefunded.length > 1) {
-              // Día normal con varios cobros: se queda el primero, sobran n-1.
-              const extras = [...notRefunded].sort((a, b) => a.created - b.created).slice(1);
-              for (const e of extras) {
-                items.push({ day: k, reason: 'double_charge', amount_cop: Math.round(e.amount_paid / 100), invoice_id: e.id });
-              }
+              // Día normal con varios cobros: se queda el de la suscripción (o el primero)
+              // y sobran n-1; los cobros manuales son los primeros en sobrar.
+              const extras = [...notRefunded]
+                .sort((a, b) => (!!a.adhoc - !!b.adhoc) || (a.created - b.created))
+                .slice(1);
+              for (const e of extras) items.push(itemOf(k, 'double_charge', e));
             }
           }
 
@@ -1701,6 +1824,7 @@ exports.getPendingRefunds = async (req, res) => {
               first_name: r.first_name,
               last_name: r.last_name,
               phone: r.phone,
+              email: r.email,
               total_cop: total,
               items,
             });
@@ -1763,11 +1887,26 @@ exports.resumeRenter = async (req, res) => {
     if (!renter.rental_stripe_subscription_id) {
       return res.status(400).json({ error: 'El renter no tiene una suscripción para reanudar.' });
     }
+    // Una suscripción cancelada / expirada no se puede reanudar en Stripe (solo
+    // admite cambios de metadata). Hay que crear otra guardando la tarjeta de nuevo.
+    const acctOpts = acctIdFor(tenant) ? { stripeAccount: acctIdFor(tenant) } : undefined;
+    const current = await stripe.subscriptions.retrieve(renter.rental_stripe_subscription_id, acctOpts);
+    if (['canceled', 'incomplete_expired'].includes(current.status)) {
+      return res.status(409).json({
+        error: 'La suscripción está cancelada o expiró en Stripe y no se puede reanudar. Vincula la tarjeta del estilista otra vez para crear una nueva.',
+      });
+    }
     const sub = await connect.resumeSubscription({
       connectedAccountId: acctIdFor(tenant),
       subscriptionId: renter.rental_stripe_subscription_id,
     });
-    return res.json({ ok: true, paused: !!sub.pause_collection, status: sub.status });
+    // Al reactivar el cobro, el estado del renter pasa a "al día" (sigue siendo
+    // editable a mano desde el badge del detalle).
+    await prisma.users.update({
+      where: { id: renter.id },
+      data: { rental_status: 'active', rental_past_due_since: null, updated_at: new Date() },
+    });
+    return res.json({ ok: true, paused: !!sub.pause_collection, status: sub.status, rental_status: 'active' });
   } catch (e) {
     return fail(res, e);
   }
@@ -2318,6 +2457,8 @@ exports.getMyRental = async (req, res) => {
         const sub = await stripe.subscriptions.retrieve(subscriptionId, acctOpts);
         subscription = {
           status: sub.status,
+          paused: !!sub.pause_collection,
+          pause_behavior: sub.pause_collection?.behavior || null,
           current_period_end: sub.current_period_end,
           current_period_start: sub.current_period_start,
           cancel_at_period_end: sub.cancel_at_period_end,

@@ -37,6 +37,7 @@ type Renter = {
   rental_status: "active" | "past_due" | "blocked" | null;
   rental_past_due_since: string | null;
   rental_stripe_subscription_id: string | null;
+  has_customer?: boolean;
 };
 
 type EligibleStaff = {
@@ -76,6 +77,8 @@ type RenterDetail = {
   subscription: {
     id: string;
     status: string;
+    paused?: boolean;
+    pause_behavior?: string | null;
     current_period_end: number;
     current_period_start: number;
     cancel_at_period_end: boolean;
@@ -102,6 +105,9 @@ type PendingRefundItem = {
   reason: "double_charge" | "blocked_day" | string;
   amount_cop: number;
   invoice_id: string;
+  source?: "manual" | "subscription";
+  description?: string | null;
+  paid_at?: number;
 };
 
 type PendingRefundsResp = {
@@ -110,6 +116,7 @@ type PendingRefundsResp = {
     first_name: string | null;
     last_name: string | null;
     phone: string | null;
+    email?: string | null;
     total_cop: number;
     items: PendingRefundItem[];
   }>;
@@ -242,7 +249,7 @@ const dayPalette = (status?: string): { bg: string; color: string; border: strin
     case "paid_manual": return { bg: T.greenBg2, color: T.greenDark, border: T.greenBorder };
     case "failed": return { bg: T.redBg, color: T.red, border: T.redBorder };
     case "open": return { bg: T.amberBg, color: T.amber, border: T.amber };
-    case "void": return { bg: T.surface3, color: T.muted, border: T.border };
+    case "void": return { bg: T.surface3, color: T.red, border: T.redBorder };
     case "blocked": return { bg: T.purpleBg, color: T.purple, border: T.purpleBorder };
     case "refunded": return { bg: T.purpleBg2, color: T.purple2, border: T.purpleBorder };
     default: return { bg: T.surface, color: T.muted, border: T.border };
@@ -388,6 +395,7 @@ const Pager: React.FC<{ page: number; totalPages: number; from: number; to: numb
   </div>
 );
 
+
 // ════════════════════════════════════════════════════════════════════════════
 const Coworking: React.FC<{ tenantId?: string | null }> = () => {
   const [status, setStatus] = useState<StatusResp | null>(null);
@@ -401,7 +409,27 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
 
   // Paginación lista renters (front)
   const [renterPage, setRenterPage] = useState(1);
+  const [renterSearch, setRenterSearch] = useState("");
   const RENTERS_PER_PAGE = 10;
+
+  // Modal Anomalías: dobles cobros detectados EN VIVO (últimos 12 meses). Reutiliza
+  // /pending-refunds, que ya cuenta también los cobros manuales ("Cobro extra").
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditData, setAuditData] = useState<PendingRefundsResp | null>(null);
+  const loadAudit = async () => {
+    setAuditLoading(true);
+    try {
+      const { data } = await api.get<PendingRefundsResp>("/chair-rentals/pending-refunds", { params: { days: 365 } });
+      setAuditData(data);
+    } catch (e: any) {
+      Swal.fire("Error", e?.response?.data?.error || "No se pudieron cargar las anomalías", "error");
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+  const openAudit = () => { setAuditOpen(true); loadAudit(); };
+  const closeAudit = () => setAuditOpen(false);
 
   // Modal Agregar
   const [addOpen, setAddOpen] = useState(false);
@@ -426,7 +454,6 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
   const [chargeBusy, setChargeBusy] = useState(false);
 
   // Modal Calendario
-  const [calOpen, setCalOpen] = useState(false);
   const [calLoading, setCalLoading] = useState(false);
   const [calData, setCalData] = useState<CalendarResp | null>(null);
   const [calRenter, setCalRenter] = useState<Renter | null>(null);
@@ -508,13 +535,23 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
   };
 
   // Paginación renters
-  const rentersTotalPages = Math.max(1, Math.ceil(renters.length / RENTERS_PER_PAGE));
+  const filteredRenters = useMemo(() => {
+    const q = renterSearch.trim().toLowerCase();
+    if (!q) return renters;
+    const qDigits = q.replace(/\D/g, "");
+    return renters.filter((r) =>
+      nameOfRenter(r).toLowerCase().includes(q) ||
+      (r.email || "").toLowerCase().includes(q) ||
+      (qDigits !== "" && (r.phone || "").replace(/\D/g, "").includes(qDigits))
+    );
+  }, [renters, renterSearch]);
+  const rentersTotalPages = Math.max(1, Math.ceil(filteredRenters.length / RENTERS_PER_PAGE));
   const renterPageSafe = Math.min(renterPage, rentersTotalPages);
   const rentersPage = useMemo(
-    () => renters.slice((renterPageSafe - 1) * RENTERS_PER_PAGE, renterPageSafe * RENTERS_PER_PAGE),
-    [renters, renterPageSafe]
+    () => filteredRenters.slice((renterPageSafe - 1) * RENTERS_PER_PAGE, renterPageSafe * RENTERS_PER_PAGE),
+    [filteredRenters, renterPageSafe]
   );
-  useEffect(() => { setRenterPage(1); }, [renters.length]);
+  useEffect(() => { setRenterPage(1); }, [renters.length, renterSearch]);
 
   const onConnect = async () => {
     setConnecting(true);
@@ -733,6 +770,13 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
     setCardMode("idle");
     setSetupIntent(null);
     setInvoicePage(0);
+    // El calendario de cobros vive dentro del detalle: se carga junto con él.
+    const ym = thisMonthYm();
+    setCalRenter(r);
+    setCalMonth(ym);
+    setCalData(null);
+    setCalMode("charge");
+    loadCalendar(r.id, ym);
     try {
       const { data } = await api.get<RenterDetail>(`/chair-rentals/renters/${r.id}`);
       setDetail(data);
@@ -750,7 +794,7 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
       const { data } = await api.get<RenterDetail>(`/chair-rentals/renters/${detail.renter.id}`);
       setDetail(data);
     } catch { /* noop */ }
-    await loadAll();
+    await Promise.all([loadAll(), loadCalendar(detail.renter.id, calMonth)]);
   };
 
   // Cambiar tarifa mensual (PUT /renters/:id)
@@ -781,7 +825,7 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
   // Pausar / reanudar desde el detalle (POST pause|resume)
   const onTogglePauseDetail = async () => {
     if (!detail?.subscription) return;
-    const paused = detail.subscription.status === "paused";
+    const paused = !!detail.subscription.paused;
     const conf = await Swal.fire({
       icon: paused ? "question" : "warning",
       title: paused ? "¿Reanudar cobro automático?" : "¿Pausar cobro automático?",
@@ -791,6 +835,87 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
     if (!conf.isConfirmed) return;
     try {
       await api.post(`/chair-rentals/renters/${detail.renter.id}/${paused ? "resume" : "pause"}`, {});
+      await refreshDetail();
+    } catch (e: any) {
+      Swal.fire("Error", e?.response?.data?.error || "No se pudo cambiar el estado", "error");
+    }
+  };
+
+  // Cambio manual del estado del renter (clic en el badge del detalle). Al marcar
+  // "Al día" el backend anula los cobros abiertos en Stripe (para que la mora no
+  // vuelva sola) y registra esos días como pagado manual en el calendario.
+  const onChangeStatus = async () => {
+    if (!detail) return;
+    const cur = detail.renter.rental_status || "";
+    const opts: { v: "active" | "past_due" | "blocked"; l: string; d: string; icon: string; c: string; bg: string }[] = [
+      { v: "active", l: "Al día", d: "Pagó o se cobró por otro medio", icon: "ri-checkbox-circle-fill", c: T.green, bg: T.greenBg },
+      { v: "past_due", l: "En mora", d: "Tiene un pago pendiente", icon: "ri-error-warning-fill", c: T.amber, bg: T.amberBg },
+      { v: "blocked", l: "Bloqueado", d: "Sin acceso ni citas", icon: "ri-forbid-fill", c: T.red, bg: T.redBg },
+    ];
+    let picked: string = cur || "active";
+    const paint = () => {
+      document.querySelectorAll<HTMLElement>("[data-st]").forEach((el) => {
+        const o = opts.find((x) => x.v === el.dataset.st)!;
+        const on = el.dataset.st === picked;
+        el.style.borderColor = on ? o.c : T.border;
+        el.style.background = on ? o.bg : "transparent";
+      });
+    };
+    const { value: status } = await Swal.fire({
+      title: "Cambiar estado",
+      html: `<div style="display:flex;flex-direction:column;gap:8px;text-align:left;margin-top:6px">${opts.map((o) =>
+        `<button type="button" data-st="${o.v}" style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;border:1.5px solid ${T.border};background:transparent;cursor:pointer;font-family:inherit;text-align:left">
+          <i class="${o.icon}" style="font-size:22px;color:${o.c}"></i>
+          <span style="display:flex;flex-direction:column"><b style="font-size:14px;color:${o.c}">${o.l}</b><span style="font-size:12px;color:${T.muted}">${o.d}</span></span>
+        </button>`).join("")}</div>`,
+      didOpen: () => {
+        paint();
+        document.querySelectorAll<HTMLElement>("[data-st]").forEach((el) => {
+          el.onclick = () => { picked = el.dataset.st!; paint(); };
+        });
+      },
+      preConfirm: () => picked,
+      showCancelButton: true,
+      confirmButtonText: "Continuar",
+      cancelButtonText: "Cancelar",
+    });
+    if (!status || status === cur) return;
+
+    let note = "";
+    if (status === "active") {
+      const r = await Swal.fire({
+        title: "Marcar al día (pagado)",
+        text: "Se anularán los cobros pendientes en Stripe y los días en mora quedarán registrados como pagados manualmente.",
+        input: "text",
+        inputLabel: "Nota (opcional)",
+        inputPlaceholder: "Ej: cobro extra, efectivo…",
+        showCancelButton: true,
+        confirmButtonText: "Marcar pagado",
+      });
+      if (!r.isConfirmed) return;
+      note = (r.value || "").trim();
+    } else {
+      const conf = await Swal.fire({
+        icon: "warning",
+        title: status === "blocked" ? "¿Bloquear al estilista?" : "¿Marcar en mora?",
+        text: status === "blocked"
+          ? "No podrá iniciar sesión ni recibir citas hasta que lo actives de nuevo."
+          : "Quedará marcado con deuda pendiente desde hoy.",
+        showCancelButton: true,
+        confirmButtonText: "Sí, cambiar",
+      });
+      if (!conf.isConfirmed) return;
+    }
+
+    try {
+      const { data } = await api.post(`/chair-rentals/renters/${detail.renter.id}/set-status`, { status, note });
+      Swal.fire({
+        icon: "success",
+        text: status === "active"
+          ? `Estilista al día${data?.voided ? ` · ${data.voided} cobro(s) pendiente(s) anulado(s)` : ""}`
+          : "Estado actualizado",
+        timer: 1800, showConfirmButton: false,
+      });
       await refreshDetail();
     } catch (e: any) {
       Swal.fire("Error", e?.response?.data?.error || "No se pudo cambiar el estado", "error");
@@ -1030,16 +1155,6 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
     }
   }, []);
 
-  const openCalendar = async (r: Renter) => {
-    const ym = thisMonthYm();
-    setCalRenter(r);
-    setCalMonth(ym);
-    setCalData(null);
-    setCalMode("charge");
-    setCalOpen(true);
-    await loadCalendar(r.id, ym);
-  };
-
   const gotoMonth = async (delta: number) => {
     if (!calRenter) return;
     const ym = shiftMonth(calMonth, delta);
@@ -1061,7 +1176,7 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
     try {
       await api.post(`/chair-rentals/renters/${calRenter.id}/${paused ? "resume" : "pause"}`, {});
       await loadCalendar(calRenter.id, calMonth);
-      await loadAll();
+      await refreshDetail();
     } catch (e: any) {
       Swal.fire("Error", e?.response?.data?.error || "No se pudo cambiar el estado", "error");
     } finally {
@@ -1294,6 +1409,9 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
             title={<><i className="ri-user-star-line" style={{ marginRight: 6 }} />Estilistas en coworking</>}
             right={
               <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={openAudit} style={{ ...btnGhost, color: T.amber, borderColor: T.amber }} title="Dobles cobros detectados en la revisión de Stripe">
+                  <i className="ri-error-warning-line" style={{ marginRight: 5 }} />Anomalías
+                </button>
                 <button onClick={openRefundsModal} style={btnGhost} title="Personas con cobros que toca devolver">
                   <i className="ri-arrow-go-back-line" style={{ marginRight: 5 }} />Devoluciones
                 </button>
@@ -1307,9 +1425,16 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
               <Empty icon="🪑" title="Aún no hay estilistas en coworking." hint={!status?.chair_rental_enabled ? "Activa el switch para empezar." : "Usa \"Agregar estilista\"."} />
             ) : (
               <div>
+                <div style={{ position: "relative", padding: "12px 20px" }}>
+                  <i className="ri-search-line" style={{ position: "absolute", left: 31, top: "50%", transform: "translateY(-50%)", color: T.muted }} />
+                  <input value={renterSearch} onChange={(e) => setRenterSearch(e.target.value)} placeholder="Buscar estilista por nombre, email o teléfono…" style={{ ...inp, paddingLeft: 32 }} />
+                </div>
                 <div style={{ display: "grid", gridTemplateColumns: "2fr 1.5fr 1fr 1fr 1.4fr", padding: "11px 20px", fontSize: 11, fontWeight: 700, letterSpacing: ".5px", color: T.dim, background: T.surface2 }}>
                   <span>ESTILISTA</span><span>CONTACTO</span><span style={{ textAlign: "right" }}>MENSUAL</span><span>ESTADO</span><span style={{ textAlign: "right" }}>ACCIONES</span>
                 </div>
+                {filteredRenters.length === 0 && (
+                  <div style={{ padding: "18px 20px", fontSize: 13, color: T.muted, borderTop: `1px solid ${T.border3}` }}>Sin resultados para “{renterSearch}”.</div>
+                )}
                 {rentersPage.map((r) => {
                   const name = nameOfRenter(r);
                   const tone = renterTone(r.rental_status);
@@ -1321,7 +1446,7 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
                         <div style={{ minWidth: 0 }}>
                           <div style={{ fontWeight: 700, fontSize: 13.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}</div>
                           {!r.rental_stripe_subscription_id && (
-                            <div style={{ fontSize: 11, color: T.dim }}><i className="ri-time-line" style={{ marginRight: 3 }} />Sin tarjeta guardada</div>
+                            <div style={{ fontSize: 11, color: T.dim }}><i className="ri-time-line" style={{ marginRight: 3 }} />{r.has_customer ? "Sin suscripción (cobro manual)" : "Sin tarjeta guardada"}</div>
                           )}
                         </div>
                       </div>
@@ -1338,7 +1463,6 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
                       </div>
                       <div style={{ display: "flex", justifyContent: "flex-end", gap: 5 }}>
                         <IconBtn icon="ri-eye-line" title="Ver detalle" onClick={() => openDetail(r)} />
-                        <IconBtn icon="ri-calendar-2-line" title="Calendario de cobros" onClick={() => openCalendar(r)} />
                         <IconBtn icon="ri-link" title="Enlace de pago" onClick={() => onResendLink(r)} />
                         <IconBtn icon="ri-mail-send-line" title="Enviar invitación de acceso" onClick={() => onInvite(r)} />
                         <IconBtn icon="ri-delete-bin-line" title="Quitar" danger onClick={() => onRemove(r)} />
@@ -1351,8 +1475,8 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
                     <Pager
                       page={renterPageSafe} totalPages={rentersTotalPages}
                       from={(renterPageSafe - 1) * RENTERS_PER_PAGE + 1}
-                      to={Math.min(renterPageSafe * RENTERS_PER_PAGE, renters.length)}
-                      total={renters.length}
+                      to={Math.min(renterPageSafe * RENTERS_PER_PAGE, filteredRenters.length)}
+                      total={filteredRenters.length}
                       onPrev={() => setRenterPage((p) => Math.max(1, p - 1))}
                       onNext={() => setRenterPage((p) => Math.min(rentersTotalPages, p + 1))}
                     />
@@ -1479,7 +1603,10 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
                 <div style={{ fontWeight: 800, fontSize: 17 }}>{nameOfRenter(detail.renter)}</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
                   {(() => { const t = renterTone(detail.renter.rental_status); return (
-                    <span style={{ background: t.bg, color: t.c, fontWeight: 700, fontSize: 11, padding: "4px 10px", borderRadius: 7, display: "inline-flex", alignItems: "center", gap: 4 }}><i className={t.icon} />{t.l}</span>
+                    <button onClick={onChangeStatus} title="Cambiar estado manualmente (ej: marcar pagado tras un cobro extra)"
+                      style={{ background: t.bg, color: t.c, fontWeight: 700, fontSize: 11, padding: "4px 10px", borderRadius: 7, display: "inline-flex", alignItems: "center", gap: 4, border: 0, cursor: "pointer", fontFamily: FONT }}>
+                      <i className={t.icon} />{t.l}<i className="ri-arrow-down-s-line" style={{ fontSize: 12, opacity: 0.7 }} />
+                    </button>
                   ); })()}
                   <span style={{ fontSize: 12, color: T.muted }}><i className="ri-calendar-line" style={{ marginRight: 4 }} />Renter desde {new Date(detail.renter.created_at).toLocaleDateString("es-CO", { month: "short", year: "numeric" })}</span>
                 </div>
@@ -1543,7 +1670,7 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
                     <span><i className="ri-calendar-event-line" style={{ marginRight: 4 }} />Próximo cobro: <strong>{fmtUnixDate(detail.subscription.current_period_end)}</strong></span>
                     {detail.subscription.cancel_at_period_end && <span style={{ background: T.redBg, color: T.red, fontWeight: 700, fontSize: 10.5, padding: "2px 8px", borderRadius: 999 }}>Cancela al cierre</span>}
                     <button onClick={onTogglePauseDetail} style={{ background: "transparent", border: 0, color: T.purple, cursor: "pointer", fontSize: 12, fontWeight: 700, padding: 0 }}>
-                      {detail.subscription.status === "paused" ? <><i className="ri-play-line" style={{ marginRight: 3 }} />Reanudar</> : <><i className="ri-pause-line" style={{ marginRight: 3 }} />Pausar</>}
+                      {detail.subscription.paused ? <><i className="ri-play-line" style={{ marginRight: 3 }} />Reanudar</> : <><i className="ri-pause-line" style={{ marginRight: 3 }} />Pausar</>}
                     </button>
                   </div>
                 ) : (
@@ -1595,6 +1722,157 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
                 )}
               </div>
             )}
+            {/* Calendario de cobros */}
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".5px", color: T.dim, margin: "22px 0 10px", paddingTop: 16, borderTop: `1px solid ${T.border2}` }}><i className="ri-calendar-2-line" style={{ marginRight: 5 }} />CALENDARIO DE COBROS</div>
+
+            {/* Estado + pausar/reanudar */}
+            {calData?.subscription ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, borderRadius: R.md, padding: 14, marginBottom: 14, background: calData.subscription.paused ? T.amberBg : T.greenBg }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <i className={calData.subscription.paused ? "ri-pause-circle-fill" : "ri-play-circle-fill"} style={{ fontSize: 22, color: calData.subscription.paused ? T.amber : T.green }} />
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 13.5 }}>{calData.subscription.paused ? "Cobro automático en pausa" : "Cobro automático activo"}</div>
+                    <div style={{ fontSize: 11.5, color: T.muted }}>
+                      {calData.subscription.paused
+                        ? "No se cobra la tarifa diaria. Cobra días sueltos abajo."
+                        : <>Stripe cobra la tarifa diaria cada día.{calData.subscription.current_period_end ? ` Próximo: ${fmtUnixDate(calData.subscription.current_period_end)}` : ""}</>}
+                    </div>
+                  </div>
+                </div>
+                <button onClick={onTogglePause} disabled={calBusy} style={{ ...(calData.subscription.paused ? btnGreen : { background: T.amber, color: "#fff", border: 0, borderRadius: R.md, padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer" }), opacity: calBusy ? 0.6 : 1 }}>
+                  {calBusy ? "…" : calData.subscription.paused ? <><i className="ri-play-line" style={{ marginRight: 5 }} />Reanudar cobro</> : <><i className="ri-pause-line" style={{ marginRight: 5 }} />Pausar cobro</>}
+                </button>
+              </div>
+            ) : !calLoading && calData ? (
+              <div style={{ background: T.surface2, borderRadius: R.md, padding: "12px 14px", marginBottom: 14, fontSize: 13, color: T.muted }}>
+                <i className="ri-information-line" style={{ marginRight: 6 }} />Este estilista aún no tiene una suscripción activa. Guarda su tarjeta para empezar a cobrar.
+              </div>
+            ) : null}
+
+            {/* Selector de modo */}
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
+              <div style={{ display: "flex", gap: 4, background: T.surface2, borderRadius: 999, padding: 4 }}>
+                {([
+                  { m: "charge", icon: "ri-money-dollar-circle-line", l: "Cobrar día", bg: T.green },
+                  { m: "paid", icon: "ri-hand-coin-line", l: "Marcar pagado", bg: T.green },
+                  { m: "block", icon: "ri-lock-line", l: "Bloquear día", bg: T.purple },
+                ] as const).map((b) => (
+                  <button key={b.m} onClick={() => setCalMode(b.m)} disabled={calBusy} style={{ border: 0, borderRadius: 999, padding: "7px 14px", fontWeight: 700, fontSize: 12.5, fontFamily: FONT, cursor: "pointer", background: calMode === b.m ? b.bg : "transparent", color: calMode === b.m ? "#fff" : T.muted }}>
+                    <i className={b.icon} style={{ marginRight: 5 }} />{b.l}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Política de bloqueo */}
+            {calMode === "block" && calData && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, background: T.purpleBg, border: `1px solid ${T.purpleBorder}`, borderRadius: R.md, padding: "10px 14px", marginBottom: 14 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 12.5, color: T.purple }}><i className="ri-scales-3-line" style={{ marginRight: 5 }} />{calData.readjust_blocked ? "Reajustar: paga el mes completo" : "Saltar: el día bloqueado se descuenta"}</div>
+                  <div style={{ fontSize: 11.5, color: T.muted }}>{calData.readjust_blocked ? "Los días bloqueados NO se reembolsan — el cobro diario sigue corriendo." : "Los días bloqueados se reembolsan automáticamente — el renter paga menos ese mes."}</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 12, color: T.muted }}>Reajustar</span>
+                  <Toggle on={!!calData.readjust_blocked} onClick={calBusy ? undefined : onToggleReadjust} />
+                </div>
+              </div>
+            )}
+
+            {/* Navegación de mes */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <IconBtn icon="ri-arrow-left-s-line" onClick={() => gotoMonth(-1)} disabled={calLoading || calBusy} title="Mes anterior" />
+              <span style={{ fontWeight: 800, fontSize: 15 }}>{monthLabelEs(calMonth)}</span>
+              <IconBtn icon="ri-arrow-right-s-line" onClick={() => gotoMonth(1)} disabled={calLoading || calBusy || calMonth >= thisMonthYm()} title={calMonth >= thisMonthYm() ? "No puedes avanzar a meses futuros" : "Mes siguiente"} />
+            </div>
+
+            {calLoading ? (
+              <Loading label="Cargando calendario…" />
+            ) : (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6, marginBottom: 4 }}>
+                  {WEEKDAYS_ES.map((w) => <div key={w} style={{ textAlign: "center", color: T.muted, fontWeight: 600, fontSize: 11 }}>{w}</div>)}
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6 }}>
+                  {buildMonthGrid(calMonth).map((cell, idx) => {
+                    if (!cell) return <div key={`e${idx}`} />;
+                    const day = Number(cell.slice(-2));
+                    const info = calData?.days[cell];
+                    const pal = dayPalette(info?.status);
+                    const isToday = cell === todayKey();
+                    const isFuture = cell > todayKey();
+                    const isPaid = info?.status === "paid";
+                    const isManual = info?.status === "paid_manual";
+                    const isBlocked = info?.status === "blocked";
+                    const paidMode = calMode === "paid";
+                    const blockMode = calMode === "block";
+                    const clickable = calBusy ? false
+                      : paidMode ? (!isPaid && !isBlocked)
+                      : blockMode ? (!isPaid && !isManual)
+                      : (!isPaid && !isManual && !isBlocked && !!calData?.has_customer);
+                    return (
+                      <div
+                        key={cell}
+                        onClick={clickable ? () => (paidMode ? onMarkDayPaid(cell) : blockMode ? onToggleBlockDay(cell) : onChargeDay(cell)) : undefined}
+                        title={cell}
+                        style={{
+                          position: "relative", aspectRatio: "1 / 1", borderRadius: 10,
+                          background: isFuture && !info ? T.surface2 : pal.bg,
+                          border: isToday ? `2px solid ${T.purple2}` : `1.5px ${isFuture && !info ? "dashed" : "solid"} ${pal.border}`,
+                          color: pal.color, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                          cursor: clickable ? "pointer" : "default", opacity: isFuture && !info ? 0.8 : 1,
+                        }}
+                      >
+                        <span style={{ fontWeight: 700, fontSize: 14, lineHeight: 1 }}>{day}</span>
+                        {info?.status === "paid" && <i className="ri-check-line" style={{ fontSize: 13 }} />}
+                        {info?.status === "paid_manual" && <i className="ri-hand-coin-line" style={{ fontSize: 12 }} />}
+                        {info?.status === "refunded" && <i className="ri-arrow-go-back-line" style={{ fontSize: 12 }} />}
+                        {info?.status === "failed" && <i className="ri-close-line" style={{ fontSize: 13 }} />}
+                    {info?.status === "void" && <i className="ri-forbid-2-line" style={{ fontSize: 12 }} title="Anulado: no se cobró" />}
+                        {info?.status === "open" && <i className="ri-time-line" style={{ fontSize: 12 }} />}
+                        {isBlocked && <i className={info?.refunded ? "ri-arrow-go-back-line" : "ri-lock-line"} style={{ fontSize: 12 }} />}
+                        {!info && clickable && <i className={blockMode ? "ri-lock-line" : "ri-add-line"} style={{ fontSize: 12, opacity: 0.55 }} />}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Resumen del mes */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginTop: 14 }}>
+                  <div style={{ background: T.greenBg, borderRadius: R.md, padding: 10, textAlign: "center" }}><div style={{ fontWeight: 800, color: T.green }}>{calSummary.paidDays}</div><div style={{ fontSize: 11, color: T.muted }}>días pagados</div></div>
+                  <div style={{ background: T.surface2, borderRadius: R.md, padding: 10, textAlign: "center" }}><Mono style={{ fontWeight: 800 }}>{fmtCOP(calSummary.paidTotal)}</Mono><div style={{ fontSize: 11, color: T.muted }}>cobrado el mes</div></div>
+                  <div style={{ background: calSummary.failedDays ? T.redBg : T.surface2, borderRadius: R.md, padding: 10, textAlign: "center" }}><div style={{ fontWeight: 800, color: calSummary.failedDays ? T.red : T.text }}>{calSummary.failedDays}</div><div style={{ fontSize: 11, color: T.muted }}>días fallidos</div></div>
+                </div>
+
+                {/* Leyenda */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 14, justifyContent: "center" }}>
+                  {[
+                    { c: dayPalette("paid"), t: "Pagado" },
+                    { c: dayPalette("paid_manual"), t: "Pagado manual" },
+                    { c: dayPalette("failed"), t: "Falló" },
+                    { c: dayPalette("open"), t: "Pendiente" },
+                { c: dayPalette("void"), t: "Anulado (no cobrado)" },
+                    { c: dayPalette("blocked"), t: "Bloqueado" },
+                    { c: dayPalette("refunded"), t: "Reembolsado" },
+                    { c: dayPalette(undefined), t: "Sin cobro" },
+                  ].map((l) => (
+                    <div key={l.t} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <span style={{ width: 14, height: 14, borderRadius: 4, background: l.c.bg, border: `1.5px solid ${l.c.border}`, display: "inline-block" }} />
+                      <span style={{ fontSize: 11.5, color: T.muted }}>{l.t}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontSize: 11.5, color: T.muted, textAlign: "center", marginTop: 10 }}>
+                  <i className="ri-information-line" style={{ marginRight: 4 }} />
+                  {calMode === "block"
+                    ? calData?.readjust_blocked
+                      ? 'Toca un día para bloquearlo. Con la política "reajustar" el día NO se reembolsa: el renter paga el mes completo.'
+                      : "Toca un día para bloquearlo: no se cobrará. Si la suscripción alcanza a cobrarlo, se reembolsa automáticamente."
+                    : calMode === "paid"
+                      ? "Toca un día (pendiente o fallido) para marcarlo como pagado SIN cobrar la tarjeta — para cuando cobraste en efectivo o con un cobro extra."
+                      : "Toca un día sin cobro para cobrar la tarifa diaria manualmente."}
+                </div>
+              </>
+            )}
           </>
         )}
       </Modal>
@@ -1636,6 +1914,82 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
             </div>
           </>
         )}
+      </Modal>
+
+      {/* ═══════════ Modal Anomalías — dobles cobros detectados (en vivo) ═══════════ */}
+      <Modal
+        open={auditOpen}
+        onClose={closeAudit}
+        width={760}
+        title="Anomalías — dobles cobros"
+        icon="ri-error-warning-line"
+        footer={
+          <>
+            <button onClick={loadAudit} disabled={auditLoading} style={{ ...btnGhost, opacity: auditLoading ? 0.6 : 1 }}>
+              <i className="ri-refresh-line" style={{ marginRight: 5 }} />Actualizar
+            </button>
+            <button onClick={closeAudit} style={btnDark}>Cerrar</button>
+          </>
+        }
+      >
+        {auditLoading && !auditData ? (
+          <Loading label="Revisando cobros en Stripe…" />
+        ) : !auditData || auditData.renters.length === 0 ? (
+          <Empty icon="✅" title="Sin dobles cobros pendientes." hint="Se revisan los últimos 12 meses, incluyendo cobros manuales." />
+        ) : (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", background: T.amberBg, border: `1px solid ${T.amber}`, borderRadius: R.md, padding: "12px 14px", marginBottom: 16 }}>
+              <i className="ri-error-warning-fill" style={{ fontSize: 22, color: T.amber }} />
+              <div style={{ flex: 1, minWidth: 200, fontSize: 13, lineHeight: 1.5 }}>
+                <strong>{auditData.renters.length}</strong> estilista{auditData.renters.length === 1 ? "" : "s"} con cobros de más por{" "}
+                <strong>{fmtCOP(auditData.total_cop)}</strong> sin devolver.
+                <div style={{ color: T.muted, fontSize: 12 }}>
+                  Incluye cobros manuales ("Cobro extra") hechos un día que la suscripción ya había cobrado. Esta lista se recalcula al abrirla;
+                  desde aquí no se devuelve nada — usa <strong>Devoluciones</strong>.
+                </div>
+              </div>
+              {auditLoading && <span style={{ fontSize: 12, color: T.muted }}>Actualizando…</span>}
+            </div>
+
+            {auditData.renters.map((r) => {
+              const nm = nameOfRenter(r);
+              return (
+                <div key={r.id} style={{ border: `1px solid ${T.border}`, borderRadius: R.lg, padding: 14, marginBottom: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 6 }}>
+                    <Avatar ini={initials(nm)} color={colorFor(r.id)} size={40} radius={12} />
+                    <div style={{ flex: 1, minWidth: 140 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13.5 }}>{nm}</div>
+                      <div style={{ fontSize: 11.5, color: T.muted }}>{r.email || r.phone || ""}</div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontWeight: 800, color: T.red }}>{fmtCOP(r.total_cop)}</div>
+                      <div style={{ fontSize: 11, color: T.muted }}>{r.items.length} cobro{r.items.length === 1 ? "" : "s"} de más</div>
+                    </div>
+                  </div>
+
+                  {r.items.map((it) => (
+                    <div key={it.invoice_id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderTop: `1px solid ${T.border3}`, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 12.5, width: 92 }}>{it.day}</span>
+                      <span style={{ background: T.redBg, color: T.red, fontWeight: 700, fontSize: 10.5, padding: "3px 8px", borderRadius: 999 }}>
+                        {it.reason === "blocked_day" ? "Día bloqueado" : "Doble cobro"}
+                      </span>
+                      <span style={{ background: T.purpleBg, color: T.purple, fontWeight: 700, fontSize: 10.5, padding: "3px 8px", borderRadius: 999 }}
+                            title={it.source === "manual" ? "Cobro hecho a mano (Cobro extra) en un día ya pagado." : "Cobro de la suscripción diaria."}>
+                        {it.source === "manual" ? "Cobro manual" : "Suscripción"}
+                      </span>
+                      <span style={{ flex: 1, minWidth: 120, fontSize: 12, color: T.muted, fontStyle: "italic" }} title="Nota escrita al hacer el cobro">
+                        {it.description ? `“${it.description}”` : ""}
+                      </span>
+                      <Mono style={{ fontWeight: 700, fontSize: 13, color: T.red }}>{fmtCOP(it.amount_cop)}</Mono>
+                      <Mono style={{ fontSize: 10, color: T.dim, flexBasis: "100%" }}>{it.invoice_id}</Mono>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </>
+        )}
+
       </Modal>
 
       {/* ═══════════ Modal Devoluciones pendientes ═══════════ */}
@@ -1799,167 +2153,6 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
         )}
       </Modal>
 
-      {/* ═══════════ Modal Calendario ═══════════ */}
-      <Modal open={calOpen} onClose={() => setCalOpen(false)} width={720} title="Calendario de cobros" icon="ri-calendar-2-line"
-        footer={<button onClick={() => setCalOpen(false)} style={btnGhost}>Cerrar</button>}
-      >
-        {calRenter && (
-          <div style={{ display: "flex", alignItems: "center", gap: 13, paddingBottom: 14, borderBottom: `1px solid ${T.border2}`, marginBottom: 14 }}>
-            <Avatar ini={initials(nameOfRenter(calRenter))} color={colorFor(calRenter.id)} size={46} radius={13} />
-            <div>
-              <div style={{ fontWeight: 800, fontSize: 16 }}>{nameOfRenter(calRenter)}</div>
-              <div style={{ fontSize: 12, color: T.muted }}>Tarifa diaria: <strong>{fmtCOP(calData?.daily_cop || 0)}</strong>{calData?.monthly_rent_cop ? ` · Mensualidad ${fmtCOP(Number(calData.monthly_rent_cop))}` : ""}</div>
-            </div>
-          </div>
-        )}
-
-        {/* Estado + pausar/reanudar */}
-        {calData?.subscription ? (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, borderRadius: R.md, padding: 14, marginBottom: 14, background: calData.subscription.paused ? T.amberBg : T.greenBg }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <i className={calData.subscription.paused ? "ri-pause-circle-fill" : "ri-play-circle-fill"} style={{ fontSize: 22, color: calData.subscription.paused ? T.amber : T.green }} />
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 13.5 }}>{calData.subscription.paused ? "Cobro automático en pausa" : "Cobro automático activo"}</div>
-                <div style={{ fontSize: 11.5, color: T.muted }}>
-                  {calData.subscription.paused
-                    ? "No se cobra la tarifa diaria. Cobra días sueltos abajo."
-                    : <>Stripe cobra la tarifa diaria cada día.{calData.subscription.current_period_end ? ` Próximo: ${fmtUnixDate(calData.subscription.current_period_end)}` : ""}</>}
-                </div>
-              </div>
-            </div>
-            <button onClick={onTogglePause} disabled={calBusy} style={{ ...(calData.subscription.paused ? btnGreen : { background: T.amber, color: "#fff", border: 0, borderRadius: R.md, padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer" }), opacity: calBusy ? 0.6 : 1 }}>
-              {calBusy ? "…" : calData.subscription.paused ? <><i className="ri-play-line" style={{ marginRight: 5 }} />Reanudar cobro</> : <><i className="ri-pause-line" style={{ marginRight: 5 }} />Pausar cobro</>}
-            </button>
-          </div>
-        ) : !calLoading && calData ? (
-          <div style={{ background: T.surface2, borderRadius: R.md, padding: "12px 14px", marginBottom: 14, fontSize: 13, color: T.muted }}>
-            <i className="ri-information-line" style={{ marginRight: 6 }} />Este estilista aún no tiene una suscripción activa. Guarda su tarjeta para empezar a cobrar.
-          </div>
-        ) : null}
-
-        {/* Selector de modo */}
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
-          <div style={{ display: "flex", gap: 4, background: T.surface2, borderRadius: 999, padding: 4 }}>
-            {([
-              { m: "charge", icon: "ri-money-dollar-circle-line", l: "Cobrar día", bg: T.green },
-              { m: "paid", icon: "ri-hand-coin-line", l: "Marcar pagado", bg: T.green },
-              { m: "block", icon: "ri-lock-line", l: "Bloquear día", bg: T.purple },
-            ] as const).map((b) => (
-              <button key={b.m} onClick={() => setCalMode(b.m)} disabled={calBusy} style={{ border: 0, borderRadius: 999, padding: "7px 14px", fontWeight: 700, fontSize: 12.5, fontFamily: FONT, cursor: "pointer", background: calMode === b.m ? b.bg : "transparent", color: calMode === b.m ? "#fff" : T.muted }}>
-                <i className={b.icon} style={{ marginRight: 5 }} />{b.l}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Política de bloqueo */}
-        {calMode === "block" && calData && (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, background: T.purpleBg, border: `1px solid ${T.purpleBorder}`, borderRadius: R.md, padding: "10px 14px", marginBottom: 14 }}>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 12.5, color: T.purple }}><i className="ri-scales-3-line" style={{ marginRight: 5 }} />{calData.readjust_blocked ? "Reajustar: paga el mes completo" : "Saltar: el día bloqueado se descuenta"}</div>
-              <div style={{ fontSize: 11.5, color: T.muted }}>{calData.readjust_blocked ? "Los días bloqueados NO se reembolsan — el cobro diario sigue corriendo." : "Los días bloqueados se reembolsan automáticamente — el renter paga menos ese mes."}</div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 12, color: T.muted }}>Reajustar</span>
-              <Toggle on={!!calData.readjust_blocked} onClick={calBusy ? undefined : onToggleReadjust} />
-            </div>
-          </div>
-        )}
-
-        {/* Navegación de mes */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-          <IconBtn icon="ri-arrow-left-s-line" onClick={() => gotoMonth(-1)} disabled={calLoading || calBusy} title="Mes anterior" />
-          <span style={{ fontWeight: 800, fontSize: 15 }}>{monthLabelEs(calMonth)}</span>
-          <IconBtn icon="ri-arrow-right-s-line" onClick={() => gotoMonth(1)} disabled={calLoading || calBusy || calMonth >= thisMonthYm()} title={calMonth >= thisMonthYm() ? "No puedes avanzar a meses futuros" : "Mes siguiente"} />
-        </div>
-
-        {calLoading ? (
-          <Loading label="Cargando calendario…" />
-        ) : (
-          <>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6, marginBottom: 4 }}>
-              {WEEKDAYS_ES.map((w) => <div key={w} style={{ textAlign: "center", color: T.muted, fontWeight: 600, fontSize: 11 }}>{w}</div>)}
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 6 }}>
-              {buildMonthGrid(calMonth).map((cell, idx) => {
-                if (!cell) return <div key={`e${idx}`} />;
-                const day = Number(cell.slice(-2));
-                const info = calData?.days[cell];
-                const pal = dayPalette(info?.status);
-                const isToday = cell === todayKey();
-                const isFuture = cell > todayKey();
-                const isPaid = info?.status === "paid";
-                const isManual = info?.status === "paid_manual";
-                const isBlocked = info?.status === "blocked";
-                const paidMode = calMode === "paid";
-                const blockMode = calMode === "block";
-                const clickable = calBusy ? false
-                  : paidMode ? (!isPaid && !isBlocked)
-                  : blockMode ? (!isPaid && !isManual)
-                  : (!isPaid && !isManual && !isBlocked && !!calData?.has_customer);
-                return (
-                  <div
-                    key={cell}
-                    onClick={clickable ? () => (paidMode ? onMarkDayPaid(cell) : blockMode ? onToggleBlockDay(cell) : onChargeDay(cell)) : undefined}
-                    title={cell}
-                    style={{
-                      position: "relative", aspectRatio: "1 / 1", borderRadius: 10,
-                      background: isFuture && !info ? T.surface2 : pal.bg,
-                      border: isToday ? `2px solid ${T.purple2}` : `1.5px ${isFuture && !info ? "dashed" : "solid"} ${pal.border}`,
-                      color: pal.color, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-                      cursor: clickable ? "pointer" : "default", opacity: isFuture && !info ? 0.8 : 1,
-                    }}
-                  >
-                    <span style={{ fontWeight: 700, fontSize: 14, lineHeight: 1 }}>{day}</span>
-                    {info?.status === "paid" && <i className="ri-check-line" style={{ fontSize: 13 }} />}
-                    {info?.status === "paid_manual" && <i className="ri-hand-coin-line" style={{ fontSize: 12 }} />}
-                    {info?.status === "refunded" && <i className="ri-arrow-go-back-line" style={{ fontSize: 12 }} />}
-                    {info?.status === "failed" && <i className="ri-close-line" style={{ fontSize: 13 }} />}
-                    {info?.status === "open" && <i className="ri-time-line" style={{ fontSize: 12 }} />}
-                    {isBlocked && <i className={info?.refunded ? "ri-arrow-go-back-line" : "ri-lock-line"} style={{ fontSize: 12 }} />}
-                    {!info && clickable && <i className={blockMode ? "ri-lock-line" : "ri-add-line"} style={{ fontSize: 12, opacity: 0.55 }} />}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Resumen del mes */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginTop: 14 }}>
-              <div style={{ background: T.greenBg, borderRadius: R.md, padding: 10, textAlign: "center" }}><div style={{ fontWeight: 800, color: T.green }}>{calSummary.paidDays}</div><div style={{ fontSize: 11, color: T.muted }}>días pagados</div></div>
-              <div style={{ background: T.surface2, borderRadius: R.md, padding: 10, textAlign: "center" }}><Mono style={{ fontWeight: 800 }}>{fmtCOP(calSummary.paidTotal)}</Mono><div style={{ fontSize: 11, color: T.muted }}>cobrado el mes</div></div>
-              <div style={{ background: calSummary.failedDays ? T.redBg : T.surface2, borderRadius: R.md, padding: 10, textAlign: "center" }}><div style={{ fontWeight: 800, color: calSummary.failedDays ? T.red : T.text }}>{calSummary.failedDays}</div><div style={{ fontSize: 11, color: T.muted }}>días fallidos</div></div>
-            </div>
-
-            {/* Leyenda */}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 14, marginTop: 14, justifyContent: "center" }}>
-              {[
-                { c: dayPalette("paid"), t: "Pagado" },
-                { c: dayPalette("paid_manual"), t: "Pagado manual" },
-                { c: dayPalette("failed"), t: "Falló" },
-                { c: dayPalette("open"), t: "Pendiente" },
-                { c: dayPalette("blocked"), t: "Bloqueado" },
-                { c: dayPalette("refunded"), t: "Reembolsado" },
-                { c: dayPalette(undefined), t: "Sin cobro" },
-              ].map((l) => (
-                <div key={l.t} style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                  <span style={{ width: 14, height: 14, borderRadius: 4, background: l.c.bg, border: `1.5px solid ${l.c.border}`, display: "inline-block" }} />
-                  <span style={{ fontSize: 11.5, color: T.muted }}>{l.t}</span>
-                </div>
-              ))}
-            </div>
-            <div style={{ fontSize: 11.5, color: T.muted, textAlign: "center", marginTop: 10 }}>
-              <i className="ri-information-line" style={{ marginRight: 4 }} />
-              {calMode === "block"
-                ? calData?.readjust_blocked
-                  ? 'Toca un día para bloquearlo. Con la política "reajustar" el día NO se reembolsa: el renter paga el mes completo.'
-                  : "Toca un día para bloquearlo: no se cobrará. Si la suscripción alcanza a cobrarlo, se reembolsa automáticamente."
-                : calMode === "paid"
-                  ? "Toca un día (pendiente o fallido) para marcarlo como pagado SIN cobrar la tarjeta — para cuando cobraste en efectivo o con un cobro extra."
-                  : "Toca un día sin cobro para cobrar la tarifa diaria manualmente."}
-            </div>
-          </>
-        )}
-      </Modal>
     </div>
   );
 };
