@@ -160,6 +160,10 @@ type CalendarDay = {
   status: "paid" | "paid_manual" | "open" | "failed" | "void" | "blocked" | "refunded" | string;
   refunded?: boolean;
   manual?: boolean;
+  adhoc?: boolean;
+  adhoc_count?: number;
+  duplicate?: boolean;
+  extra_cop?: number;
   note?: string;
   amount_cop: number;
   currency: string;
@@ -1336,7 +1340,7 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
     let paidDays = 0, paidTotal = 0, failedDays = 0;
     for (const k of Object.keys(calData.days)) {
       const d = calData.days[k];
-      if (d.status === "paid" || d.status === "paid_manual") { paidDays++; paidTotal += d.amount_cop || 0; }
+      if (d.status === "paid" || d.status === "paid_manual") { paidDays++; paidTotal += (d.amount_cop || 0) + (d.extra_cop || 0); }
       else if (d.status === "failed") failedDays++;
     }
     return { paidDays, paidTotal, failedDays };
@@ -1869,7 +1873,7 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
                       <div
                         key={cell}
                         onClick={clickable ? () => (paidMode ? onMarkDayPaid(cell) : blockMode ? onToggleBlockDay(cell) : onChargeDay(cell)) : undefined}
-                        title={cell}
+                        title={info ? `${cell} · ${info.status}${info.amount_cop ? " · " + fmtCOP(info.amount_cop) : ""}${info.adhoc ? " · cobro manual" : ""}${info.duplicate ? ` · DOBLE COBRO: +${fmtCOP(info.extra_cop || 0)} manual` : ""}${info.note ? " · " + info.note : ""}` : cell}
                         style={{
                           position: "relative", aspectRatio: "1 / 1", borderRadius: 10,
                           background: isFuture && !info ? T.surface2 : pal.bg,
@@ -1879,7 +1883,8 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
                         }}
                       >
                         <span style={{ fontWeight: 700, fontSize: 14, lineHeight: 1 }}>{day}</span>
-                        {info?.status === "paid" && <i className="ri-check-line" style={{ fontSize: 13 }} />}
+                        {info?.status === "paid" && <i className={info.adhoc ? "ri-bank-card-2-line" : "ri-check-line"} style={{ fontSize: 13 }} />}
+                        {info?.duplicate && <span title="Doble cobro: la suscripción ya había cobrado este día" style={{ position: "absolute", top: 4, right: 5, width: 9, height: 9, borderRadius: "50%", background: T.red }} />}
                         {info?.status === "paid_manual" && <i className="ri-hand-coin-line" style={{ fontSize: 12 }} />}
                         {info?.status === "refunded" && <i className="ri-arrow-go-back-line" style={{ fontSize: 12 }} />}
                         {info?.status === "failed" && <i className="ri-close-line" style={{ fontSize: 13 }} />}
@@ -1904,6 +1909,8 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
                   {[
                     { c: dayPalette("paid"), t: "Pagado" },
                     { c: dayPalette("paid_manual"), t: "Pagado manual" },
+                    { c: dayPalette("paid"), t: "Cobro manual (tarjeta)" },
+                    { c: { bg: T.greenBg, color: T.red, border: T.red }, t: "Doble cobro" },
                     { c: dayPalette("failed"), t: "Falló" },
                     { c: dayPalette("open"), t: "Pendiente" },
                 { c: dayPalette("void"), t: "Anulado (no cobrado)" },

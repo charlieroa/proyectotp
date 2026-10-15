@@ -1023,6 +1023,47 @@ exports.getRenterCalendar = async (req, res) => {
             hosted_invoice_url: inv.hosted_invoice_url,
           };
         }
+
+        // Cobros manuales ("Cobro extra"): son PaymentIntents sin invoice, por eso el
+        // calendario no los veía. Se unen al día: si el día no estaba pagado queda
+        // pagado (con marca de cobro manual); si la suscripción ya lo había cobrado,
+        // es un posible doble cobro (duplicate) y se suma aparte en extra_cop.
+        const monthKeyAdhoc = `${year}-${String(month).padStart(2, '0')}`;
+        for (const customerId of customerIds) {
+          let adhoc = [];
+          try {
+            adhoc = await connect.listAdhocCharges({ connectedAccountId: acctId, customerId, limit: 100 });
+          } catch (e) {
+            console.warn('[chairRental] calendar adhoc error:', e.message);
+          }
+          for (const a of adhoc) {
+            if (a.refunded) continue;
+            const key = bogotaDayKey(a.created);
+            if (!key.startsWith(monthKeyAdhoc)) continue;
+            const amt = Math.round((a.amount_paid || 0) / 100);
+            const cur = days[key];
+            if (cur && cur.status === 'paid' && cur.adhoc) {
+              // Varios cobros manuales el mismo día (p. ej. 2 días cobrados juntos).
+              cur.amount_cop += amt;
+              cur.adhoc_count = (cur.adhoc_count || 1) + 1;
+            } else if (cur && cur.status === 'paid') {
+              cur.extra_cop = (cur.extra_cop || 0) + amt;
+              cur.adhoc_count = (cur.adhoc_count || 0) + 1;
+              cur.duplicate = true;
+            } else {
+              days[key] = {
+                status: 'paid',
+                adhoc: true,
+                adhoc_count: 1,
+                amount_cop: amt,
+                currency: a.currency,
+                invoice_id: a.id,
+                hosted_invoice_url: a.hosted_invoice_url,
+                note: a.description || '',
+              };
+            }
+          }
+        }
       } catch (e) {
         console.warn('[chairRental] calendar invoices error:', e.message);
       }
