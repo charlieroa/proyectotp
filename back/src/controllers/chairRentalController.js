@@ -881,6 +881,16 @@ const BOGOTA_DAY_FMT = new Intl.DateTimeFormat('en-CA', {
   month: '2-digit',
   day: '2-digit',
 });
+// Día de renta al que pertenece una invoice. Las de suscripción pertenecen al día en
+// que se generaron (created), AUNQUE se paguen días después por un reintento: antes
+// se ubicaban por fecha de pago, y un día cobrado tarde quedaba "sin pago" en el
+// calendario mientras el día del reintento acumulaba varios cobros (falsos dobles).
+function rentDayTs(inv) {
+  return /^subscription/.test(inv.billing_reason || '')
+    ? inv.created
+    : (inv.status_transitions?.paid_at || inv.created);
+}
+
 function bogotaDayKey(unixSeconds) {
   return BOGOTA_DAY_FMT.format(new Date(unixSeconds * 1000)); // → "YYYY-MM-DD"
 }
@@ -1004,8 +1014,8 @@ exports.getRenterCalendar = async (req, res) => {
         }
         for (const inv of invoices) {
           // Solo invoices del arriendo (suscripción). Ad-hoc no genera invoice.
-          const ts = inv.status_transitions?.paid_at || inv.created;
-          const key = bogotaDayKey(ts);
+          const key = bogotaDayKey(rentDayTs(inv));
+          const paidAt = inv.status_transitions?.paid_at;
           if (!key.startsWith(`${year}-${String(month).padStart(2, '0')}`)) continue;
           const existing = days[key];
           // Si ya hay un 'paid' ese día, no lo degrades.
@@ -1021,6 +1031,8 @@ exports.getRenterCalendar = async (req, res) => {
             currency: inv.currency,
             invoice_id: inv.id,
             hosted_invoice_url: inv.hosted_invoice_url,
+            // Día real del pago si fue distinto (reintento posterior a un rechazo).
+            paid_on: paidAt && bogotaDayKey(paidAt) !== key ? bogotaDayKey(paidAt) : null,
           };
         }
 
@@ -1834,7 +1846,7 @@ exports.getPendingRefunds = async (req, res) => {
 
           const byDay = {};
           for (const inv of paid) {
-            const k = bogotaDayKey(inv.status_transitions?.paid_at || inv.created);
+            const k = bogotaDayKey(rentDayTs(inv));
             (byDay[k] = byDay[k] || []).push(inv);
           }
 

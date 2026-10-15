@@ -164,6 +164,7 @@ type CalendarDay = {
   adhoc_count?: number;
   duplicate?: boolean;
   extra_cop?: number;
+  paid_on?: string | null;
   note?: string;
   amount_cop: number;
   currency: string;
@@ -1873,7 +1874,7 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
                       <div
                         key={cell}
                         onClick={clickable ? () => (paidMode ? onMarkDayPaid(cell) : blockMode ? onToggleBlockDay(cell) : onChargeDay(cell)) : undefined}
-                        title={info ? `${cell} · ${info.status}${info.amount_cop ? " · " + fmtCOP(info.amount_cop) : ""}${info.adhoc ? " · cobro manual" : ""}${info.duplicate ? ` · DOBLE COBRO: +${fmtCOP(info.extra_cop || 0)} manual` : ""}${info.note ? " · " + info.note : ""}` : cell}
+                        title={info ? `${cell} · ${info.status}${info.amount_cop ? " · " + fmtCOP(info.amount_cop) : ""}${info.adhoc ? " · cobro manual" : ""}${info.paid_on ? ` · pagado el ${info.paid_on} (reintento)` : ""}${info.duplicate ? ` · DOBLE COBRO: +${fmtCOP(info.extra_cop || 0)} manual` : ""}${info.note ? " · " + info.note : ""}` : cell}
                         style={{
                           position: "relative", aspectRatio: "1 / 1", borderRadius: 10,
                           background: isFuture && !info ? T.surface2 : pal.bg,
