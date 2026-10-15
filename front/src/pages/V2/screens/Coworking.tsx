@@ -829,6 +829,35 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
   };
 
   // Pausar / reanudar desde el detalle (POST pause|resume)
+  // Pasar de cobro manual a automático: crea la suscripción diaria con la tarjeta
+  // guardada (el backend la crea desde /resume cuando no existe una viva).
+  const [activatingAuto, setActivatingAuto] = useState(false);
+  const onActivateAuto = async () => {
+    if (!detail) return;
+    const conf = await Swal.fire({
+      icon: "question",
+      title: "¿Pasar a cobro automático?",
+      html: `Se creará la suscripción diaria de <b>${fmtCOP(Number(detail.renter.monthly_rent_cop) / 30 || 0)}</b> aprox. con la tarjeta guardada y Stripe intentará <b>el cobro de hoy ahora</b>.<br/><br/><small>Si hoy ya le cobraste a mano, se cobraría doble: devuélvelo o márcalo antes.</small>`,
+      showCancelButton: true,
+      confirmButtonText: "Sí, activar",
+    });
+    if (!conf.isConfirmed) return;
+    setActivatingAuto(true);
+    try {
+      const { data } = await api.post(`/chair-rentals/renters/${detail.renter.id}/resume`, {});
+      await refreshDetail();
+      Swal.fire({
+        icon: data?.status === "active" ? "success" : "warning",
+        title: data?.status === "active" ? "Cobro automático activo" : "Suscripción creada",
+        text: data?.status === "active" ? "Stripe cobrará la tarifa diaria cada día." : `Quedó en estado "${data?.status}": el primer cobro no pasó (revisa la tarjeta).`,
+      });
+    } catch (e: any) {
+      Swal.fire("Error", e?.response?.data?.error || "No se pudo activar el cobro automático", "error");
+    } finally {
+      setActivatingAuto(false);
+    }
+  };
+
   const onTogglePauseDetail = async () => {
     if (!detail?.subscription) return;
     const paused = !!detail.subscription.paused;
@@ -1687,7 +1716,19 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
                     </button>
                   </div>
                 ) : (
-                  <div style={{ fontSize: 12, color: T.muted, marginTop: 6 }}>Sin suscripción activa</div>
+                  <div style={{ marginTop: 8, background: T.amberBg, borderRadius: R.md, padding: "10px 12px" }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: T.amber }}><i className="ri-hand-coin-line" style={{ marginRight: 5 }} />Cobro manual (sin suscripción)</div>
+                    {detail.default_card ? (
+                      <>
+                        <div style={{ fontSize: 11.5, color: T.muted, margin: "4px 0 8px" }}>Hoy se cobra a mano. Puedes pasarla a cobro automático diario con la tarjeta guardada.</div>
+                        <button onClick={onActivateAuto} disabled={activatingAuto} style={{ ...btnGreen, padding: "8px 12px", opacity: activatingAuto ? 0.6 : 1 }}>
+                          {activatingAuto ? "Activando…" : <><i className="ri-flashlight-line" style={{ marginRight: 5 }} />Pasar a cobro automático</>}
+                        </button>
+                      </>
+                    ) : (
+                      <div style={{ fontSize: 11.5, color: T.muted, marginTop: 4 }}>Para pasarla a automático primero vincula su tarjeta (arriba).</div>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
