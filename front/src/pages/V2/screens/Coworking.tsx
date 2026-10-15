@@ -256,6 +256,12 @@ const dayPalette = (status?: string): { bg: string; color: string; border: strin
   }
 };
 
+const DEAD_SUB = ["canceled", "incomplete_expired"];
+const normSub = <D extends { subscription: any }>(d: D): D =>
+  d.subscription && DEAD_SUB.includes(d.subscription.status)
+    ? { ...d, subscription: { ...d.subscription, paused: true, dead: true } }
+    : d;
+
 const renterTone = (s: Renter["rental_status"]) =>
   s === "active" ? { l: "Al día", c: T.green, bg: T.greenBg, icon: "ri-checkbox-circle-fill" }
   : s === "past_due" ? { l: "En mora", c: T.amber, bg: T.amberBg, icon: "ri-error-warning-fill" }
@@ -779,7 +785,7 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
     loadCalendar(r.id, ym);
     try {
       const { data } = await api.get<RenterDetail>(`/chair-rentals/renters/${r.id}`);
-      setDetail(data);
+      setDetail(normSub(data));
     } catch (e: any) {
       Swal.fire("Error", e?.response?.data?.error || "No se pudo cargar el detalle", "error");
       setDetailOpen(false);
@@ -792,7 +798,7 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
     if (!detail) return;
     try {
       const { data } = await api.get<RenterDetail>(`/chair-rentals/renters/${detail.renter.id}`);
-      setDetail(data);
+      setDetail(normSub(data));
     } catch { /* noop */ }
     await Promise.all([loadAll(), loadCalendar(detail.renter.id, calMonth)]);
   };
@@ -829,7 +835,9 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
     const conf = await Swal.fire({
       icon: paused ? "question" : "warning",
       title: paused ? "¿Reanudar cobro automático?" : "¿Pausar cobro automático?",
-      text: paused ? "Stripe volverá a cobrar la tarifa diaria automáticamente." : "Stripe dejará de cobrar la tarifa diaria.",
+      text: (detail.subscription as any).dead
+        ? "La suscripción anterior expiró en Stripe y no se puede reanudar. Se creará una NUEVA con la tarjeta guardada y se intentará el cobro de hoy."
+        : paused ? "Stripe volverá a cobrar la tarifa diaria automáticamente." : "Stripe dejará de cobrar la tarifa diaria.",
       showCancelButton: true, confirmButtonText: paused ? "Sí, reanudar" : "Sí, pausar",
     });
     if (!conf.isConfirmed) return;
@@ -1147,7 +1155,7 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
     setCalLoading(true);
     try {
       const { data } = await api.get<CalendarResp>(`/chair-rentals/renters/${renterId}/calendar`, { params: { month } });
-      setCalData(data);
+      setCalData(normSub(data));
     } catch (e: any) {
       Swal.fire("Error", e?.response?.data?.error || "No se pudo cargar el calendario", "error");
     } finally {
@@ -1168,7 +1176,9 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
     const conf = await Swal.fire({
       icon: paused ? "question" : "warning",
       title: paused ? "¿Reanudar cobro automático?" : "¿Pausar cobro automático?",
-      text: paused ? "Stripe volverá a cobrar la tarifa diaria automáticamente cada día." : "Stripe dejará de cobrar la tarifa diaria. Podrás cobrar días sueltos manualmente desde el calendario.",
+      text: (calData.subscription as any).dead
+        ? "La suscripción anterior expiró en Stripe y no se puede reanudar. Se creará una NUEVA con la tarjeta guardada y se intentará el cobro de hoy."
+        : paused ? "Stripe volverá a cobrar la tarifa diaria automáticamente cada día." : "Stripe dejará de cobrar la tarifa diaria. Podrás cobrar días sueltos manualmente desde el calendario.",
       showCancelButton: true, confirmButtonText: paused ? "Sí, reanudar" : "Sí, pausar",
     });
     if (!conf.isConfirmed) return;
@@ -1590,7 +1600,7 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
       </Modal>
 
       {/* ═══════════ Modal Detalle ═══════════ */}
-      <Modal open={detailOpen} onClose={() => setDetailOpen(false)} width={720} title="Detalle del renter" icon="ri-file-user-line"
+      <Modal open={detailOpen} onClose={() => setDetailOpen(false)} width={1360} title="Detalle del renter" icon="ri-file-user-line"
         footer={<button onClick={() => setDetailOpen(false)} style={btnGhost}>Cerrar</button>}
       >
         {detailLoading || !detail ? (
@@ -1616,7 +1626,9 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
               </button>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 18 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(460px, 1fr))", gap: 28, alignItems: "start" }}>
+            <div style={{ minWidth: 0 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 14, marginBottom: 18 }}>
               <div style={{ background: T.surface2, borderRadius: R.lg, padding: 16 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".5px", color: T.dim, marginBottom: 12 }}><i className="ri-contacts-line" style={{ marginRight: 5 }} />CONTACTO</div>
                 <div style={{ fontSize: 13, marginBottom: 8 }}><i className="ri-mail-line" style={{ color: T.muted, marginRight: 7 }} />{detail.renter.email}</div>
@@ -1668,6 +1680,7 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
                 {detail.subscription ? (
                   <div style={{ fontSize: 12, color: T.muted, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
                     <span><i className="ri-calendar-event-line" style={{ marginRight: 4 }} />Próximo cobro: <strong>{fmtUnixDate(detail.subscription.current_period_end)}</strong></span>
+                    {(detail.subscription as any).dead && <span style={{ background: T.redBg, color: T.red, fontWeight: 700, fontSize: 10.5, padding: "2px 8px", borderRadius: 999 }}>Suscripción expirada</span>}
                     {detail.subscription.cancel_at_period_end && <span style={{ background: T.redBg, color: T.red, fontWeight: 700, fontSize: 10.5, padding: "2px 8px", borderRadius: 999 }}>Cancela al cierre</span>}
                     <button onClick={onTogglePauseDetail} style={{ background: "transparent", border: 0, color: T.purple, cursor: "pointer", fontSize: 12, fontWeight: 700, padding: 0 }}>
                       {detail.subscription.paused ? <><i className="ri-play-line" style={{ marginRight: 3 }} />Reanudar</> : <><i className="ri-pause-line" style={{ marginRight: 3 }} />Pausar</>}
@@ -1722,8 +1735,10 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
                 )}
               </div>
             )}
-            {/* Calendario de cobros */}
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".5px", color: T.dim, margin: "22px 0 10px", paddingTop: 16, borderTop: `1px solid ${T.border2}` }}><i className="ri-calendar-2-line" style={{ marginRight: 5 }} />CALENDARIO DE COBROS</div>
+            </div>
+            {/* Calendario de cobros (columna derecha, en paralelo al resumen) */}
+            <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".5px", color: T.dim, marginBottom: 10 }}><i className="ri-calendar-2-line" style={{ marginRight: 5 }} />CALENDARIO DE COBROS</div>
 
             {/* Estado + pausar/reanudar */}
             {calData?.subscription ? (
@@ -1873,6 +1888,8 @@ const Coworking: React.FC<{ tenantId?: string | null }> = () => {
                 </div>
               </>
             )}
+            </div>
+            </div>
           </>
         )}
       </Modal>

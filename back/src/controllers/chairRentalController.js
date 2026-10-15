@@ -1879,21 +1879,50 @@ exports.resumeRenter = async (req, res) => {
     const tenant = await tenantOrThrow(req.user.tenant_id);
     const renter = await prisma.users.findUnique({
       where: { id: req.params.id },
-      select: { id: true, tenant_id: true, employment_type: true, rental_stripe_subscription_id: true },
+      select: {
+        id: true, tenant_id: true, employment_type: true, monthly_rent_cop: true,
+        rental_stripe_customer_id: true, rental_stripe_subscription_id: true,
+      },
     });
     if (!renter || renter.tenant_id !== tenant.id || renter.employment_type !== 'renter') {
       return res.status(404).json({ error: 'Renter no encontrado' });
     }
-    if (!renter.rental_stripe_subscription_id) {
-      return res.status(400).json({ error: 'El renter no tiene una suscripción para reanudar.' });
+    const acctId = acctIdFor(tenant);
+    const acctOpts = acctId ? { stripeAccount: acctId } : undefined;
+
+    // Una suscripción cancelada / expirada (o inexistente) NO se puede reanudar en
+    // Stripe: solo admite cambios de metadata. En ese caso se crea una NUEVA con la
+    // tarjeta ya guardada (mismo flujo que "vincular tarjeta"); reconcile descarta
+    // la muerta y evita duplicados.
+    let dead = !renter.rental_stripe_subscription_id;
+    if (!dead) {
+      try {
+        const current = await stripe.subscriptions.retrieve(renter.rental_stripe_subscription_id, acctOpts);
+        dead = ['canceled', 'incomplete_expired'].includes(current.status);
+      } catch (e) {
+        if (e?.code === 'resource_missing') dead = true; else throw e;
+      }
     }
-    // Una suscripción cancelada / expirada no se puede reanudar en Stripe (solo
-    // admite cambios de metadata). Hay que crear otra guardando la tarjeta de nuevo.
-    const acctOpts = acctIdFor(tenant) ? { stripeAccount: acctIdFor(tenant) } : undefined;
-    const current = await stripe.subscriptions.retrieve(renter.rental_stripe_subscription_id, acctOpts);
-    if (['canceled', 'incomplete_expired'].includes(current.status)) {
-      return res.status(409).json({
-        error: 'La suscripción está cancelada o expiró en Stripe y no se puede reanudar. Vincula la tarjeta del estilista otra vez para crear una nueva.',
+    if (dead) {
+      if (!renter.rental_stripe_customer_id || !renter.monthly_rent_cop) {
+        return res.status(409).json({
+          error: 'La suscripción expiró y no hay tarjeta guardada o tarifa mensual para crear una nueva. Vincula la tarjeta del estilista.',
+        });
+      }
+      const { card, subscriptionId } = await reconcileRenterCard({ acctId, renter, startSubIfMissing: true });
+      if (!card) {
+        return res.status(409).json({
+          error: 'La suscripción expiró y el estilista no tiene una tarjeta guardada. Vincula su tarjeta para crear una nueva.',
+        });
+      }
+      if (!subscriptionId) {
+        return res.status(502).json({ error: 'No se pudo crear la nueva suscripción en Stripe. Intenta de nuevo o revisa el log.' });
+      }
+      const fresh = await stripe.subscriptions.retrieve(subscriptionId, acctOpts);
+      const updated = await prisma.users.findUnique({ where: { id: renter.id }, select: { rental_status: true } });
+      return res.json({
+        ok: true, recreated: true, paused: !!fresh.pause_collection,
+        status: fresh.status, rental_status: updated?.rental_status || null,
       });
     }
     const sub = await connect.resumeSubscription({
